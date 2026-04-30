@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "900881984780",
+    "project_id": "zorapp-dc8c5",
+    "storage_bucket": "zorapp-dc8c5.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:900881984780:android:437880cea2b8928d1aed29",
+        "android_client_info": {
+          "package_name": "com.example.first_projects"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "900881984780-q6a4j95e292f3o0bftfohghbh46i25rb.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.first_projects",
+            "certificate_hash": "c885633977c60ce442e19cba5bd68d8a29275c89"
+          }
+        },
+        {
+          "client_id": "900881984780-odtphur89flt2rlggop7cpre7q1d482i.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAMX7Oe8Iv4JpXZZNvdufdn9094NzM8wOU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "900881984780-odtphur89flt2rlggop7cpre7q1d482i.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

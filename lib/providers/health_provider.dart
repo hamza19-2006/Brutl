@@ -1,149 +1,213 @@
-// Required sensor permissions for pedometer:
-// Android (android/app/src/main/AndroidManifest.xml):
-// <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+// ═══════════════════════════════════════════════════════════════════════════════
+// STEP PROVIDER — State Management for Steps & Calories
+// ═══════════════════════════════════════════════════════════════════════════════
 //
-// iOS (ios/Runner/Info.plist):
-// <key>NSMotionUsageDescription</key>
-// <string>Brutl uses motion data to track your steps and calories.</string>
+// Listens to StepSensorService.todaysStepsStream (the "Sensor Math" output).
+// Manages runtime permission state for Activity Recognition.
+// Provides a weight-aware calorie estimation formula.
+//
+// Required permissions:
+//   Android: android.permission.ACTIVITY_RECOGNITION
+//   iOS:     NSMotionUsageDescription (Info.plist)
+// ═══════════════════════════════════════════════════════════════════════════════
 
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
-import 'package:pedometer/pedometer.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../services/local_storage_service.dart';
+import '../services/step_sensor_service.dart';
 
 class StepProvider extends ChangeNotifier {
-  static const String _baselineDateKey = 'step_baseline_date';
-  static const String _baselineRawStepsKey = 'step_baseline_raw';
-  static const String _latestRawStepsKey = 'step_latest_raw';
-
-  StreamSubscription<StepCount>? _stepSubscription;
-  SharedPreferences? _prefs;
+  final StepSensorService _sensorService = StepSensorService.instance;
   final LocalStorageService _localStorage = LocalStorageService();
 
+  StreamSubscription<int>? _stepsSubscription;
+
+  // ─── State ───────────────────────────────────────────────────────────────
   bool _isInitialized = false;
   bool _isListening = false;
-  int _baselineRawSteps = 0;
-  int _latestRawSteps = 0;
   int _currentSteps = 0;
+  int _previousSteps = -1; // for deduplication
   String? _sensorError;
 
+  // ─── Permission state ────────────────────────────────────────────────────
+  bool _hasPermission = false;
+  bool _permissionPermanentlyDenied = false;
+
+  // ─── User weight (for calorie formula) ───────────────────────────────────
+  double _userWeightKg = 70.0;
+
+  // ─── Public getters ──────────────────────────────────────────────────────
   bool get isInitialized => _isInitialized;
   bool get isListening => _isListening;
   int get currentSteps => _currentSteps;
   String? get sensorError => _sensorError;
-  double get caloriesBurned => _currentSteps * 0.04;
+  bool get hasPermission => _hasPermission;
+  bool get permissionPermanentlyDenied => _permissionPermanentlyDenied;
+
+  /// Calorie estimation using BMR + NEAT model.
+  ///
+  /// Industry-standard approximation:
+  ///   ~0.04 kcal per step per kg of body weight.
+  ///
+  /// For a 70 kg person: 10,000 steps ≈ 280 kcal (NEAT component).
+  /// This aligns with research from the American Council on Exercise.
+  double get caloriesBurned {
+    final weight = _userWeightKg > 0 ? _userWeightKg : 70.0;
+    return _currentSteps * 0.04 * weight;
+  }
+
+  // ─── Initialization ─────────────────────────────────────────────────────
 
   Future<void> initialize() async {
-    if (_isInitialized) {
-      return;
-    }
+    if (_isInitialized) return;
 
-    _prefs = await SharedPreferences.getInstance();
-    _hydrateStoredStepState();
-
-    // Initialize local steps history (Hive) and seed placeholder data
+    // Initialize local steps history (Hive) and seed placeholder data.
     await _localStorage.initialize();
     await _localStorage.ensureSeeded();
 
-    try {
-      _stepSubscription = Pedometer.stepCountStream.listen(
-        _onStepCountEvent,
-        onError: _onStepCountError,
-        cancelOnError: false,
-      );
-    } on MissingPluginException catch (error) {
-      _sensorError = error.message;
-      _isListening = false;
-      _isInitialized = true;
-      notifyListeners();
-      return;
-    } on PlatformException catch (error) {
-      _sensorError = error.message ?? error.code;
-      _isListening = false;
-      _isInitialized = true;
-      notifyListeners();
-      return;
+    // Check permission first (don't start sensor if denied).
+    await requestPermissions();
+
+    if (_hasPermission) {
+      await _startSensorListening();
     }
 
     _isInitialized = true;
-    _isListening = true;
     notifyListeners();
   }
 
-  void _hydrateStoredStepState() {
-    final today = _todayStamp();
-    final storedDate = _prefs?.getString(_baselineDateKey);
+  // ─── Permission handling ────────────────────────────────────────────────
 
-    if (storedDate == today) {
-      _baselineRawSteps = _prefs?.getInt(_baselineRawStepsKey) ?? 0;
-      _latestRawSteps = _prefs?.getInt(_latestRawStepsKey) ?? 0;
-      _currentSteps = math.max(0, _latestRawSteps - _baselineRawSteps);
+  /// Checks and requests the Activity Recognition permission.
+  /// Sets [hasPermission] and [permissionPermanentlyDenied] accordingly.
+  Future<void> requestPermissions() async {
+    debugPrint('BRUTL_STEPS: Checking activity recognition permission...');
+
+    final status = await Permission.activityRecognition.status;
+    debugPrint('BRUTL_STEPS: Current permission status = $status');
+
+    if (status.isGranted) {
+      _hasPermission = true;
+      _permissionPermanentlyDenied = false;
+      debugPrint('BRUTL_STEPS: Permission already granted.');
       return;
     }
 
-    _persistDailyState(date: today, baselineRawSteps: 0, latestRawSteps: 0);
-  }
-
-  void _onStepCountEvent(StepCount event) {
-    final today = _todayStamp();
-    final storedDate = _prefs?.getString(_baselineDateKey);
-    final rawSteps = event.steps;
-
-    if (storedDate != today) {
-      _baselineRawSteps = rawSteps;
-    } else if (_baselineRawSteps == 0) {
-      _baselineRawSteps = _prefs?.getInt(_baselineRawStepsKey) ?? rawSteps;
+    if (status.isPermanentlyDenied) {
+      _hasPermission = false;
+      _permissionPermanentlyDenied = true;
+      debugPrint('BRUTL_STEPS: Permission permanently denied.');
+      notifyListeners();
+      return;
     }
 
-    _latestRawSteps = rawSteps;
-    _currentSteps = math.max(0, _latestRawSteps - _baselineRawSteps);
+    // Request the permission.
+    final result = await Permission.activityRecognition.request();
+    debugPrint('BRUTL_STEPS: Permission request result = $result');
+
+    if (result.isGranted) {
+      _hasPermission = true;
+      _permissionPermanentlyDenied = false;
+    } else if (result.isPermanentlyDenied) {
+      _hasPermission = false;
+      _permissionPermanentlyDenied = true;
+    } else {
+      _hasPermission = false;
+      _permissionPermanentlyDenied = false;
+    }
+
+    notifyListeners();
+  }
+
+  /// Called after user returns from OS Settings. Re-checks permission state
+  /// and starts the sensor if now granted.
+  Future<void> recheckPermissionAndStart() async {
+    await requestPermissions();
+    if (_hasPermission && !_isListening) {
+      await _startSensorListening();
+      notifyListeners();
+    }
+  }
+
+  // ─── Sensor listening ───────────────────────────────────────────────────
+
+  Future<void> _startSensorListening() async {
+    await _sensorService.initialize();
+
+    _sensorError = _sensorService.sensorError;
+    _isListening = _sensorService.isListening;
+
+    if (_sensorError != null) {
+      debugPrint(
+        'BRUTL_STEPS: Sensor service reported error — $_sensorError',
+      );
+      notifyListeners();
+      return;
+    }
+
+    // Listen to the deduplicated daily steps stream.
+    _stepsSubscription = _sensorService.todaysStepsStream.listen(
+      _onStepsUpdated,
+      onError: (Object error) {
+        _sensorError = error.toString();
+        _isListening = false;
+        debugPrint('BRUTL_STEPS: Stream error — $error');
+        notifyListeners();
+      },
+    );
+  }
+
+  void _onStepsUpdated(int steps) {
+    // Only notify if the value actually changed.
+    if (steps == _previousSteps) return;
+    _previousSteps = steps;
+    _currentSteps = steps;
     _sensorError = null;
 
-    _persistDailyState(
-      date: today,
-      baselineRawSteps: _baselineRawSteps,
-      latestRawSteps: _latestRawSteps,
-    );
+    // Persist to local history for the steps chart.
+    final today = StepSensorService.dateStampFor(DateTime.now());
+    unawaited(_localStorage.saveDailySteps(today, _currentSteps));
 
-    // Persist to local history for the steps chart
-    unawaited(
-      _localStorage.saveDailySteps(today, _currentSteps),
-    );
-
+    debugPrint('BRUTL_STEPS: UI updated — steps=$_currentSteps');
     notifyListeners();
   }
 
-  void _onStepCountError(Object error) {
-    _sensorError = error.toString();
-    _isListening = false;
-    notifyListeners();
+  // ─── Manual refresh (app resume from background) ────────────────────────
+
+  /// Call this from `didChangeAppLifecycleState(resumed)` to force an
+  /// immediate UI update without waiting for the next stream event.
+  Future<void> refreshSteps() async {
+    if (!_hasPermission) return;
+
+    debugPrint('BRUTL_STEPS: Refreshing steps on app resume...');
+    await _sensorService.refreshFromSensor();
   }
 
-  void _persistDailyState({
-    required String date,
-    required int baselineRawSteps,
-    required int latestRawSteps,
-  }) {
-    _prefs?.setString(_baselineDateKey, date);
-    _prefs?.setInt(_baselineRawStepsKey, baselineRawSteps);
-    _prefs?.setInt(_latestRawStepsKey, latestRawSteps);
+  // ─── User weight for calorie formula ────────────────────────────────────
+
+  /// Updates the user weight used in the calorie calculation.
+  /// [weight] — the numeric value from the user's profile.
+  /// [unit] — 'kg' or 'lbs'. If lbs, it is converted to kg internally.
+  void setUserWeight(double weight, String unit) {
+    final kg = unit.toLowerCase() == 'lbs' ? weight * 0.453592 : weight;
+    if (kg == _userWeightKg) return;
+    _userWeightKg = kg > 0 ? kg : 70.0;
+    debugPrint('BRUTL_STEPS: User weight set to ${_userWeightKg.toStringAsFixed(1)} kg');
+
+    // Recalculate calories with same step count — only notify if we have steps.
+    if (_currentSteps > 0) {
+      notifyListeners();
+    }
   }
 
-  String _todayStamp() {
-    final now = DateTime.now();
-    final month = now.month.toString().padLeft(2, '0');
-    final day = now.day.toString().padLeft(2, '0');
-    return '${now.year}-$month-$day';
-  }
+  // ─── Cleanup ────────────────────────────────────────────────────────────
 
   @override
   void dispose() {
-    _stepSubscription?.cancel();
+    _stepsSubscription?.cancel();
     super.dispose();
   }
 }

@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:first_projects/Screens/home_screen.dart';
 import 'package:provider/provider.dart';
+import 'package:workmanager/workmanager.dart';
 
 import 'core/theme/app_theme.dart';
 import 'providers/auth_provider.dart';
@@ -13,6 +14,8 @@ import 'providers/workout_nutrition_provider.dart';
 import 'providers/workout_provider.dart';
 import 'Screens/auth/auth_screen.dart';
 import 'Screens/onboarding/onboarding_screen.dart';
+import 'Screens/permission_gate_screen.dart';
+import 'services/background_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -20,6 +23,30 @@ Future<void> main() async {
   await Hive.initFlutter();
   await Hive.openBox<String>('exercises');
   await Hive.openBox<int>('steps_history');
+
+  // ── Initialize Workmanager for silent background step sync ──
+  await Workmanager().initialize(
+    callbackDispatcher,
+    isInDebugMode: false,
+  );
+
+  // Register a periodic task that runs approximately every 15 minutes.
+  // Android enforces a minimum of 15 minutes for periodic tasks.
+  await Workmanager().registerPeriodicTask(
+    kBrutlStepSyncTask,
+    kBrutlStepSyncTask,
+    frequency: const Duration(minutes: 15),
+    constraints: Constraints(
+      networkType: NetworkType.not_required,
+      requiresBatteryNotLow: false,
+      requiresCharging: false,
+      requiresDeviceIdle: false,
+    ),
+    existingWorkPolicy: ExistingWorkPolicy.keep,
+    backoffPolicy: BackoffPolicy.linear,
+    backoffPolicyDelay: const Duration(minutes: 10),
+  );
+  debugPrint('BRUTL_STEPS: Workmanager initialized & periodic task registered.');
 
   final workoutProvider = WorkoutProvider();
   final stepProvider = StepProvider();
@@ -97,6 +124,11 @@ class AuthGate extends StatelessWidget {
                     data?['isProfileComplete'] as bool? ?? false;
 
                 if (isProfileComplete) {
+                  // ── Permission gate: check if step permission is granted ──
+                  final stepProvider = context.read<StepProvider>();
+                  if (!stepProvider.hasPermission) {
+                    return const PermissionGateScreen();
+                  }
                   return const HomeScreen();
                 }
               }

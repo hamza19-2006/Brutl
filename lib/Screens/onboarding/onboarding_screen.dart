@@ -53,7 +53,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   String _bodyGoal = 'Weight Loss';
 
   // --- Page 5: Macros ---
-  String _macroOption = 'Balanced';
   int _targetCalories = 2000;
   int _targetProtein = 150;
   int _targetCarbs = 200;
@@ -194,29 +193,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     double bmr = (10 * weightKg) + (6.25 * heightCm) - (5 * 25) + 5;
     double tdee = bmr * 1.375; // Lightly active
 
-    int modifier = 0;
     double proMultiplier = 2.0;
     double fatMultiplier = 0.7;
 
-    if (_macroOption == 'Maintenance') {
-      modifier = 0;
-      proMultiplier = 2.0;
-      fatMultiplier = 0.7;
-    } else if (_macroOption == 'Balanced') {
-      modifier = _bodyGoal == 'Weight Loss'
-          ? -300
-          : (_bodyGoal == 'Weight Gain' ? 300 : 0);
-      proMultiplier = 2.2;
-      fatMultiplier = 0.8;
-    } else if (_macroOption == 'Aggressive') {
-      modifier = _bodyGoal == 'Weight Loss'
-          ? -600
-          : (_bodyGoal == 'Weight Gain' ? 600 : 0);
-      proMultiplier = 2.5;
-      fatMultiplier = 1.0;
-    }
-
-    _targetCalories = (tdee + modifier).round();
+    _targetCalories = tdee.round();
     _targetProtein = (weightKg * proMultiplier).round();
     _targetFats = (weightKg * fatMultiplier).round();
     _targetCarbs =
@@ -484,9 +464,26 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           ),
           const SizedBox(height: 12),
           if (_isUsernameAvailable == false && _usernameCtrl.text.isNotEmpty)
-            const Text(
-              'Username is already taken',
-              style: TextStyle(color: Colors.redAccent, fontSize: 12),
+            const Row(
+              children: [
+                Icon(Icons.error_outline, color: Colors.redAccent, size: 16),
+                SizedBox(width: 8),
+                Text(
+                  'This username is already taken.',
+                  style: TextStyle(color: Colors.redAccent, fontSize: 12),
+                ),
+              ],
+            ),
+          if (_isUsernameAvailable == true && _usernameCtrl.text.isNotEmpty)
+            const Row(
+              children: [
+                Icon(Icons.check_circle_outline, color: Colors.greenAccent, size: 16),
+                SizedBox(width: 8),
+                Text(
+                  'Username available!',
+                  style: TextStyle(color: Colors.greenAccent, fontSize: 12),
+                ),
+              ],
             ),
         ],
       ),
@@ -505,13 +502,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             strokeWidth: 2,
           ),
         ),
-      );
-    }
-    if (_isUsernameAvailable == true) {
-      return const Icon(
-        Icons.check_circle,
-        color: Colors.greenAccent,
-        size: 20,
       );
     }
     return const SizedBox.shrink();
@@ -814,10 +804,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   // ===================== PAGE 5 =====================
   Widget _buildMacrosPage() {
-    // NOTE: Do NOT call _calculateMacros() here — it overwrites the user's
-    // card selection on every rebuild. Macros are recalculated inside onTap.
-    final options = ['Aggressive', 'Balanced', 'Maintenance'];
-
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -837,70 +823,87 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             style: TextStyle(color: Color(0xFF9A9A9A), fontSize: 16),
           ),
           const SizedBox(height: 32),
-          if (!_isCustomMacro)
-            Row(
-              children: options.map((opt) {
-                final isSelected = _macroOption == opt;
-                return Expanded(
-                  child: GestureDetector(
-                    onTap: () {
-                      setState(() {
-                        _macroOption = opt;
-                        _calculateMacros();
-                      });
-                    },
-                    child: Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 4),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      decoration: BoxDecoration(
-                        color: isSelected
-                            ? const Color(0xFFFF3D00)
-                            : const Color(0xFF1A1A1A),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        opt,
-                        textAlign: TextAlign.center,
+          GestureDetector(
+            onTap: () {
+              setState(() {
+                _isCustomMacro = false;
+                _calculateMacros();
+              });
+            },
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+              decoration: BoxDecoration(
+                color: !_isCustomMacro
+                    ? const Color(0xFFFF3D00).withValues(alpha: 0.1)
+                    : const Color(0xFF1A1A1A),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: !_isCustomMacro
+                      ? const Color(0xFFFF3D00)
+                      : const Color(0xFF2A2A2A),
+                  width: 2,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    !_isCustomMacro ? Icons.check_circle : Icons.circle_outlined,
+                    color: !_isCustomMacro ? const Color(0xFFFF3D00) : const Color(0xFF555555),
+                  ),
+                  const SizedBox(width: 16),
+                  const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Maintenance (TDEE)',
                         style: TextStyle(
-                          color: isSelected
-                              ? Colors.white
-                              : const Color(0xFF9A9A9A),
-                          fontWeight: isSelected
-                              ? FontWeight.bold
-                              : FontWeight.normal,
-                          fontSize: 12,
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                    ),
+                      SizedBox(height: 4),
+                      Text(
+                        'Your calculated daily energy expenditure',
+                        style: TextStyle(color: Color(0xFF9A9A9A), fontSize: 12),
+                      ),
+                    ],
                   ),
-                );
-              }).toList(),
+                ],
+              ),
             ),
+          ),
           const SizedBox(height: 24),
           _buildMacroDashboard(),
           const SizedBox(height: 24),
-          Center(
-            child: TextButton(
-              onPressed: () {
-                setState(() {
-                  _isCustomMacro = !_isCustomMacro;
-                  if (_isCustomMacro) {
-                    _customCalCtrl.text = _targetCalories.toString();
-                    _customProCtrl.text = _targetProtein.toString();
-                    _customCarbCtrl.text = _targetCarbs.toString();
-                    _customFatCtrl.text = _targetFats.toString();
-                  }
-                });
-              },
-              child: Text(
-                _isCustomMacro
-                    ? 'Use Auto Calculated Macros'
-                    : 'Customize My Own Macros',
-                style: const TextStyle(
-                  color: Color(0xFFFF3D00),
-                  fontWeight: FontWeight.w600,
+          GestureDetector(
+            onTap: () {
+              setState(() {
+                _isCustomMacro = true;
+                _customCalCtrl.text = _targetCalories.toString();
+                _customProCtrl.text = _targetProtein.toString();
+                _customCarbCtrl.text = _targetCarbs.toString();
+                _customFatCtrl.text = _targetFats.toString();
+              });
+            },
+            child: Row(
+              children: [
+                Icon(
+                  _isCustomMacro ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                  color: _isCustomMacro ? const Color(0xFFFF3D00) : const Color(0xFF555555),
                 ),
-              ),
+                const SizedBox(width: 12),
+                Text(
+                  'Customize My Own Macros',
+                  style: TextStyle(
+                    color: _isCustomMacro ? Colors.white : const Color(0xFF9A9A9A),
+                    fontSize: 16,
+                    fontWeight: _isCustomMacro ? FontWeight.w600 : FontWeight.normal,
+                  ),
+                ),
+              ],
             ),
           ),
           if (_isCustomMacro) ...[
@@ -912,6 +915,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     controller: _customCalCtrl,
                     label: 'Kcal',
                     keyboardType: TextInputType.number,
+                    onChanged: (_) => setState(() => _calculateMacros()),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -920,6 +924,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     controller: _customProCtrl,
                     label: 'Pro (g)',
                     keyboardType: TextInputType.number,
+                    onChanged: (_) => setState(() => _calculateMacros()),
                   ),
                 ),
               ],
@@ -932,6 +937,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     controller: _customCarbCtrl,
                     label: 'Carbs (g)',
                     keyboardType: TextInputType.number,
+                    onChanged: (_) => setState(() => _calculateMacros()),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -940,6 +946,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     controller: _customFatCtrl,
                     label: 'Fats (g)',
                     keyboardType: TextInputType.number,
+                    onChanged: (_) => setState(() => _calculateMacros()),
                   ),
                 ),
               ],

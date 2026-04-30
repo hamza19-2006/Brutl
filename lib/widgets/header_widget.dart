@@ -102,14 +102,14 @@ class HeaderWidget extends StatelessWidget {
                   const Icon(
                     Icons.bolt_rounded,
                     color: AppColors.accentPrimary,
-                    size: 18,
+                    size: 30,
                   ),
                   const SizedBox(width: 4),
                   Text(
                     brandName,
                     style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                       color: Colors.white,
-                      fontSize: 24,
+                      fontSize: 36,
                       fontWeight: FontWeight.w700,
                     ),
                   ),

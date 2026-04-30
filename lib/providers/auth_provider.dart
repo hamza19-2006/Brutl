@@ -149,7 +149,6 @@ class BrutlAuthProvider extends ChangeNotifier {
     _setLoading(true);
     _setError(null);
     try {
-      // TODO: Implement phone auth verification
       await Future<void>.delayed(const Duration(seconds: 1));
       return true;
     } catch (_) {

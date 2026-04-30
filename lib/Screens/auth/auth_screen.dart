@@ -201,7 +201,7 @@ class _AuthScreenState extends State<AuthScreen> {
                         Padding(
                           padding: const EdgeInsets.only(right: 12),
                           child: Image.asset(
-                            'assets/Images/google_logo.png',
+                            'assets/Images/google_logo.jpg',
                             width: 22,
                             height: 22,
                             errorBuilder: (context, error, stackTrace) =>

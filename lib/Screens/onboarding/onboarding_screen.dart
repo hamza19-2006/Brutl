@@ -270,7 +270,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     } else if (_currentPage == 1) {
       if (_weightCtrl.text.trim().isEmpty) return;
       if (_heightUnit == 'cm' && _heightCmCtrl.text.trim().isEmpty) return;
-    } else if (_currentPage == 4) {
+    }
+
+    // Pre-calculate macros BEFORE entering the macros page so TDEE is visible.
+    if (_currentPage == 3) {
       _calculateMacros();
     }
 
@@ -853,24 +856,36 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     color: !_isCustomMacro ? const Color(0xFFFF3D00) : const Color(0xFF555555),
                   ),
                   const SizedBox(width: 16),
-                  const Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Maintenance (TDEE)',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Maintenance (TDEE)',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
-                      ),
-                      SizedBox(height: 4),
-                      Text(
-                        'Your calculated daily energy expenditure',
-                        style: TextStyle(color: Color(0xFF9A9A9A), fontSize: 12),
-                      ),
-                    ],
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Your calculated daily energy expenditure',
+                          style: TextStyle(color: Color(0xFF9A9A9A), fontSize: 12),
+                        ),
+                      ],
+                    ),
                   ),
+                  if (!_isCustomMacro)
+                    Text(
+                      '$_targetCalories',
+                      style: const TextStyle(
+                        color: Color(0xFFFF3D00),
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        fontFeatures: [FontFeature.tabularFigures()],
+                      ),
+                    ),
                 ],
               ),
             ),

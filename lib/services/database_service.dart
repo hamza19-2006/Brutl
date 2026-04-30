@@ -1,3 +1,17 @@
+// ═══════════════════════════════════════════════════════════════════════════════
+// DATABASE SERVICE — Local-First + Firestore Sync
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// DATA PERSISTENCE MANDATE:
+//   • WORKOUTS, PROFILE, SPLIT NAMES → saved to Hive FIRST (0 ms loading),
+//     then synced to Firestore in the background via unawaited batch writes.
+//   • STEP DATA → strictly LOCAL ONLY (Hive + SharedPreferences).
+//     Step data must NEVER be written to Firestore (cost savings).
+//
+// This service handles workout/profile persistence only.
+// Step persistence lives in LocalStorageService & StepSensorService.
+// ═══════════════════════════════════════════════════════════════════════════════
+
 import 'dart:async';
 import 'dart:convert';
 

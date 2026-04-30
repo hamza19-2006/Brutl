@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
-import '../models/brutl_models.dart';
 import '../providers/workout_nutrition_provider.dart';
-import '../widgets/exercise_editor_sheet.dart';
+import '../providers/workout_provider.dart';
 import '../widgets/macro_dashboard_card.dart';
 import '../widgets/meal_logger_sheet.dart';
+import '../widgets/workout_day_card.dart';
+import 'workout_detail_screen.dart';
 
 class WorkoutScreen extends StatelessWidget {
   const WorkoutScreen({super.key, this.showBottomNavigationBar = true});
@@ -28,13 +28,9 @@ class WorkoutScreen extends StatelessWidget {
           );
         }
 
-        final selectedSplit = provider.selectedSplit;
-        final splitLastUpdated = provider.currentSplitModel.updatedAt;
-        final splitNames = provider.selectedSession.splits
-            .map((split) => split.title)
-            .toList(growable: false);
-        final exercises = provider.filteredExercises;
-
+        final workoutProvider = context.watch<WorkoutProvider>();
+        final currentWeekWorkouts = workoutProvider.currentWeekWorkouts;
+        
         return Scaffold(
           backgroundColor: const Color(0xFF0A0A0A),
           bottomNavigationBar: showBottomNavigationBar
@@ -83,120 +79,86 @@ class WorkoutScreen extends StatelessWidget {
                   ),
                 ),
                 const SliverToBoxAdapter(child: SizedBox(height: 16)),
-                SliverPersistentHeader(
-                  pinned: true,
-                  delegate: _WorkoutControlHeaderDelegate(
-                    child: _WorkoutControlHeader(
-                      ui: ui,
-                      sessions: provider.sessions,
-                      selectedSessionId: provider.selectedSessionId,
-                      splitNames: splitNames,
-                      selectedSplit: provider.selectedSplit,
-                      onSessionChanged: provider.selectSession,
-                      onSplitChanged: (splitName) {
-                        context
-                            .read<WorkoutNutritionProvider>()
-                            .setSelectedSplit(splitName);
-                      },
-                      onAddExercise: () => _openExerciseEditor(context),
-                    ),
-                  ),
-                ),
+                
+                // --- PHASE 3: THE WEEK SCROLLER ---
                 SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          selectedSplit,
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w700,
+                  child: SizedBox(
+                    height: 45,
+                    child: ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      itemCount: workoutProvider.totalProgramWeeks,
+                      itemBuilder: (context, index) {
+                        final weekNum = index + 1;
+                        final isSelected = workoutProvider.selectedWeek == weekNum;
+                        return GestureDetector(
+                          onTap: () => workoutProvider.selectWeek(weekNum),
+                          child: Container(
+                            margin: const EdgeInsets.only(right: 12),
+                            padding: const EdgeInsets.symmetric(horizontal: 24),
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: isSelected ? const Color(0xFFFF3D00) : const Color(0xFF1A1A1A),
+                              borderRadius: BorderRadius.circular(20),
+                              border: isSelected ? null : Border.all(color: const Color(0xFF2A2A2A)),
+                            ),
+                            child: Text(
+                              'Week $weekNum',
+                              style: TextStyle(
+                                color: isSelected ? const Color(0xFFFFFFFF) : const Color(0xFF888888),
+                                fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                                fontSize: 14,
                               ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          _formatLastUpdated(splitLastUpdated),
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(
-                                fontSize: 12,
-                                fontStyle: FontStyle.italic,
-                                color: Colors.grey[400],
-                              ),
-                        ),
-                      ],
+                            ),
+                          ),
+                        );
+                      },
                     ),
                   ),
                 ),
-                if (exercises.isEmpty)
+                
+                const SliverToBoxAdapter(child: SizedBox(height: 16)),
+                
+                // --- PHASE 4: THE DAY CARDS ---
+                if (currentWeekWorkouts.isEmpty)
                   SliverToBoxAdapter(
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 24, 16, 24),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          vertical: 48,
-                          horizontal: 24,
-                        ),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF1A1A1A),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: const Color(0xFF2A2A2A)),
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Container(
-                              width: 80,
-                              height: 80,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                gradient: LinearGradient(
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                  colors: [
-                                    const Color(
-                                      0xFFFF3D00,
-                                    ).withValues(alpha: 0.15),
-                                    const Color(
-                                      0xFFFF6B00,
-                                    ).withValues(alpha: 0.05),
-                                  ],
-                                ),
-                              ),
-                              child: const Icon(
-                                Icons.fitness_center_rounded,
-                                color: Color(0xFFFF3D00),
-                                size: 36,
-                              ),
-                            ),
-                            const SizedBox(height: 20),
-                            Text(
-                              'Your log is empty. Tap + to add an exercise!',
-                              style: Theme.of(context).textTheme.titleMedium
-                                  ?.copyWith(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                            ),
-                          ],
+                      padding: const EdgeInsets.all(32),
+                      child: Center(
+                        child: Text(
+                          "No workouts scheduled for this week. Tap '+' to build your split.",
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: const Color(0xFF888888),
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
                       ),
                     ),
                   )
                 else
                   SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
                     sliver: SliverList.builder(
-                      itemCount: exercises.length,
+                      itemCount: currentWeekWorkouts.length,
                       itemBuilder: (context, index) {
-                        final exercise = exercises[index];
-                        return _ExerciseCard(
-                          exercise: exercise,
-                          ui: ui,
-                          onTap: () =>
-                              _openExerciseEditor(context, exercise: exercise),
+                        final session = currentWeekWorkouts[index];
+                        return AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 300),
+                          child: WorkoutDayCard(
+                            key: ValueKey(session.id),
+                            programDay: session,
+                            onTap: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => WorkoutDetailScreen(session: session),
+                                ),
+                              ).then((_) {
+                                // Refresh logic if needed
+                              });
+                            },
+                          ),
                         );
                       },
                     ),
@@ -218,18 +180,6 @@ class WorkoutScreen extends StatelessWidget {
     );
   }
 
-  Future<void> _openExerciseEditor(
-    BuildContext context, {
-    ExerciseModel? exercise,
-  }) async {
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => ExerciseEditorSheet(exercise: exercise),
-    );
-  }
-
   IconData _iconForIndex(int index) {
     switch (index) {
       case 0:
@@ -241,290 +191,5 @@ class WorkoutScreen extends StatelessWidget {
       default:
         return Icons.chat_bubble_rounded;
     }
-  }
-
-  String _formatLastUpdated(DateTime updatedAt) {
-    if (updatedAt.millisecondsSinceEpoch <= 0) {
-      return 'Last Updated: Waiting for your first sync';
-    }
-
-    final now = DateTime.now();
-    final isToday =
-        now.year == updatedAt.year &&
-        now.month == updatedAt.month &&
-        now.day == updatedAt.day;
-    if (isToday) {
-      return 'Last Updated: Today at ${DateFormat('h:mm a').format(updatedAt)}';
-    }
-    return 'Last Updated: ${DateFormat('MMM d, y').format(updatedAt)}';
-  }
-}
-
-class _WorkoutControlHeader extends StatelessWidget {
-  const _WorkoutControlHeader({
-    required this.ui,
-    required this.sessions,
-    required this.selectedSessionId,
-    required this.splitNames,
-    required this.selectedSplit,
-    required this.onSessionChanged,
-    required this.onSplitChanged,
-    required this.onAddExercise,
-  });
-
-  final WorkoutNutritionUiModel ui;
-  final List<WorkoutSessionModel> sessions;
-  final String selectedSessionId;
-  final List<String> splitNames;
-  final String selectedSplit;
-  final ValueChanged<String> onSessionChanged;
-  final ValueChanged<String> onSplitChanged;
-  final VoidCallback onAddExercise;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      color: const Color(0xFF0A0A0A),
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  ui.workoutHistoryTitle,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              _SessionDropdown(
-                sessions: sessions,
-                selectedSessionId: selectedSessionId,
-                onChanged: onSessionChanged,
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          TextButton(
-            onPressed: onAddExercise,
-            style: TextButton.styleFrom(
-              foregroundColor: const Color(0xFFFF3D00),
-              padding: EdgeInsets.zero,
-              minimumSize: const Size(0, 32),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              visualDensity: VisualDensity.compact,
-              textStyle: Theme.of(
-                context,
-              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-            ),
-            child: Text(ui.addNewExerciseLabel),
-          ),
-          const SizedBox(height: 6),
-          SizedBox(
-            height: 36,
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              physics: const BouncingScrollPhysics(),
-              child: Row(
-                children: splitNames
-                    .map((splitName) {
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: ChoiceChip(
-                          selected: selectedSplit == splitName,
-                          onSelected: (_) => onSplitChanged(splitName),
-                          materialTapTargetSize:
-                              MaterialTapTargetSize.shrinkWrap,
-                          visualDensity: VisualDensity.compact,
-                          label: Text(splitName),
-                          side: const BorderSide(color: Color(0xFF2A2A2A)),
-                          selectedColor: const Color(0xFFFF3D00),
-                          backgroundColor: const Color(0xFF1A1A1A),
-                          labelStyle: TextStyle(
-                            color: selectedSplit == splitName
-                                ? Colors.white
-                                : const Color(0xFFC4C4C4),
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      );
-                    })
-                    .toList(growable: false),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SessionDropdown extends StatelessWidget {
-  const _SessionDropdown({
-    required this.sessions,
-    required this.selectedSessionId,
-    required this.onChanged,
-  });
-
-  final List<WorkoutSessionModel> sessions;
-  final String selectedSessionId;
-  final ValueChanged<String> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1A1A1A),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF2A2A2A)),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: selectedSessionId,
-          dropdownColor: const Color(0xFF1A1A1A),
-          iconEnabledColor: const Color(0xFF9A9A9A),
-          style: Theme.of(
-            context,
-          ).textTheme.labelLarge?.copyWith(color: Colors.white),
-          items: sessions
-              .map(
-                (session) => DropdownMenuItem<String>(
-                  value: session.id,
-                  child: Text(session.title),
-                ),
-              )
-              .toList(growable: false),
-          onChanged: (value) {
-            if (value == null) {
-              return;
-            }
-            onChanged(value);
-          },
-        ),
-      ),
-    );
-  }
-}
-
-class _WorkoutControlHeaderDelegate extends SliverPersistentHeaderDelegate {
-  const _WorkoutControlHeaderDelegate({required this.child});
-
-  final Widget child;
-
-  @override
-  double get minExtent => 176;
-
-  @override
-  double get maxExtent => 176;
-
-  @override
-  Widget build(
-    BuildContext context,
-    double shrinkOffset,
-    bool overlapsContent,
-  ) {
-    return child;
-  }
-
-  @override
-  bool shouldRebuild(covariant _WorkoutControlHeaderDelegate oldDelegate) {
-    return child != oldDelegate.child;
-  }
-}
-
-class _ExerciseCard extends StatelessWidget {
-  const _ExerciseCard({
-    required this.exercise,
-    required this.ui,
-    required this.onTap,
-  });
-
-  final ExerciseModel exercise;
-  final WorkoutNutritionUiModel ui;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final repsText = exercise.reps;
-    final isWholeWeight = exercise.weight == exercise.weight.truncateToDouble();
-    final weightText = isWholeWeight
-        ? exercise.weight.toStringAsFixed(0)
-        : exercise.weight.toStringAsFixed(1);
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1A1A1A),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF2A2A2A)),
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(16),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        exercise.name,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                            ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        '${ui.setsLabel}: ${exercise.sets}   ${ui.repsLabel}: $repsText',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: const Color(0xFF989898),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 12),
-                SizedBox(
-                  width: 85.0,
-                  height: 40.0,
-                  child: Container(
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1A1A1A),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      '$weightText${ui.weightUnit}',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 18,
-                        fontFeatures: const [FontFeature.tabularFigures()],
-                      ),
-                      textAlign: TextAlign.center,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
   }
 }

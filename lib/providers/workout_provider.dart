@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/database_service.dart';
+import '../models/brutl_models.dart' as brutl;
 import '../models/user_data_models.dart';
 
 class WorkoutProvider extends ChangeNotifier {
@@ -21,6 +22,41 @@ class WorkoutProvider extends ChangeNotifier {
     name: 'Brutl',
     dailyCalorieGoal: 500,
   );
+  
+  // Program-Style state
+  int _selectedWeek = 1;
+  final int _totalProgramWeeks = 4;
+  final List<brutl.ProgramDayModel> _programDays = [
+    brutl.ProgramDayModel(
+      id: 'day1',
+      weekNumber: 1,
+      dayNumber: 1,
+      splitName: 'Upper A',
+      exercises: [],
+    ),
+    brutl.ProgramDayModel(
+      id: 'day2',
+      weekNumber: 1,
+      dayNumber: 2,
+      splitName: 'Lower A',
+      exercises: [],
+    ),
+    brutl.ProgramDayModel(
+      id: 'day4',
+      weekNumber: 1,
+      dayNumber: 4,
+      splitName: 'Upper B',
+      exercises: [],
+    ),
+    brutl.ProgramDayModel(
+      id: 'day5',
+      weekNumber: 1,
+      dayNumber: 5,
+      splitName: 'Lower B',
+      exercises: [],
+    ),
+  ];
+
   WorkoutPlanModel _workoutPlan = WorkoutPlanModel.defaultPlan();
   final HomeUiModel _homeUi = const HomeUiModel(
     brandName: 'Brutl',
@@ -58,6 +94,22 @@ class WorkoutProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get highlightedExerciseName => _highlightedExerciseName;
   HomeUiModel get homeUi => _homeUi;
+
+  int get selectedWeek => _selectedWeek;
+  int get totalProgramWeeks => _totalProgramWeeks;
+
+  List<brutl.ProgramDayModel> get currentWeekWorkouts {
+    final list = _programDays.where((day) => day.weekNumber == _selectedWeek).toList();
+    list.sort((a, b) => a.dayNumber.compareTo(b.dayNumber));
+    return list;
+  }
+
+  void selectWeek(int week) {
+    if (_selectedWeek != week) {
+      _selectedWeek = week;
+      notifyListeners();
+    }
+  }
 
   String get lastWorkoutTitle => _homeUi.lastWorkoutTitle;
   String get noWorkoutMessage => _homeUi.noWorkoutMessage;

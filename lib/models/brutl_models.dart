@@ -230,6 +230,65 @@ class WorkoutSessionModel {
 }
 
 @immutable
+class ProgramDayModel {
+  const ProgramDayModel({
+    required this.id,
+    required this.weekNumber,
+    required this.dayNumber,
+    required this.splitName,
+    required this.exercises,
+  });
+
+  final String id;
+  final int weekNumber;
+  final int dayNumber;
+  final String splitName;
+  final List<ExerciseModel> exercises;
+
+  ProgramDayModel copyWith({
+    String? id,
+    int? weekNumber,
+    int? dayNumber,
+    String? splitName,
+    List<ExerciseModel>? exercises,
+  }) {
+    return ProgramDayModel(
+      id: id ?? this.id,
+      weekNumber: weekNumber ?? this.weekNumber,
+      dayNumber: dayNumber ?? this.dayNumber,
+      splitName: splitName ?? this.splitName,
+      exercises: exercises ?? this.exercises,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'id': id,
+      'weekNumber': weekNumber,
+      'dayNumber': dayNumber,
+      'splitName': splitName,
+      'exercises': exercises.map((e) => e.toJson()).toList(),
+    };
+  }
+
+  factory ProgramDayModel.fromJson(Map<String, dynamic> json) {
+    return ProgramDayModel(
+      id: json['id']?.toString() ?? '',
+      weekNumber: (json['weekNumber'] as num?)?.toInt() ?? 1,
+      dayNumber: (json['dayNumber'] as num?)?.toInt() ?? 1,
+      splitName: json['splitName']?.toString() ?? '',
+      exercises: (json['exercises'] as List<dynamic>?)
+              ?.whereType<Map<dynamic, dynamic>>()
+              .map(
+                (e) => ExerciseModel.fromJson(Map<String, dynamic>.from(e)),
+              )
+              .toList(growable: false) ??
+          const <ExerciseModel>[],
+    );
+  }
+}
+
+@immutable
 class WorkoutNutritionUiModel {
   const WorkoutNutritionUiModel({
     required this.screenTitle,

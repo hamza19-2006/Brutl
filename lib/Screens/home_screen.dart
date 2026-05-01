@@ -1,13 +1,13 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
 import 'workout_screen.dart';
 import '../providers/health_provider.dart';
 import '../providers/workout_provider.dart';
 import '../services/database_service.dart';
+import '../services/step_service.dart';
 import '../widgets/biometric_card.dart';
 import '../widgets/exercise_highlight_card.dart';
 import '../widgets/header_widget.dart';
@@ -32,12 +32,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-
-    // Wire user weight from Firestore profile into the StepProvider
-    // so the calorie formula uses the actual user weight.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _syncUserWeight();
-    });
   }
 
   @override
@@ -52,10 +46,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      debugPrint('BRUTL_STEPS: App resumed — triggering step refresh.');
-      context.read<StepProvider>().refreshSteps();
-      context.read<StepProvider>().recheckPermissionAndStart();
-
       // Trigger pending exercise sync on app resume
       _syncPendingExercises();
     }
@@ -68,32 +58,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       debugPrint('BRUTL: Pending exercises synced on app resume');
     } catch (e) {
       debugPrint('BRUTL: Failed to sync pending exercises — $e');
-    }
-  }
-
-  /// Reads the user's weight and unit from Firestore and passes it to
-  /// StepProvider for the BMR + NEAT calorie calculation.
-  Future<void> _syncUserWeight() async {
-    try {
-      final uid = FirebaseAuth.instance.currentUser?.uid;
-      if (uid == null) return;
-
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .get();
-
-      if (!mounted) return;
-
-      if (doc.exists && doc.data() != null) {
-        final data = doc.data()!;
-        final weight = (data['weight'] as num?)?.toDouble() ?? 70.0;
-        final unit = data['weightUnit'] as String? ?? 'kg';
-        context.read<StepProvider>().setUserWeight(weight, unit);
-        debugPrint('BRUTL_STEPS: Synced user weight — $weight $unit');
-      }
-    } catch (e) {
-      debugPrint('BRUTL_STEPS: Failed to load user weight — $e');
     }
   }
 
@@ -190,203 +154,82 @@ class _HomeTab extends StatelessWidget {
                 // ── Split Dashboard: Steps (left) + Calories (right) ──
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-                    stream: FirebaseAuth.instance.currentUser == null
-                        ? null
-                        : FirebaseFirestore.instance
-                              .collection('users')
-                              .doc(FirebaseAuth.instance.currentUser!.uid)
-                              .snapshots(),
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting) {
-                        return const SizedBox(
-                          height: 170,
-                          child: Center(
-                            child: CircularProgressIndicator(
-                              color: Color(0xFFFF3D00),
+                    child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                      stream: FirebaseAuth.instance.currentUser == null
+                          ? null
+                          : FirebaseFirestore.instance
+                                .collection('users')
+                                .doc(FirebaseAuth.instance.currentUser!.uid)
+                                .snapshots(),
+                      builder: (context, snapshot) {
+                        if (snapshot.connectionState == ConnectionState.waiting) {
+                          return const SizedBox(
+                            height: 170,
+                            child: Center(
+                              child: CircularProgressIndicator(
+                                color: Color(0xFFFF3D00),
+                              ),
                             ),
+                          );
+                        }
+
+                        final remoteData = snapshot.data?.data();
+                        final service = StepService.instance;
+                        final serviceSteps = service.getTodaySteps();
+                        final serviceCalories = service.calculateCalories(
+                          serviceSteps,
+                        );
+                        final remoteSteps =
+                            (remoteData?['dailySteps'] as num?)?.toInt();
+                        final remoteCalories =
+                            (remoteData?['dailyCaloriesBurned'] as num?)
+                                ?.toDouble();
+                        final steps = remoteSteps ?? serviceSteps;
+                        final calories = remoteCalories ?? serviceCalories;
+
+                        return IntrinsicHeight(
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Expanded(
+                                flex: 6,
+                                child: _buildStepsCard(
+                                  context,
+                                  workoutProvider,
+                                  steps,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                flex: 4,
+                                child: CaloriesCard(
+                                  caloriesBurned: calories.clamp(0, 5000),
+                                  calorieGoal: workoutProvider.user.dailyCalorieGoal,
+                                  caloriesLabel: workoutProvider.homeUi.caloriesLabel,
+                                  caloriesUnitLabel:
+                                      workoutProvider.homeUi.caloriesUnitLabel,
+                                  onTap: onCaloriesTap,
+                                ),
+                              ),
+                            ],
                           ),
                         );
-                      }
-                      final remoteData = snapshot.data?.data();
-                      final remoteSteps =
-                          (remoteData?['dailySteps'] as num?)?.toInt();
-                      final remoteCalories =
-                          (remoteData?['dailyCaloriesBurned'] as num?)
-                              ?.toDouble();
-                      final steps = remoteSteps ?? stepProvider.currentSteps;
-                      final calories =
-                          remoteCalories ?? stepProvider.caloriesBurned;
-
-                      return IntrinsicHeight(
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Expanded(
-                              flex: 6,
-                              child: _buildStepsCard(
-                                context,
-                                stepProvider,
-                                workoutProvider,
-                                steps,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              flex: 4,
-                              child: CaloriesCard(
-                                caloriesBurned: calories.clamp(0, 5000),
-                                calorieGoal: workoutProvider.user.dailyCalorieGoal,
-                                caloriesLabel: workoutProvider.homeUi.caloriesLabel,
-                                caloriesUnitLabel:
-                                    workoutProvider.homeUi.caloriesUnitLabel,
-                                onTap: onCaloriesTap,
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
+                      },
+                    ),
                 ),
 
                 const SizedBox(height: 20),
-                Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Column(
+    int todaySteps,
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        workoutProvider.lastWorkoutTitle,
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                            ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
                         workoutProvider.lastWorkoutSubtitle,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+      currentSteps: todaySteps,
                           color: const Color(0xFF888888),
                           fontSize: 12,
                         ),
                       ),
                     ],
                   ),
-                ),
-                const SizedBox(height: 12),
-                if (workoutProvider.topVolumeExercises.isEmpty)
-                  Container(
-                    width: double.infinity,
-                    margin: const EdgeInsets.symmetric(horizontal: 16),
-                    padding: const EdgeInsets.all(18),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1A1A1A),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: const Color(0xFF2A2A2A),
-                        width: 1,
-                      ),
-                    ),
-                    child: Text(
-                      workoutProvider.noWorkoutMessage,
-                      style: Theme.of(
-                        context,
-                      ).textTheme.bodyMedium?.copyWith(color: Colors.white),
-                    ),
-                  )
-                else
-                  ...workoutProvider.topVolumeExercises.map(
-                    (exercise) => ExerciseHighlightCard(
-                      exercise: exercise,
-                      setsLabel: workoutProvider.homeUi.setsLabel,
-                      repsLabel: workoutProvider.homeUi.repsLabel,
-                      weightLabel: workoutProvider.homeUi.weightLabel,
-                      weightUnit: workoutProvider.homeUi.weightUnit,
-                      isHighlighted:
-                          workoutProvider.highlightedExerciseName ==
-                          exercise.name,
-                      onTap: () => onExerciseTap(exercise.name),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  /// Builds the StepsCard with graceful error/permission fallback.
-  Widget _buildStepsCard(
-    BuildContext context,
-    StepProvider stepProvider,
-    WorkoutProvider workoutProvider,
-    int streamSteps,
-  ) {
-    // ── Sensor error or permission issue → show fallback card ──
-    if (stepProvider.sensorError != null || !stepProvider.hasPermission) {
-      return _StepsErrorCard(
-        sensorError: stepProvider.sensorError,
-        hasPermission: stepProvider.hasPermission,
-        permissionPermanentlyDenied: stepProvider.permissionPermanentlyDenied,
-        onRequestPermission: () async {
-          await stepProvider.recheckPermissionAndStart();
-        },
-      );
-    }
-
-    return StepsCard(
-      currentSteps: streamSteps,
-      goalSteps: workoutProvider.user.dailyStepGoal,
-      stepsLabel: workoutProvider.homeUi.stepsLabel,
-      stepsUnitLabel: workoutProvider.homeUi.stepsUnitLabel,
-    );
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// STEPS ERROR CARD — Graceful fallback when tracking is unavailable
-// ═══════════════════════════════════════════════════════════════════════════════
-
-class _StepsErrorCard extends StatelessWidget {
-  const _StepsErrorCard({
-    required this.sensorError,
-    required this.hasPermission,
-    required this.permissionPermanentlyDenied,
-    required this.onRequestPermission,
-  });
-
-  final String? sensorError;
-  final bool hasPermission;
-  final bool permissionPermanentlyDenied;
-  final VoidCallback onRequestPermission;
-
-  @override
-  Widget build(BuildContext context) {
-    String message;
-    String actionLabel;
-    VoidCallback? action;
-
-    if (!hasPermission) {
-      message = 'Step tracking paused.\nPermission required.';
-      if (permissionPermanentlyDenied) {
-        actionLabel = 'Open Settings';
-        action = () => openAppSettings();
-      } else {
-        actionLabel = 'Grant Permission';
-        action = onRequestPermission;
-      }
-    } else {
-      message = 'Tracking paused.\nCheck permissions.';
-      actionLabel = 'Retry';
-      action = onRequestPermission;
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: const Color(0xFF1A1A1A),
         borderRadius: BorderRadius.circular(20),

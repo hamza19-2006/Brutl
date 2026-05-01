@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
 
-import 'Screens/auth/auth_screen.dart';
+import 'Screens/auth/login_screen.dart';
 import 'Screens/home_screen.dart';
 import 'Screens/onboarding/onboarding_screen.dart';
 import 'core/theme/app_theme.dart';
@@ -150,15 +150,6 @@ class _BrutlLoadingScreen extends StatelessWidget {
       backgroundColor: Color(0xFF0A0A0A),
       body: Center(child: CircularProgressIndicator(color: Color(0xFFFF3D00))),
     );
-  }
-}
-
-class LoginScreen extends StatelessWidget {
-  const LoginScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return const AuthScreen();
   }
 }
 

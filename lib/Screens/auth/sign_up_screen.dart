@@ -231,25 +231,28 @@ class _SignUpScreenState extends State<SignUpScreen> {
 
                   // Login link
                   Center(
-                    child: RichText(
-                      text: TextSpan(
-                        text: 'Already have an account? ',
-                        style: const TextStyle(
-                          fontSize: 13,
-                          color: Color(0xFF6B7280),
+                    child: Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        const Text(
+                          'Already have an account? ',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Color(0xFF6B7280),
+                          ),
                         ),
-                        children: [
-                          TextSpan(
-                            text: 'Login',
-                            style: const TextStyle(
+                        GestureDetector(
+                          onTap: () => Navigator.pop(context),
+                          child: const Text(
+                            'Login',
+                            style: TextStyle(
                               fontSize: 13,
                               color: Color(0xFF6366F1),
                               fontWeight: FontWeight.w600,
                             ),
-                            recognizer: null, // Navigate to login screen
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
                 ],

@@ -16,9 +16,11 @@ class AuthValidationProvider extends ChangeNotifier {
   // ============ PASSWORD VISIBILITY STATE ============
   bool _isPasswordVisible = false;
   bool _isConfirmPasswordVisible = false;
+  bool _isLoginPasswordVisible = false;
 
   bool get isPasswordVisible => _isPasswordVisible;
   bool get isConfirmPasswordVisible => _isConfirmPasswordVisible;
+  bool get isLoginPasswordVisible => _isLoginPasswordVisible;
 
   void togglePasswordVisibility() {
     _isPasswordVisible = !_isPasswordVisible;
@@ -27,6 +29,11 @@ class AuthValidationProvider extends ChangeNotifier {
 
   void toggleConfirmPasswordVisibility() {
     _isConfirmPasswordVisible = !_isConfirmPasswordVisible;
+    notifyListeners();
+  }
+
+  void toggleLoginPasswordVisibility() {
+    _isLoginPasswordVisible = !_isLoginPasswordVisible;
     notifyListeners();
   }
 
@@ -98,10 +105,14 @@ class AuthValidationProvider extends ChangeNotifier {
   String? get loginError => _loginError;
   bool get showForgotPasswordLink => _showForgotPasswordLink;
 
-  void setLoginError(String? error) {
+  void setLoginError(
+    String? error, {
+    bool showForgotPasswordLink = false,
+  }) {
     _loginError = error;
-    // Show "Forgot Password?" link only when there's an error
-    _showForgotPasswordLink = error != null && error.isNotEmpty;
+    // Show "Forgot Password?" link only for wrong-password style errors.
+    _showForgotPasswordLink =
+        showForgotPasswordLink && error != null && error.isNotEmpty;
     notifyListeners();
   }
 
@@ -118,6 +129,7 @@ class AuthValidationProvider extends ChangeNotifier {
     _confirmPassword = '';
     _isPasswordVisible = false;
     _isConfirmPasswordVisible = false;
+    _isLoginPasswordVisible = false;
     _loginError = null;
     _showForgotPasswordLink = false;
     notifyListeners();

@@ -4,6 +4,7 @@ import '../../providers/auth_provider.dart';
 import '../../providers/auth_validation_provider.dart';
 import '../../widgets/password_input_field.dart';
 import 'forgot_password_screen.dart';
+import 'sign_up_screen.dart';
 
 /// LOGIN SCREEN
 ///
@@ -77,11 +78,22 @@ class _LoginScreenState extends State<LoginScreen> {
       // Login failed - show error and set "Forgot Password?" link to visible
       final errorMessage =
           authProvider.errorMessage ?? 'Login failed. Please try again.';
+      final isWrongPasswordError = _isWrongPasswordError(errorMessage);
 
       // Set login error to trigger "Forgot Password?" link visibility
-      _validationProvider.setLoginError(errorMessage);
+      _validationProvider.setLoginError(
+        errorMessage,
+        showForgotPasswordLink: isWrongPasswordError,
+      );
       _showErrorDialog(errorMessage);
     }
+  }
+
+  bool _isWrongPasswordError(String message) {
+    final normalized = message.toLowerCase();
+    return normalized.contains('wrong password') ||
+        normalized.contains('incorrect credentials') ||
+        normalized.contains('invalid credential');
   }
 
   void _showErrorDialog(String message) {
@@ -143,12 +155,13 @@ class _LoginScreenState extends State<LoginScreen> {
                     controller: _passwordController,
                     label: 'Password',
                     hintText: 'Enter your password',
-                    isVisible: validationProvider.isPasswordVisible,
+                    isVisible: validationProvider.isLoginPasswordVisible,
                     onVisibilityToggle: (value) {
-                      validationProvider.togglePasswordVisibility();
+                      validationProvider.toggleLoginPasswordVisibility();
                     },
                     onChanged: (value) {
-                      validationProvider.updatePassword(value);
+                      // Keep login error state clean while user edits.
+                      validationProvider.clearLoginError();
                     },
                   ),
                   const SizedBox(height: 12),
@@ -167,25 +180,35 @@ class _LoginScreenState extends State<LoginScreen> {
 
                   // Sign up link
                   Center(
-                    child: RichText(
-                      text: TextSpan(
-                        text: "Don't have an account? ",
-                        style: const TextStyle(
-                          fontSize: 13,
-                          color: Color(0xFF6B7280),
+                    child: Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        const Text(
+                          "Don't have an account? ",
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Color(0xFF6B7280),
+                          ),
                         ),
-                        children: [
-                          TextSpan(
-                            text: 'Sign Up',
-                            style: const TextStyle(
+                        GestureDetector(
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const SignUpScreen(),
+                              ),
+                            );
+                          },
+                          child: const Text(
+                            'Sign Up',
+                            style: TextStyle(
                               fontSize: 13,
                               color: Color(0xFF6366F1),
                               fontWeight: FontWeight.w600,
                             ),
-                            recognizer: null, // Navigate to sign-up screen
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
                 ],

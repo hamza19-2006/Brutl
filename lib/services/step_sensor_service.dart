@@ -1,18 +1,4 @@
-// ═══════════════════════════════════════════════════════════════════════════════
-// STEP SENSOR SERVICE — "Sensor Math" Engine
-// ═══════════════════════════════════════════════════════════════════════════════
-//
-// The hardware step sensor returns TOTAL steps since the last device reboot.
-// This service converts that into "today's steps" using a persisted midnight
-// baseline, with automatic reboot detection and midnight rollover.
-//
-// Key formula:  todaySteps = currentRaw - midnightBaseline + carryOver
-//
-// CarryOver only exists if the device was rebooted mid-day (sensor reset to 0).
-// ═══════════════════════════════════════════════════════════════════════════════
-
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -25,47 +11,37 @@ class StepSensorService {
   StepSensorService._();
   static final StepSensorService instance = StepSensorService._();
 
-  // ─── SharedPreferences keys ───────────────────────────────────────────────
-  static const String _keyBaselineDate = 'brutl_step_baseline_date';
-  static const String _keyBaselineRaw = 'brutl_step_baseline_raw';
+  static const String _keyLastSavedDate = 'last_saved_date';
+  static const String _keyInitialHardwareSteps = 'initial_hardware_steps';
   static const String _keyLatestRaw = 'brutl_step_latest_raw';
-  static const String _keyCarryOver = 'brutl_step_carry_over';
 
-  // ─── Internal state ──────────────────────────────────────────────────────
   SharedPreferences? _prefs;
   StreamSubscription<StepCount>? _sensorSubscription;
   Timer? _midnightTimer;
 
-  int _baselineRaw = 0;
+  int _initialHardwareSteps = 0;
   int _latestRaw = 0;
-  int _carryOver = 0;
-  String _baselineDate = '';
+  String _lastSavedDate = '';
   int _lastEmittedSteps = -1;
   String? _sensorError;
+  Future<void> Function()? _onDailyReset;
 
   bool _isInitialized = false;
   bool _isListening = false;
 
-  // ─── Public getters ──────────────────────────────────────────────────────
   bool get isInitialized => _isInitialized;
   bool get isListening => _isListening;
   String? get sensorError => _sensorError;
 
-  // ─── Stream controller (broadcast so multiple listeners are allowed) ─────
   final StreamController<int> _stepsController =
       StreamController<int>.broadcast();
 
-  /// Continuously yields the calculated daily step count.
-  /// Deduplicated: only emits when the value actually changes.
   Stream<int> get todaysStepsStream => _stepsController.stream;
 
-  // ─── Lifecycle ───────────────────────────────────────────────────────────
-
-  /// Initializes the service: loads persisted baseline, starts the hardware
-  /// pedometer listener, and schedules the midnight rollover timer.
-  Future<void> initialize() async {
+  Future<void> initialize({Future<void> Function()? onDailyReset}) async {
     if (_isInitialized) return;
 
+    _onDailyReset = onDailyReset;
     _prefs = await SharedPreferences.getInstance();
     await _syncStagedBackgroundStepsToHive();
     _hydrateFromStorage();
@@ -93,31 +69,23 @@ class StepSensorService {
     _isInitialized = true;
   }
 
-  /// One-shot read of the current daily steps (for background tasks & resume).
-  /// Does NOT start the stream; reads from persisted state only.
   Future<int> getCurrentDailySteps() async {
     final prefs = _prefs ?? await SharedPreferences.getInstance();
     final today = _todayStamp();
-    final storedDate = prefs.getString(_keyBaselineDate) ?? '';
+    final storedDate = prefs.getString(_keyLastSavedDate) ?? '';
 
     if (storedDate != today) {
-      // Day rolled over since last read — steps are 0 until next sensor event.
       return 0;
     }
 
-    final baseline = prefs.getInt(_keyBaselineRaw) ?? 0;
+    final initial = prefs.getInt(_keyInitialHardwareSteps) ?? 0;
     final latest = prefs.getInt(_keyLatestRaw) ?? 0;
-    final carry = prefs.getInt(_keyCarryOver) ?? 0;
-
     return calculateDailySteps(
       rawSensor: latest,
-      baseline: baseline,
-      carryOver: carry,
+      initialHardwareSteps: initial,
     );
   }
 
-  /// Manually triggers a refresh by re-reading the latest sensor value.
-  /// Useful when the app resumes from background.
   Future<void> refreshFromSensor() async {
     try {
       final event = await Pedometer.stepCountStream.first.timeout(
@@ -128,26 +96,20 @@ class StepSensorService {
       debugPrint('BRUTL_STEPS: Manual refresh — raw=${event.steps}');
     } catch (e) {
       debugPrint('BRUTL_STEPS: Manual refresh failed — $e');
-      // Fall back to persisted state
       final steps = await getCurrentDailySteps();
       _emitSteps(steps);
     }
   }
 
-  /// Pure function — no side effects. Can be called from a background isolate.
   static int calculateDailySteps({
     required int rawSensor,
-    required int baseline,
-    required int carryOver,
+    required int initialHardwareSteps,
   }) {
-    if (rawSensor < baseline) {
-      // Reboot detected in a background context — treat rawSensor as fresh
-      return math.max(0, carryOver + rawSensor);
+    if (rawSensor < initialHardwareSteps) {
+      return 0;
     }
-    return math.max(0, (rawSensor - baseline) + carryOver);
+    return rawSensor - initialHardwareSteps;
   }
-
-  // ─── Sensor event handling ──────────────────────────────────────────────
 
   void _onSensorEvent(StepCount event) {
     final today = _todayStamp();
@@ -155,27 +117,26 @@ class StepSensorService {
 
     debugPrint(
       'BRUTL_STEPS: Sensor event — raw=$rawSteps, '
-      'baseline=$_baselineRaw, carry=$_carryOver, date=$_baselineDate',
+      'initial=$_initialHardwareSteps, date=$_lastSavedDate',
     );
 
-    // ── Midnight rollover check ──
-    if (_baselineDate != today) {
+    if (_lastSavedDate != today) {
       _performMidnightRollover(rawSteps, today);
       return;
     }
 
-    // ── Reboot detection ──
-    if (rawSteps < _baselineRaw) {
-      _handleReboot(rawSteps);
+    if (rawSteps < _initialHardwareSteps) {
+      _initialHardwareSteps = rawSteps;
+      _latestRaw = rawSteps;
+      _persistState(today);
+      _emitSteps(0);
       return;
     }
 
-    // ── Normal step accumulation ──
     _latestRaw = rawSteps;
     final dailySteps = calculateDailySteps(
       rawSensor: _latestRaw,
-      baseline: _baselineRaw,
-      carryOver: _carryOver,
+      initialHardwareSteps: _initialHardwareSteps,
     );
 
     _persistState(today);
@@ -189,58 +150,29 @@ class StepSensorService {
     _stepsController.addError(error);
   }
 
-  // ─── Reboot detection ────────────────────────────────────────────────────
-
-  void _handleReboot(int newRawAfterReboot) {
-    // Steps accumulated before the reboot become carry-over.
-    final stepsBeforeReboot = math.max(0, _latestRaw - _baselineRaw);
-    _carryOver += stepsBeforeReboot;
-    _baselineRaw = newRawAfterReboot;
-    _latestRaw = newRawAfterReboot;
-
-    final dailySteps = calculateDailySteps(
-      rawSensor: _latestRaw,
-      baseline: _baselineRaw,
-      carryOver: _carryOver,
-    );
-
-    debugPrint(
-      'BRUTL_STEPS: REBOOT detected — carryOver=$_carryOver, '
-      'newBaseline=$_baselineRaw, dailySteps=$dailySteps',
-    );
-
-    _persistState(_baselineDate);
-    _emitSteps(dailySteps);
-  }
-
-  // ─── Midnight rollover ──────────────────────────────────────────────────
-
   void _performMidnightRollover(int currentRaw, String newDate) {
-    // Persist yesterday's final step count to Hive history.
     final yesterdaySteps = calculateDailySteps(
       rawSensor: _latestRaw,
-      baseline: _baselineRaw,
-      carryOver: _carryOver,
+      initialHardwareSteps: _initialHardwareSteps,
     );
 
-    if (yesterdaySteps > 0 && _baselineDate.isNotEmpty) {
+    if (yesterdaySteps > 0 && _lastSavedDate.isNotEmpty) {
       debugPrint(
-        'BRUTL_STEPS: Midnight rollover — saving $_baselineDate = $yesterdaySteps steps',
+        'BRUTL_STEPS: Midnight rollover — saving $_lastSavedDate = $yesterdaySteps steps',
       );
-      _saveToHiveHistory(_baselineDate, yesterdaySteps);
+      _saveToHiveHistory(_lastSavedDate, yesterdaySteps);
     }
 
-    // Reset for the new day.
-    _baselineRaw = currentRaw;
+    _initialHardwareSteps = currentRaw;
     _latestRaw = currentRaw;
-    _carryOver = 0;
-    _baselineDate = newDate;
+    _lastSavedDate = newDate;
 
     _persistState(newDate);
-    _emitSteps(0); // Fresh day starts at 0.
+    _emitSteps(0);
     _scheduleMidnightRollover();
+    unawaited(_onDailyReset?.call());
 
-    debugPrint('BRUTL_STEPS: New day baseline set — raw=$currentRaw');
+    debugPrint('BRUTL_STEPS: New day baseline set — initial=$currentRaw');
   }
 
   void _scheduleMidnightRollover() {
@@ -252,7 +184,6 @@ class StepSensorService {
 
     _midnightTimer = Timer(duration, () {
       debugPrint('BRUTL_STEPS: Midnight timer fired.');
-      // Force a sensor re-read to trigger rollover logic.
       refreshFromSensor();
     });
 
@@ -262,46 +193,39 @@ class StepSensorService {
     );
   }
 
-  // ─── Persistence ────────────────────────────────────────────────────────
-
   void _hydrateFromStorage() {
     final today = _todayStamp();
-    _baselineDate = _prefs?.getString(_keyBaselineDate) ?? '';
+    _lastSavedDate = _prefs?.getString(_keyLastSavedDate) ?? '';
 
-    if (_baselineDate == today) {
-      _baselineRaw = _prefs?.getInt(_keyBaselineRaw) ?? 0;
+    if (_lastSavedDate == today) {
+      _initialHardwareSteps = _prefs?.getInt(_keyInitialHardwareSteps) ?? 0;
       _latestRaw = _prefs?.getInt(_keyLatestRaw) ?? 0;
-      _carryOver = _prefs?.getInt(_keyCarryOver) ?? 0;
 
       final restoredSteps = calculateDailySteps(
         rawSensor: _latestRaw,
-        baseline: _baselineRaw,
-        carryOver: _carryOver,
+        initialHardwareSteps: _initialHardwareSteps,
       );
       _emitSteps(restoredSteps);
 
       debugPrint(
-        'BRUTL_STEPS: Hydrated from storage — baseline=$_baselineRaw, '
-        'latest=$_latestRaw, carry=$_carryOver, steps=$restoredSteps',
+        'BRUTL_STEPS: Hydrated from storage — initial=$_initialHardwareSteps, '
+        'latest=$_latestRaw, steps=$restoredSteps',
       );
     } else {
-      // Different day (or first launch) — will be set on first sensor event.
       debugPrint(
-        'BRUTL_STEPS: Stored date "$_baselineDate" ≠ today "$today". '
+        'BRUTL_STEPS: Stored date "$_lastSavedDate" ≠ today "$today". '
         'Waiting for first sensor event to set baseline.',
       );
-      _baselineDate = today;
-      _baselineRaw = 0;
+      _lastSavedDate = today;
+      _initialHardwareSteps = 0;
       _latestRaw = 0;
-      _carryOver = 0;
     }
   }
 
   void _persistState(String date) {
-    _prefs?.setString(_keyBaselineDate, date);
-    _prefs?.setInt(_keyBaselineRaw, _baselineRaw);
+    _prefs?.setString(_keyLastSavedDate, date);
+    _prefs?.setInt(_keyInitialHardwareSteps, _initialHardwareSteps);
     _prefs?.setInt(_keyLatestRaw, _latestRaw);
-    _prefs?.setInt(_keyCarryOver, _carryOver);
   }
 
   Future<void> _saveToHiveHistory(String dateKey, int steps) async {

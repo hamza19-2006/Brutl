@@ -16,6 +16,26 @@ class WorkoutProvider extends ChangeNotifier {
   static const String _userPrefsKey = 'brutl_user_model';
   static const String _workoutPlanPrefsKey = 'brutl_workout_plan_model';
   static const String _workoutHistoryBoxName = 'brutl_workout_history';
+  static const String _defaultWorkoutSplit = 'Upper/Lower';
+  static const Map<String, List<String>> _splitTemplates =
+      <String, List<String>>{
+        'Upper/Lower': <String>['Upper A', 'Lower A', 'Upper B', 'Lower B'],
+        'Push/Pull/Legs': <String>[
+          'Push',
+          'Pull',
+          'Legs',
+          'Push',
+          'Pull',
+          'Legs',
+        ],
+        'Bro Split': <String>[
+          'Chest & Triceps',
+          'Back & Biceps',
+          'Legs',
+          'Shoulders',
+          'Arms',
+        ],
+      };
 
   UserModel _user = const UserModel(
     id: 'local-athlete',
@@ -26,36 +46,11 @@ class WorkoutProvider extends ChangeNotifier {
   // Program-Style state
   int _selectedWeek = 1;
   final int _totalProgramWeeks = 4;
-  List<brutl.ProgramDayModel> _programDays = [
-    brutl.ProgramDayModel(
-      id: 'day1',
-      weekNumber: 1,
-      dayNumber: 1,
-      splitName: 'Upper A',
-      exercises: [],
-    ),
-    brutl.ProgramDayModel(
-      id: 'day2',
-      weekNumber: 1,
-      dayNumber: 2,
-      splitName: 'Lower A',
-      exercises: [],
-    ),
-    brutl.ProgramDayModel(
-      id: 'day4',
-      weekNumber: 1,
-      dayNumber: 4,
-      splitName: 'Upper B',
-      exercises: [],
-    ),
-    brutl.ProgramDayModel(
-      id: 'day5',
-      weekNumber: 1,
-      dayNumber: 5,
-      splitName: 'Lower B',
-      exercises: [],
-    ),
-  ];
+  String _selectedWorkoutSplit = _defaultWorkoutSplit;
+  List<String> _masterTemplate = const <String>[];
+  Map<String, brutl.ProgramDayModel> _selectedWeekOverrides =
+      <String, brutl.ProgramDayModel>{};
+  List<brutl.ProgramDayModel> _programDays = <brutl.ProgramDayModel>[];
 
   WorkoutPlanModel _workoutPlan = WorkoutPlanModel.defaultPlan();
   final HomeUiModel _homeUi = const HomeUiModel(
@@ -100,16 +95,21 @@ class WorkoutProvider extends ChangeNotifier {
   int get totalProgramWeeks => _totalProgramWeeks;
 
   List<brutl.ProgramDayModel> get currentWeekWorkouts {
-    final list = _programDays
+    final baseList = _programDays
         .where((day) => day.weekNumber == _selectedWeek)
         .toList();
-    list.sort((a, b) => a.dayNumber.compareTo(b.dayNumber));
-    return list;
+    baseList.sort((a, b) => a.dayNumber.compareTo(b.dayNumber));
+    return baseList.map((baseDay) {
+      final override = _selectedWeekOverrides[baseDay.id];
+      if (override == null) return baseDay;
+      return baseDay.copyWith(exercises: override.exercises);
+    }).toList(growable: false);
   }
 
   void selectWeek(int week) {
     if (_selectedWeek != week) {
       _selectedWeek = week;
+      unawaited(_loadWeekOverridesForSelectedWeek());
       notifyListeners();
     }
   }
@@ -138,6 +138,7 @@ class WorkoutProvider extends ChangeNotifier {
 
     final prefs = await SharedPreferences.getInstance();
     await _loadUser(prefs);
+    await _loadWorkoutSplit(prefs);
     await _loadWorkoutPlan(prefs);
     _workoutHistoryBox = await Hive.openBox<dynamic>(_workoutHistoryBoxName);
     
@@ -149,6 +150,7 @@ class WorkoutProvider extends ChangeNotifier {
     
     // Initial load of program days
     refreshProgramDays();
+    await _loadWeekOverridesForSelectedWeek();
     
     // Auto-refresh program days if exercises box changes
     final exercisesBox = Hive.box<String>('exercises');
@@ -175,12 +177,17 @@ class WorkoutProvider extends ChangeNotifier {
                 final calorieGoal =
                     (data['targetCalories'] as num?)?.toInt() ??
                     _user.dailyCalorieGoal;
+                final remoteSplit =
+                    (data['workoutSplit'] as String?) ??
+                    (data['split'] as String?) ??
+                    _selectedWorkoutSplit;
 
                 _user = _user.copyWith(
                   name: displayName.isNotEmpty ? displayName : _user.name,
                   dailyStepGoal: stepGoal,
                   dailyCalorieGoal: calorieGoal,
                 );
+                _setWorkoutSplit(remoteSplit, persist: true);
                 unawaited(prefs.setString(_userPrefsKey, _user.toRawJson()));
                 notifyListeners();
               }
@@ -249,16 +256,133 @@ class WorkoutProvider extends ChangeNotifier {
     );
   }
 
+  Future<void> _loadWorkoutSplit(SharedPreferences prefs) async {
+    final firebaseUser = FirebaseAuth.instance.currentUser;
+    if (firebaseUser != null) {
+      try {
+        final snapshot = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(firebaseUser.uid)
+            .get();
+        if (snapshot.exists && snapshot.data() != null) {
+          final data = snapshot.data()!;
+          final remoteTemplate = (data['workoutMasterTemplate'] as List<dynamic>?)
+              ?.map((item) => item.toString())
+              .where((item) => item.trim().isNotEmpty)
+              .toList(growable: false);
+          if (remoteTemplate != null && remoteTemplate.isNotEmpty) {
+            _masterTemplate = remoteTemplate;
+            _selectedWorkoutSplit = _defaultWorkoutSplit;
+            _programDays = _buildProgramDaysFromTemplate(_masterTemplate);
+            await prefs.setString('brutl_workout_split', _selectedWorkoutSplit);
+            return;
+          }
+          final remoteSplit =
+              (data['workoutSplit'] as String?) ??
+              (data['split'] as String?) ??
+              _defaultWorkoutSplit;
+          _setWorkoutSplit(remoteSplit, persist: true);
+          await prefs.setString('brutl_workout_split', _selectedWorkoutSplit);
+          return;
+        }
+      } catch (error) {
+        debugPrint('WORKOUT_PROVIDER: Failed to load workout split — $error');
+      }
+    }
+
+    final cachedSplit = prefs.getString('brutl_workout_split');
+    _setWorkoutSplit(cachedSplit ?? _defaultWorkoutSplit, persist: false);
+  }
+
   void refreshProgramDays() {
     final dbService = DatabaseService();
     final updatedDays = _programDays.map((day) {
+      final isRestDay = day.splitName.toLowerCase() == 'rest';
       return day.copyWith(
-        exercises: dbService.getExercisesForSplit(day.splitName),
+        exercises: isRestDay ? const [] : dbService.getExercisesForSplit(day.splitName),
       );
     }).toList();
     
     _programDays = updatedDays;
     notifyListeners();
+  }
+
+  void _setWorkoutSplit(String split, {required bool persist}) {
+    final normalizedSplit = _splitTemplates.containsKey(split)
+        ? split
+        : _defaultWorkoutSplit;
+    if (_selectedWorkoutSplit == normalizedSplit && _programDays.isNotEmpty) {
+      return;
+    }
+    _selectedWorkoutSplit = normalizedSplit;
+    _masterTemplate = (_splitTemplates[_selectedWorkoutSplit] ??
+            _splitTemplates[_defaultWorkoutSplit]!)
+        .toList(growable: false);
+    _programDays = _buildProgramDaysFromTemplate(_masterTemplate);
+    if (persist) {
+      unawaited(_persistSelectedSplit(_selectedWorkoutSplit));
+      unawaited(_persistMasterTemplate(_masterTemplate));
+    }
+  }
+
+  List<brutl.ProgramDayModel> _buildProgramDaysFromTemplate(List<String> days) {
+    final generated = <brutl.ProgramDayModel>[];
+    for (var week = 1; week <= _totalProgramWeeks; week++) {
+      for (var index = 0; index < days.length; index++) {
+        generated.add(
+          brutl.ProgramDayModel(
+            id: 'week${week}_day${index + 1}',
+            weekNumber: week,
+            dayNumber: index + 1,
+            splitName: days[index],
+            exercises: const [],
+          ),
+        );
+      }
+    }
+    return generated;
+  }
+
+  Future<void> _persistSelectedSplit(String split) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('brutl_workout_split', split);
+  }
+
+  Future<void> _persistMasterTemplate(List<String> template) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    await FirebaseFirestore.instance.collection('users').doc(uid).set({
+      'workoutMasterTemplate': template,
+    }, SetOptions(merge: true));
+  }
+
+  Future<void> _loadWeekOverridesForSelectedWeek() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) {
+      _selectedWeekOverrides = <String, brutl.ProgramDayModel>{};
+      notifyListeners();
+      return;
+    }
+
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .collection('workout_day_logs')
+          .where('weekNumber', isEqualTo: _selectedWeek)
+          .get();
+
+      final overrides = <String, brutl.ProgramDayModel>{};
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+        final programDay = brutl.ProgramDayModel.fromJson(data);
+        overrides[programDay.id] = programDay;
+      }
+      _selectedWeekOverrides = overrides;
+      notifyListeners();
+    } catch (error) {
+      debugPrint('WORKOUT_PROVIDER: Failed loading week overrides — $error');
+    }
   }
 
   Future<void> refreshLastWorkoutInsights() async {
@@ -297,7 +421,25 @@ class WorkoutProvider extends ChangeNotifier {
 
     final key = 'session_${date.toIso8601String()}';
     await box.put(key, sessionPayload);
+    await _persistDailyLogIfAvailable(date);
     await refreshLastWorkoutInsights();
+  }
+
+  Future<void> _persistDailyLogIfAvailable(DateTime date) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    final selectedDay = currentWeekWorkouts.where((day) {
+      return day.dayNumber == date.weekday;
+    }).toList();
+    if (selectedDay.isEmpty) return;
+    final day = selectedDay.first;
+
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('workout_day_logs')
+        .doc(day.id)
+        .set(day.toJson(), SetOptions(merge: true));
   }
 
   Future<void> updateUser({

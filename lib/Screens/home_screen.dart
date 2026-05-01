@@ -190,35 +190,63 @@ class _HomeTab extends StatelessWidget {
                 // ── Split Dashboard: Steps (left) + Calories (right) ──
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: IntrinsicHeight(
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        // STEPS CARD — with error/permission fallback
-                        Expanded(
-                          flex: 6,
-                          child: _buildStepsCard(
-                            context,
-                            stepProvider,
-                            workoutProvider,
+                  child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                    stream: FirebaseAuth.instance.currentUser == null
+                        ? null
+                        : FirebaseFirestore.instance
+                              .collection('users')
+                              .doc(FirebaseAuth.instance.currentUser!.uid)
+                              .snapshots(),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const SizedBox(
+                          height: 170,
+                          child: Center(
+                            child: CircularProgressIndicator(
+                              color: Color(0xFFFF3D00),
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 12),
+                        );
+                      }
+                      final remoteData = snapshot.data?.data();
+                      final remoteSteps =
+                          (remoteData?['dailySteps'] as num?)?.toInt();
+                      final remoteCalories =
+                          (remoteData?['dailyCaloriesBurned'] as num?)
+                              ?.toDouble();
+                      final steps = remoteSteps ?? stepProvider.currentSteps;
+                      final calories =
+                          remoteCalories ?? stepProvider.caloriesBurned;
 
-                        // CALORIES CARD — taps to Workout tab
-                        Expanded(
-                          flex: 4,
-                          child: CaloriesCard(
-                            caloriesBurned: stepProvider.caloriesBurned,
-                            calorieGoal: workoutProvider.user.dailyCalorieGoal,
-                            caloriesLabel: workoutProvider.homeUi.caloriesLabel,
-                            caloriesUnitLabel:
-                                workoutProvider.homeUi.caloriesUnitLabel,
-                            onTap: onCaloriesTap,
-                          ),
+                      return IntrinsicHeight(
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Expanded(
+                              flex: 6,
+                              child: _buildStepsCard(
+                                context,
+                                stepProvider,
+                                workoutProvider,
+                                steps,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              flex: 4,
+                              child: CaloriesCard(
+                                caloriesBurned: calories.clamp(0, 5000),
+                                calorieGoal: workoutProvider.user.dailyCalorieGoal,
+                                caloriesLabel: workoutProvider.homeUi.caloriesLabel,
+                                caloriesUnitLabel:
+                                    workoutProvider.homeUi.caloriesUnitLabel,
+                                onTap: onCaloriesTap,
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
+                      );
+                    },
                   ),
                 ),
 
@@ -296,6 +324,7 @@ class _HomeTab extends StatelessWidget {
     BuildContext context,
     StepProvider stepProvider,
     WorkoutProvider workoutProvider,
+    int streamSteps,
   ) {
     // ── Sensor error or permission issue → show fallback card ──
     if (stepProvider.sensorError != null || !stepProvider.hasPermission) {
@@ -310,7 +339,7 @@ class _HomeTab extends StatelessWidget {
     }
 
     return StepsCard(
-      currentSteps: stepProvider.currentSteps,
+      currentSteps: streamSteps,
       goalSteps: workoutProvider.user.dailyStepGoal,
       stepsLabel: workoutProvider.homeUi.stepsLabel,
       stepsUnitLabel: workoutProvider.homeUi.stepsUnitLabel,

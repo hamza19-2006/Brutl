@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -20,39 +22,10 @@ import 'services/background_service.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
-  await Hive.initFlutter();
-  await Hive.openBox<String>('exercises');
-  await Hive.openBox<int>('steps_history');
-
-  // ── Initialize Workmanager for silent background step sync ──
-  await Workmanager().initialize(callbackDispatcher);
-
-  // Register a periodic task that runs approximately every 15 minutes.
-  // Android enforces a minimum of 15 minutes for periodic tasks.
-  await Workmanager().registerPeriodicTask(
-    kBrutlStepSyncTask,
-    kBrutlStepSyncTask,
-    frequency: const Duration(minutes: 15),
-    constraints: Constraints(
-      networkType: NetworkType.notRequired,
-      requiresBatteryNotLow: false,
-      requiresCharging: false,
-      requiresDeviceIdle: false,
-    ),
-    existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
-    backoffPolicy: BackoffPolicy.linear,
-    backoffPolicyDelay: const Duration(minutes: 10),
-  );
-  debugPrint(
-    'BRUTL_STEPS: Workmanager initialized & periodic task registered.',
-  );
 
   final workoutProvider = WorkoutProvider();
   final stepProvider = StepProvider();
   final workoutNutritionProvider = WorkoutNutritionProvider();
-  await workoutProvider.initialize();
-  await stepProvider.initialize();
-  await workoutNutritionProvider.initialize();
 
   runApp(
     MultiProvider(
@@ -66,9 +39,66 @@ Future<void> main() async {
           value: workoutNutritionProvider,
         ),
       ],
-      child: const BrutlApp(),
+      child: const BrutlAppBootstrap(),
     ),
   );
+}
+
+class BrutlAppBootstrap extends StatefulWidget {
+  const BrutlAppBootstrap({super.key});
+
+  @override
+  State<BrutlAppBootstrap> createState() => _BrutlAppBootstrapState();
+}
+
+class _BrutlAppBootstrapState extends State<BrutlAppBootstrap> {
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_warmupServices());
+  }
+
+  Future<void> _warmupServices() async {
+    try {
+      await Hive.initFlutter();
+      await Hive.openBox<String>('exercises');
+      await Hive.openBox<int>('steps_history');
+
+      await Workmanager().initialize(callbackDispatcher);
+      await Workmanager().registerPeriodicTask(
+        kBrutlStepSyncTask,
+        kBrutlStepSyncTask,
+        frequency: const Duration(minutes: 15),
+        constraints: Constraints(
+          networkType: NetworkType.notRequired,
+          requiresBatteryNotLow: false,
+          requiresCharging: false,
+          requiresDeviceIdle: false,
+        ),
+        existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
+        backoffPolicy: BackoffPolicy.linear,
+        backoffPolicyDelay: const Duration(minutes: 10),
+      );
+      debugPrint(
+        'BRUTL_STEPS: Workmanager initialized & periodic task registered.',
+      );
+
+      if (!mounted) return;
+      final workoutProvider = context.read<WorkoutProvider>();
+      final stepProvider = context.read<StepProvider>();
+      final workoutNutritionProvider = context.read<WorkoutNutritionProvider>();
+      await workoutProvider.initialize();
+      await stepProvider.initialize();
+      await workoutNutritionProvider.initialize();
+    } catch (error) {
+      debugPrint('BRUTL_BOOT: Startup warmup failed — $error');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return const BrutlApp();
+  }
 }
 
 class BrutlApp extends StatelessWidget {
@@ -124,7 +154,17 @@ class AuthGate extends StatelessWidget {
 
                 if (isProfileComplete) {
                   // ── Permission gate: check if step permission is granted ──
-                  final stepProvider = context.read<StepProvider>();
+                  final stepProvider = context.watch<StepProvider>();
+                  if (!stepProvider.isInitialized) {
+                    return const Scaffold(
+                      backgroundColor: Color(0xFF0A0A0A),
+                      body: Center(
+                        child: CircularProgressIndicator(
+                          color: Color(0xFFFF3D00),
+                        ),
+                      ),
+                    );
+                  }
                   if (!stepProvider.hasPermission) {
                     return const PermissionGateScreen();
                   }

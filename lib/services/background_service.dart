@@ -12,7 +12,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:pedometer/pedometer.dart';
@@ -33,10 +32,9 @@ void callbackDispatcher() {
       // ── 1. Read persisted baseline ─────────────────────────────────────
       final prefs = await SharedPreferences.getInstance();
       final today = _bgTodayStamp();
-      final storedDate = prefs.getString('brutl_step_baseline_date') ?? '';
-      int baselineRaw = prefs.getInt('brutl_step_baseline_raw') ?? 0;
+      final storedDate = prefs.getString('last_saved_date') ?? '';
+      int initialHardwareSteps = prefs.getInt('initial_hardware_steps') ?? 0;
       int latestRaw = prefs.getInt('brutl_step_latest_raw') ?? 0;
-      int carryOver = prefs.getInt('brutl_step_carry_over') ?? 0;
 
       // ── 2. Read current hardware step count ────────────────────────────
       int currentRaw;
@@ -54,10 +52,7 @@ void callbackDispatcher() {
       // ── 3. Handle midnight rollover ────────────────────────────────────
       if (storedDate != today && storedDate.isNotEmpty) {
         // Save yesterday's final count to Hive.
-        final yesterdaySteps = math.max(
-          0,
-          (latestRaw - baselineRaw) + carryOver,
-        );
+        final yesterdaySteps = (latestRaw - initialHardwareSteps).clamp(0, 1000000);
         if (yesterdaySteps > 0) {
           prefs.setInt('brutl_pending_hive_steps_$storedDate', yesterdaySteps);
           debugPrint(
@@ -66,14 +61,12 @@ void callbackDispatcher() {
         }
 
         // Reset baseline for new day ONLY AFTER Hive succeeds.
-        baselineRaw = currentRaw;
+        initialHardwareSteps = currentRaw;
         latestRaw = currentRaw;
-        carryOver = 0;
 
-        prefs.setString('brutl_step_baseline_date', today);
-        prefs.setInt('brutl_step_baseline_raw', baselineRaw);
+        prefs.setString('last_saved_date', today);
+        prefs.setInt('initial_hardware_steps', initialHardwareSteps);
         prefs.setInt('brutl_step_latest_raw', latestRaw);
-        prefs.setInt('brutl_step_carry_over', carryOver);
 
         debugPrint('BRUTL_STEPS: [BG] New day baseline set — raw=$currentRaw');
         return Future.value(true);
@@ -81,46 +74,41 @@ void callbackDispatcher() {
 
       // ── 4. First-ever launch (no stored date) ─────────────────────────
       if (storedDate.isEmpty) {
-        baselineRaw = currentRaw;
+        initialHardwareSteps = currentRaw;
         latestRaw = currentRaw;
-        carryOver = 0;
 
-        prefs.setString('brutl_step_baseline_date', today);
-        prefs.setInt('brutl_step_baseline_raw', baselineRaw);
+        prefs.setString('last_saved_date', today);
+        prefs.setInt('initial_hardware_steps', initialHardwareSteps);
         prefs.setInt('brutl_step_latest_raw', latestRaw);
-        prefs.setInt('brutl_step_carry_over', carryOver);
 
         debugPrint('BRUTL_STEPS: [BG] First launch — baseline=$currentRaw');
         return Future.value(true);
       }
 
       // ── 5. Reboot detection ────────────────────────────────────────────
-      if (currentRaw < baselineRaw) {
-        final stepsBeforeReboot = math.max(0, latestRaw - baselineRaw);
-        carryOver += stepsBeforeReboot;
-        baselineRaw = currentRaw;
+      if (currentRaw < initialHardwareSteps) {
+        initialHardwareSteps = currentRaw;
         debugPrint(
-          'BRUTL_STEPS: [BG] Reboot detected — carryOver=$carryOver, '
-          'newBaseline=$baselineRaw',
+          'BRUTL_STEPS: [BG] Reboot detected — '
+          'newInitial=$initialHardwareSteps',
         );
       }
 
       // ── 6. Calculate ──────────────────────────────────────────
       latestRaw = currentRaw;
-      final dailySteps = math.max(0, (latestRaw - baselineRaw) + carryOver);
+      final dailySteps = (latestRaw - initialHardwareSteps).clamp(0, 1000000);
 
       // ── 7. Stash today's partial steps in SharedPrefs ───────────────────
       prefs.setInt('brutl_pending_hive_steps_$today', dailySteps);
       
       // ── 8. Persist baselines to SharedPrefs ──────────────────────────────
-      prefs.setString('brutl_step_baseline_date', today);
-      prefs.setInt('brutl_step_baseline_raw', baselineRaw);
+      prefs.setString('last_saved_date', today);
+      prefs.setInt('initial_hardware_steps', initialHardwareSteps);
       prefs.setInt('brutl_step_latest_raw', latestRaw);
-      prefs.setInt('brutl_step_carry_over', carryOver);
 
       debugPrint(
         'BRUTL_STEPS: [BG] Task complete — raw=$currentRaw, '
-        'baseline=$baselineRaw, carry=$carryOver, daily=$dailySteps',
+        'initial=$initialHardwareSteps, daily=$dailySteps',
       );
       return Future.value(true);
     } catch (e, stack) {

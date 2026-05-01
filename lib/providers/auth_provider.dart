@@ -159,6 +159,27 @@ class BrutlAuthProvider extends ChangeNotifier {
     }
   }
 
+  /// Send password reset email to user
+  ///
+  /// This method sends a password reset email using Firebase Auth.
+  /// User will receive an email with a link to reset their password.
+  /// After clicking the link and resetting, they can log in with new password.
+  Future<void> sendPasswordResetEmail({required String email}) async {
+    _setLoading(true);
+    _setError(null);
+    try {
+      await _auth.sendPasswordResetEmail(email: email.trim());
+    } on FirebaseAuthException catch (error) {
+      _setError(_mapAuthException(error));
+      rethrow;
+    } catch (_) {
+      _setError('Unable to send reset email. Please try again.');
+      rethrow;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
   void _setLoading(bool value) {
     if (isLoading == value) {
       return;

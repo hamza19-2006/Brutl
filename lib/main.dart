@@ -12,6 +12,7 @@ import 'Screens/home_screen.dart';
 import 'Screens/onboarding/onboarding_screen.dart';
 import 'core/theme/app_theme.dart';
 import 'providers/auth_provider.dart';
+import 'providers/auth_validation_provider.dart';
 import 'providers/health_provider.dart';
 import 'providers/workout_nutrition_provider.dart';
 import 'providers/workout_provider.dart';
@@ -32,6 +33,9 @@ class BrutlAppBootstrap extends StatelessWidget {
       providers: [
         ChangeNotifierProvider<BrutlAuthProvider>(
           create: (_) => BrutlAuthProvider(),
+        ),
+        ChangeNotifierProvider<AuthValidationProvider>(
+          create: (_) => AuthValidationProvider(),
         ),
         ChangeNotifierProvider<WorkoutProvider>(
           create: (_) => WorkoutProvider(),

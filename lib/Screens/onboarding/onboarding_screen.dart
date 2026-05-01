@@ -99,7 +99,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       case 'Bro Split (1 muscle per day)':
         return <String>['Chest ', 'Back ', 'Legs', 'Shoulders', 'Arms'];
       case 'Upper, Lower, Rest, Repeat':
-        return <String>['Upper Body', 'Lower Body', 'Rest Day', 'Repeat'];
+        return <String>['Upper Body', 'Lower Body', 'Upper Body', 'Lower Body'];
       case 'Push, Pull, Legs, Upper, Lower':
         return <String>[
           'Chest & Triceps',

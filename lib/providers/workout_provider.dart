@@ -22,11 +22,11 @@ class WorkoutProvider extends ChangeNotifier {
     name: 'Brutl',
     dailyCalorieGoal: 500,
   );
-  
+
   // Program-Style state
   int _selectedWeek = 1;
   final int _totalProgramWeeks = 4;
-  final List<brutl.ProgramDayModel> _programDays = [
+  List<brutl.ProgramDayModel> _programDays = [
     brutl.ProgramDayModel(
       id: 'day1',
       weekNumber: 1,
@@ -87,6 +87,7 @@ class WorkoutProvider extends ChangeNotifier {
   Box<dynamic>? _workoutHistoryBox;
 
   StreamSubscription<DocumentSnapshot>? _userStreamSubscription;
+  StreamSubscription<BoxEvent>? _exercisesBoxSubscription;
 
   UserModel get user => _user;
   WorkoutPlanModel get workoutPlan => _workoutPlan;
@@ -99,7 +100,9 @@ class WorkoutProvider extends ChangeNotifier {
   int get totalProgramWeeks => _totalProgramWeeks;
 
   List<brutl.ProgramDayModel> get currentWeekWorkouts {
-    final list = _programDays.where((day) => day.weekNumber == _selectedWeek).toList();
+    final list = _programDays
+        .where((day) => day.weekNumber == _selectedWeek)
+        .toList();
     list.sort((a, b) => a.dayNumber.compareTo(b.dayNumber));
     return list;
   }
@@ -137,7 +140,21 @@ class WorkoutProvider extends ChangeNotifier {
     await _loadUser(prefs);
     await _loadWorkoutPlan(prefs);
     _workoutHistoryBox = await Hive.openBox<dynamic>(_workoutHistoryBoxName);
+    
+    // Sync exercises from server so reinstalling doesn't lose data
+    final dbService = DatabaseService();
+    await dbService.syncExercisesFromFirestore();
+    
     await refreshLastWorkoutInsights();
+    
+    // Initial load of program days
+    refreshProgramDays();
+    
+    // Auto-refresh program days if exercises box changes
+    final exercisesBox = Hive.box<String>('exercises');
+    _exercisesBoxSubscription = exercisesBox.watch().listen((event) {
+      refreshProgramDays();
+    });
 
     // Subscribe to Firestore for live user data (step goal, display name, calorie goal)
     final firebaseUser = FirebaseAuth.instance.currentUser;
@@ -146,26 +163,33 @@ class WorkoutProvider extends ChangeNotifier {
           .collection('users')
           .doc(firebaseUser.uid)
           .snapshots()
-          .listen((snapshot) {
-            if (snapshot.exists && snapshot.data() != null) {
-              final data = snapshot.data()!;
-              final displayName =
-                  (data['displayName'] as String?) ?? _user.name;
-              final stepGoal =
-                  (data['dailySteps'] as num?)?.toInt() ?? _user.dailyStepGoal;
-              final calorieGoal =
-                  (data['targetCalories'] as num?)?.toInt() ??
-                  _user.dailyCalorieGoal;
+          .listen(
+            (snapshot) {
+              if (snapshot.exists && snapshot.data() != null) {
+                final data = snapshot.data()!;
+                final displayName =
+                    (data['displayName'] as String?) ?? _user.name;
+                final stepGoal =
+                    (data['dailySteps'] as num?)?.toInt() ??
+                    _user.dailyStepGoal;
+                final calorieGoal =
+                    (data['targetCalories'] as num?)?.toInt() ??
+                    _user.dailyCalorieGoal;
 
-              _user = _user.copyWith(
-                name: displayName.isNotEmpty ? displayName : _user.name,
-                dailyStepGoal: stepGoal,
-                dailyCalorieGoal: calorieGoal,
-              );
-              unawaited(prefs.setString(_userPrefsKey, _user.toRawJson()));
-              notifyListeners();
-            }
-          });
+                _user = _user.copyWith(
+                  name: displayName.isNotEmpty ? displayName : _user.name,
+                  dailyStepGoal: stepGoal,
+                  dailyCalorieGoal: calorieGoal,
+                );
+                unawaited(prefs.setString(_userPrefsKey, _user.toRawJson()));
+                notifyListeners();
+              }
+            },
+            onError: (Object error) {
+              debugPrint('WORKOUT_PROVIDER: Firestore stream error — $error');
+              // Stream will automatically retry on transient errors
+            },
+          );
     }
 
     _isInitialized = true;
@@ -223,6 +247,18 @@ class WorkoutProvider extends ChangeNotifier {
       _workoutPlanPrefsKey,
       jsonEncode(_workoutPlan.toJson()),
     );
+  }
+
+  void refreshProgramDays() {
+    final dbService = DatabaseService();
+    final updatedDays = _programDays.map((day) {
+      return day.copyWith(
+        exercises: dbService.getExercisesForSplit(day.splitName),
+      );
+    }).toList();
+    
+    _programDays = updatedDays;
+    notifyListeners();
   }
 
   Future<void> refreshLastWorkoutInsights() async {
@@ -349,6 +385,7 @@ class WorkoutProvider extends ChangeNotifier {
   @override
   void dispose() {
     _userStreamSubscription?.cancel();
+    _exercisesBoxSubscription?.cancel();
     super.dispose();
   }
 }

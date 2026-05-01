@@ -141,9 +141,7 @@ class StepProvider extends ChangeNotifier {
     _isListening = _sensorService.isListening;
 
     if (_sensorError != null) {
-      debugPrint(
-        'BRUTL_STEPS: Sensor service reported error — $_sensorError',
-      );
+      debugPrint('BRUTL_STEPS: Sensor service reported error — $_sensorError');
       notifyListeners();
       return;
     }
@@ -154,8 +152,19 @@ class StepProvider extends ChangeNotifier {
       onError: (Object error) {
         _sensorError = error.toString();
         _isListening = false;
-        debugPrint('BRUTL_STEPS: Stream error — $error');
+        debugPrint(
+          'BRUTL_STEPS: Stream error — $error — attempting automatic recovery',
+        );
         notifyListeners();
+
+        // Attempt automatic recovery after 5 seconds
+        Future<void>.delayed(const Duration(seconds: 5)).then((_) async {
+          if (_hasPermission && !_isListening) {
+            debugPrint('BRUTL_STEPS: Attempting sensor recovery...');
+            await _startSensorListening();
+            notifyListeners();
+          }
+        });
       },
     );
   }
@@ -195,7 +204,9 @@ class StepProvider extends ChangeNotifier {
     final kg = unit.toLowerCase() == 'lbs' ? weight * 0.453592 : weight;
     if (kg == _userWeightKg) return;
     _userWeightKg = kg > 0 ? kg : 70.0;
-    debugPrint('BRUTL_STEPS: User weight set to ${_userWeightKg.toStringAsFixed(1)} kg');
+    debugPrint(
+      'BRUTL_STEPS: User weight set to ${_userWeightKg.toStringAsFixed(1)} kg',
+    );
 
     // Recalculate calories with same step count — only notify if we have steps.
     if (_currentSteps > 0) {

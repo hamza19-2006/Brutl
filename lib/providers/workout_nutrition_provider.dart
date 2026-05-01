@@ -139,14 +139,22 @@ class WorkoutNutritionProvider extends ChangeNotifier {
           .collection('users')
           .doc(user.uid)
           .snapshots()
-          .listen((snapshot) {
-            if (snapshot.exists && snapshot.data() != null) {
-              final brutlUser = BrutlUser.fromJson(snapshot.data()!);
-              _applyUserData(brutlUser);
-              _applyRemoteWorkoutTimestamp(snapshot.data()!);
-              notifyListeners();
-            }
-          });
+          .listen(
+            (snapshot) {
+              if (snapshot.exists && snapshot.data() != null) {
+                final brutlUser = BrutlUser.fromJson(snapshot.data()!);
+                _applyUserData(brutlUser);
+                _applyRemoteWorkoutTimestamp(snapshot.data()!);
+                notifyListeners();
+              }
+            },
+            onError: (Object error) {
+              debugPrint(
+                'WORKOUT_NUTRITION_PROVIDER: Firestore stream error — $error',
+              );
+              // Maintains last-known state; stream will auto-retry on transient errors
+            },
+          );
     } else {
       _applyEmptyState();
     }

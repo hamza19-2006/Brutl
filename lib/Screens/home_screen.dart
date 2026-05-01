@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'workout_screen.dart';
 import '../providers/health_provider.dart';
 import '../providers/workout_provider.dart';
+import '../services/database_service.dart';
 import '../widgets/biometric_card.dart';
 import '../widgets/exercise_highlight_card.dart';
 import '../widgets/header_widget.dart';
@@ -47,12 +48,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   /// When the user returns from background, force-refresh the step count
   /// so the UI is instantly up-to-date without waiting for the stream.
+  /// Also triggers pending exercise sync to server.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       debugPrint('BRUTL_STEPS: App resumed — triggering step refresh.');
       context.read<StepProvider>().refreshSteps();
       context.read<StepProvider>().recheckPermissionAndStart();
+
+      // Trigger pending exercise sync on app resume
+      _syncPendingExercises();
+    }
+  }
+
+  /// Syncs any pending exercises created offline to Firestore
+  Future<void> _syncPendingExercises() async {
+    try {
+      await DatabaseService().syncPendingExercises();
+      debugPrint('BRUTL: Pending exercises synced on app resume');
+    } catch (e) {
+      debugPrint('BRUTL: Failed to sync pending exercises — $e');
     }
   }
 
@@ -364,9 +379,9 @@ class _StepsErrorCard extends StatelessWidget {
                 child: Text(
                   'Steps',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: const Color(0xFF888888),
-                        fontSize: 11,
-                      ),
+                    color: const Color(0xFF888888),
+                    fontSize: 11,
+                  ),
                 ),
               ),
             ],
@@ -375,10 +390,10 @@ class _StepsErrorCard extends StatelessWidget {
           Text(
             message,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: const Color(0xFFBDBDBD),
-                  fontSize: 13,
-                  height: 1.4,
-                ),
+              color: const Color(0xFFBDBDBD),
+              fontSize: 13,
+              height: 1.4,
+            ),
           ),
           if (sensorError != null) ...[
             const SizedBox(height: 6),
@@ -387,9 +402,9 @@ class _StepsErrorCard extends StatelessWidget {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: const Color(0xFF666666),
-                    fontSize: 10,
-                  ),
+                color: const Color(0xFF666666),
+                fontSize: 10,
+              ),
             ),
           ],
           const SizedBox(height: 14),

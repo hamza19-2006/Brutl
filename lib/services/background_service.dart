@@ -15,7 +15,6 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
-import 'package:hive_flutter/hive_flutter.dart';
 import 'package:pedometer/pedometer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:workmanager/workmanager.dart';
@@ -44,35 +43,29 @@ void callbackDispatcher() {
       try {
         final event = await Pedometer.stepCountStream.first.timeout(
           const Duration(seconds: 5),
-          onTimeout: () => throw TimeoutException('Sensor timeout in BG'),
         );
         currentRaw = event.steps;
         debugPrint('BRUTL_STEPS: [BG] Sensor read — raw=$currentRaw');
       } catch (e) {
-        debugPrint('BRUTL_STEPS: [BG] Sensor read failed — $e');
-        // Cannot read sensor; nothing to sync. Still succeed so OS doesn't
-        // penalize our task scheduling.
-        return Future.value(true);
+        debugPrint('BRUTL_STEPS: [BG] Sensor read timeout/failed — $e. Falling back to latestRaw.');
+        currentRaw = latestRaw;
       }
 
       // ── 3. Handle midnight rollover ────────────────────────────────────
       if (storedDate != today && storedDate.isNotEmpty) {
         // Save yesterday's final count to Hive.
-        final yesterdaySteps = math.max(0, (latestRaw - baselineRaw) + carryOver);
+        final yesterdaySteps = math.max(
+          0,
+          (latestRaw - baselineRaw) + carryOver,
+        );
         if (yesterdaySteps > 0) {
-          try {
-            await Hive.initFlutter();
-            final box = await Hive.openBox<int>('steps_history');
-            await box.put(storedDate, yesterdaySteps);
-            debugPrint(
-              'BRUTL_STEPS: [BG] Midnight rollover — saved $storedDate = $yesterdaySteps',
-            );
-          } catch (e) {
-            debugPrint('BRUTL_STEPS: [BG] Hive write failed — $e');
-          }
+          prefs.setInt('brutl_pending_hive_steps_$storedDate', yesterdaySteps);
+          debugPrint(
+            'BRUTL_STEPS: [BG] Midnight rollover — staged $storedDate = $yesterdaySteps to SharedPreferences',
+          );
         }
 
-        // Reset baseline for new day.
+        // Reset baseline for new day ONLY AFTER Hive succeeds.
         baselineRaw = currentRaw;
         latestRaw = currentRaw;
         carryOver = 0;
@@ -112,26 +105,18 @@ void callbackDispatcher() {
         );
       }
 
-      // ── 6. Calculate & persist ─────────────────────────────────────────
+      // ── 6. Calculate ──────────────────────────────────────────
       latestRaw = currentRaw;
       final dailySteps = math.max(0, (latestRaw - baselineRaw) + carryOver);
 
+      // ── 7. Stash today's partial steps in SharedPrefs ───────────────────
+      prefs.setInt('brutl_pending_hive_steps_$today', dailySteps);
+      
+      // ── 8. Persist baselines to SharedPrefs ──────────────────────────────
       prefs.setString('brutl_step_baseline_date', today);
       prefs.setInt('brutl_step_baseline_raw', baselineRaw);
       prefs.setInt('brutl_step_latest_raw', latestRaw);
       prefs.setInt('brutl_step_carry_over', carryOver);
-
-      // ── 7. Persist to Hive for the steps history chart ─────────────────
-      try {
-        await Hive.initFlutter();
-        final box = await Hive.openBox<int>('steps_history');
-        await box.put(today, dailySteps);
-        debugPrint(
-          'BRUTL_STEPS: [BG] Persisted $today = $dailySteps steps to Hive.',
-        );
-      } catch (e) {
-        debugPrint('BRUTL_STEPS: [BG] Hive write failed — $e');
-      }
 
       debugPrint(
         'BRUTL_STEPS: [BG] Task complete — raw=$currentRaw, '

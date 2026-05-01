@@ -67,6 +67,7 @@ class StepSensorService {
     if (_isInitialized) return;
 
     _prefs = await SharedPreferences.getInstance();
+    await _syncStagedBackgroundStepsToHive();
     _hydrateFromStorage();
     _scheduleMidnightRollover();
 
@@ -310,6 +311,24 @@ class StepSensorService {
       await localStorage.saveDailySteps(dateKey, steps);
     } catch (e) {
       debugPrint('BRUTL_STEPS: Failed to save to Hive history — $e');
+    }
+  }
+
+  Future<void> _syncStagedBackgroundStepsToHive() async {
+    final prefs = _prefs;
+    if (prefs == null) return;
+    
+    final keys = prefs.getKeys().where((k) => k.startsWith('brutl_pending_hive_steps_')).toList();
+    if (keys.isEmpty) return;
+    
+    for (final key in keys) {
+      final dateString = key.replaceFirst('brutl_pending_hive_steps_', '');
+      final steps = prefs.getInt(key);
+      if (steps != null && steps > 0) {
+        await _saveToHiveHistory(dateString, steps);
+        debugPrint('BRUTL_STEPS: Synced background staged steps to Hive — $dateString = $steps');
+      }
+      await prefs.remove(key);
     }
   }
 

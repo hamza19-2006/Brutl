@@ -1,5 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
@@ -7,7 +5,6 @@ import 'package:provider/provider.dart';
 import 'workout_screen.dart';
 import '../providers/workout_provider.dart';
 import '../services/database_service.dart';
-import '../services/step_service.dart';
 import '../widgets/biometric_card.dart';
 import '../widgets/exercise_highlight_card.dart';
 import '../widgets/header_widget.dart';
@@ -192,71 +189,35 @@ class _HomeTab extends StatelessWidget {
                 // ── Split Dashboard: Steps (left) + Calories (right) ──
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-                    stream: FirebaseAuth.instance.currentUser == null
-                        ? null
-                        : FirebaseFirestore.instance
-                              .collection('users')
-                              .doc(FirebaseAuth.instance.currentUser!.uid)
-                              .snapshots(),
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting) {
-                        return const SizedBox(
-                          height: 170,
-                          child: Center(
-                            child: CircularProgressIndicator(
-                              color: Color(0xFFFF3D00),
-                            ),
+                  child: IntrinsicHeight(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Expanded(
+                          flex: 6,
+                          child: _buildStepsCard(
+                            context,
+                            workoutProvider,
+                            workoutProvider.currentDailySteps,
+                            workoutProvider.user.dailyStepGoal,
                           ),
-                        );
-                      }
-
-                      final remoteData = snapshot.data?.data();
-                      final service = StepService.instance;
-                      final serviceSteps = service.getTodaySteps();
-                      final serviceCalories = service.calculateCalories(
-                        serviceSteps,
-                      );
-                      final remoteSteps = (remoteData?['dailySteps'] as num?)
-                          ?.toInt();
-                      final remoteCalories =
-                          (remoteData?['dailyCaloriesBurned'] as num?)
-                              ?.toDouble();
-                      final currentSteps = remoteSteps ?? serviceSteps;
-                      final stepGoal = workoutProvider.user.dailyStepGoal;
-                      final calories = remoteCalories ?? serviceCalories;
-
-                      return IntrinsicHeight(
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Expanded(
-                              flex: 6,
-                              child: _buildStepsCard(
-                                context,
-                                workoutProvider,
-                                currentSteps,
-                                stepGoal,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              flex: 4,
-                              child: CaloriesCard(
-                                caloriesBurned: calories.clamp(0, 5000),
-                                calorieGoal:
-                                    workoutProvider.user.dailyCalorieGoal,
-                                caloriesLabel:
-                                    workoutProvider.homeUi.caloriesLabel,
-                                caloriesUnitLabel:
-                                    workoutProvider.homeUi.caloriesUnitLabel,
-                                onTap: onCaloriesTap,
-                              ),
-                            ),
-                          ],
                         ),
-                      );
-                    },
+                        const SizedBox(width: 12),
+                        Expanded(
+                          flex: 4,
+                          child: CaloriesCard(
+                            caloriesBurned: workoutProvider
+                                .currentDailyCaloriesBurned
+                                .clamp(0, 5000),
+                            calorieGoal: workoutProvider.user.dailyCalorieGoal,
+                            caloriesLabel: workoutProvider.homeUi.caloriesLabel,
+                            caloriesUnitLabel:
+                                workoutProvider.homeUi.caloriesUnitLabel,
+                            onTap: onCaloriesTap,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
 

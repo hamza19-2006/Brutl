@@ -118,7 +118,7 @@ class StepService {
         .doc(currentUser.uid)
         .set(<String, dynamic>{
           'baseline_steps': _baselineSteps,
-          'dailySteps': _todaySteps,
+          'currentSteps': _todaySteps,
           'dailyCaloriesBurned': calories,
           'lastStepResetDate': _lastSavedDate,
           'last_saved_date': _lastSavedDate,

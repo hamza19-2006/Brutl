@@ -34,9 +34,7 @@ class StepsCard extends StatelessWidget {
       onTap: () {
         Navigator.push(
           context,
-          MaterialPageRoute(
-            builder: (_) => const StepsHistoryScreen(),
-          ),
+          MaterialPageRoute(builder: (_) => const StepsHistoryScreen()),
         );
       },
       child: Container(
@@ -61,32 +59,29 @@ class StepsCard extends StatelessWidget {
                 Text(
                   stepsLabel,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: const Color(0xFF888888),
-                        fontSize: 11,
-                      ),
+                    color: const Color(0xFF888888),
+                    fontSize: 11,
+                  ),
                 ),
               ],
             ),
             const SizedBox(height: 10),
 
-            // Current steps
             Text(
-              formattedCurrent,
+              '$formattedCurrent / $formattedGoal',
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 22,
-                  ),
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+                fontSize: 22,
+              ),
             ),
             const SizedBox(height: 2),
-
-            // Goal
             Text(
-              '/ $formattedGoal $stepsUnitLabel',
+              stepsUnitLabel,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: const Color(0xFF666666),
-                    fontSize: 11,
-                  ),
+                color: const Color(0xFF666666),
+                fontSize: 11,
+              ),
             ),
             const SizedBox(height: 14),
 
@@ -125,10 +120,10 @@ class StepsCard extends StatelessWidget {
                 Text(
                   'View history',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: const Color(0xFFFF3D00),
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    color: const Color(0xFFFF3D00),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 const SizedBox(width: 3),
                 const Icon(
@@ -205,17 +200,17 @@ class CaloriesCard extends StatelessWidget {
                   Text(
                     '${caloriesBurned.round()}',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 16,
-                        ),
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 16,
+                    ),
                   ),
                   Text(
                     '/ $calorieGoal',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: const Color(0xFF666666),
-                          fontSize: 9,
-                        ),
+                      color: const Color(0xFF666666),
+                      fontSize: 9,
+                    ),
                   ),
                 ],
               ),
@@ -224,17 +219,17 @@ class CaloriesCard extends StatelessWidget {
             Text(
               caloriesLabel,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: const Color(0xFF888888),
-                    fontSize: 11,
-                  ),
+                color: const Color(0xFF888888),
+                fontSize: 11,
+              ),
             ),
             const SizedBox(height: 2),
             Text(
               caloriesUnitLabel,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: const Color(0xFF555555),
-                    fontSize: 9,
-                  ),
+                color: const Color(0xFF555555),
+                fontSize: 9,
+              ),
             ),
           ],
         ),

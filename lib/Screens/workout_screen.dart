@@ -1,5 +1,4 @@
-﻿import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+﻿import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -38,155 +37,125 @@ class WorkoutScreen extends StatelessWidget {
           );
         }
 
-        return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-          stream: FirebaseFirestore.instance
-              .collection('users')
-              .doc(currentUser.uid)
-              .snapshots(),
-          builder: (context, userSnapshot) {
-            if (userSnapshot.connectionState == ConnectionState.waiting) {
-              return const Scaffold(
-                backgroundColor: Color(0xFF0A0A0A),
-                body: Center(
-                  child: CircularProgressIndicator(color: Color(0xFFFF3D00)),
+        final splitName = workoutProvider.selectedWorkoutSplit;
+        final sharedCalories = workoutProvider.currentDailyCaloriesBurned
+            .round();
+        final syncedNutrition = nutritionProvider.nutrition.copyWith(
+          totalCal: sharedCalories,
+          goalCal: workoutProvider.user.dailyCalorieGoal,
+        );
+        final daysForSplit = getDaysForSplit(splitName);
+        final weekId = 'week_${workoutProvider.selectedWeek}';
+
+        return Scaffold(
+          backgroundColor: const Color(0xFF0A0A0A),
+          bottomNavigationBar: showBottomNavigationBar
+              ? BottomNavigationBar(
+                  currentIndex: nutritionProvider.bottomNavIndex,
+                  type: BottomNavigationBarType.fixed,
+                  backgroundColor: const Color(0xFF111111),
+                  selectedItemColor: const Color(0xFFFF3D00),
+                  unselectedItemColor: const Color(0xFF5A5A5A),
+                  selectedFontSize: 10,
+                  unselectedFontSize: 10,
+                  items: List.generate(
+                    nutritionProvider.ui.bottomNavigationLabels.length,
+                    (index) => BottomNavigationBarItem(
+                      icon: Icon(_iconForIndex(index)),
+                      label: nutritionProvider.ui.bottomNavigationLabels[index],
+                    ),
+                  ),
+                  onTap: nutritionProvider.setBottomNavIndex,
+                )
+              : null,
+          body: SafeArea(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+                  child: Text(
+                    nutritionProvider.ui.screenTitle,
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
-              );
-            }
-
-            final userData = userSnapshot.data?.data();
-            final splitName =
-                (userData?['workoutSplit'] as String?) ??
-                (userData?['workoutSplitTemplate'] as String?) ??
-                (userData?['split'] as String?) ??
-                'Full Body';
-            final sharedCalories =
-                (userData?['dailyCaloriesBurned'] as num?)?.toInt() ??
-                nutritionProvider.nutrition.totalCal;
-            final syncedNutrition = nutritionProvider.nutrition.copyWith(
-              totalCal: sharedCalories,
-              goalCal: workoutProvider.user.dailyCalorieGoal,
-            );
-            final daysForSplit = getDaysForSplit(splitName);
-            final weekId = 'week_${workoutProvider.selectedWeek}';
-
-            return Scaffold(
-              backgroundColor: const Color(0xFF0A0A0A),
-              bottomNavigationBar: showBottomNavigationBar
-                  ? BottomNavigationBar(
-                      currentIndex: nutritionProvider.bottomNavIndex,
-                      type: BottomNavigationBarType.fixed,
-                      backgroundColor: const Color(0xFF111111),
-                      selectedItemColor: const Color(0xFFFF3D00),
-                      unselectedItemColor: const Color(0xFF5A5A5A),
-                      selectedFontSize: 10,
-                      unselectedFontSize: 10,
-                      items: List.generate(
-                        nutritionProvider.ui.bottomNavigationLabels.length,
-                        (index) => BottomNavigationBarItem(
-                          icon: Icon(_iconForIndex(index)),
-                          label: nutritionProvider
-                              .ui
-                              .bottomNavigationLabels[index],
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: MacroDashboardCard(
+                    nutrition: syncedNutrition,
+                    ui: nutritionProvider.ui,
+                    onTap: () => _openMealLoggerSheet(context),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  height: 45,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    itemCount: workoutProvider.totalProgramWeeks,
+                    itemBuilder: (context, index) {
+                      final weekNumber = index + 1;
+                      final isSelected =
+                          workoutProvider.selectedWeek == weekNumber;
+                      return GestureDetector(
+                        onTap: () => workoutProvider.selectWeek(weekNumber),
+                        child: Container(
+                          margin: const EdgeInsets.only(right: 12),
+                          padding: const EdgeInsets.symmetric(horizontal: 24),
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: isSelected
+                                ? const Color(0xFFFF3D00)
+                                : const Color(0xFF1A1A1A),
+                            borderRadius: BorderRadius.circular(20),
+                            border: isSelected
+                                ? null
+                                : Border.all(color: const Color(0xFF2A2A2A)),
+                          ),
+                          child: Text(
+                            'Week $weekNumber',
+                            style: TextStyle(
+                              color: isSelected
+                                  ? const Color(0xFFFFFFFF)
+                                  : const Color(0xFF888888),
+                              fontWeight: isSelected
+                                  ? FontWeight.bold
+                                  : FontWeight.w500,
+                              fontSize: 14,
+                            ),
+                          ),
                         ),
-                      ),
-                      onTap: nutritionProvider.setBottomNavIndex,
-                    )
-                  : null,
-              body: SafeArea(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-                      child: Text(
-                        nutritionProvider.ui.screenTitle,
-                        style: Theme.of(context).textTheme.headlineSmall
-                            ?.copyWith(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                            ),
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: MacroDashboardCard(
-                        nutrition: syncedNutrition,
-                        ui: nutritionProvider.ui,
-                        onTap: () => _openMealLoggerSheet(context),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      height: 45,
-                      child: ListView.builder(
-                        scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        itemCount: workoutProvider.totalProgramWeeks,
-                        itemBuilder: (context, index) {
-                          final weekNumber = index + 1;
-                          final isSelected =
-                              workoutProvider.selectedWeek == weekNumber;
-                          return GestureDetector(
-                            onTap: () => workoutProvider.selectWeek(weekNumber),
-                            child: Container(
-                              margin: const EdgeInsets.only(right: 12),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 24,
-                              ),
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: isSelected
-                                    ? const Color(0xFFFF3D00)
-                                    : const Color(0xFF1A1A1A),
-                                borderRadius: BorderRadius.circular(20),
-                                border: isSelected
-                                    ? null
-                                    : Border.all(
-                                        color: const Color(0xFF2A2A2A),
-                                      ),
-                              ),
-                              child: Text(
-                                'Week $weekNumber',
-                                style: TextStyle(
-                                  color: isSelected
-                                      ? const Color(0xFFFFFFFF)
-                                      : const Color(0xFF888888),
-                                  fontWeight: isSelected
-                                      ? FontWeight.bold
-                                      : FontWeight.w500,
-                                  fontSize: 14,
-                                ),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Expanded(
-                      child: ListView.builder(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                        itemCount: daysForSplit.length,
-                        itemBuilder: (context, index) {
-                          final day = daysForSplit[index];
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: WorkoutCardWidget(
-                              weekId: weekId,
-                              dayId: 'day_${index + 1}',
-                              dayNumber: day['dayNumber'] as String,
-                              workoutName: day['name'] as String,
-                              uid: currentUser.uid,
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ],
+                      );
+                    },
+                  ),
                 ),
-              ),
-            );
-          },
+                const SizedBox(height: 16),
+                Expanded(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    itemCount: daysForSplit.length,
+                    itemBuilder: (context, index) {
+                      final day = daysForSplit[index];
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: WorkoutCardWidget(
+                          weekId: weekId,
+                          dayId: 'day_${index + 1}',
+                          dayNumber: day['dayNumber'] as String,
+                          workoutName: day['name'] as String,
+                          uid: currentUser.uid,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
         );
       },
     );

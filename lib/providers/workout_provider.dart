@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/database_service.dart';
+import '../services/step_service.dart';
 import '../models/brutl_models.dart' as brutl;
 import '../models/user_data_models.dart';
 
@@ -77,6 +78,8 @@ class WorkoutProvider extends ChangeNotifier {
   List<ExerciseModel> _topVolumeExercises = const <ExerciseModel>[];
   String? _lastSessionDayName;
   String? _highlightedExerciseName;
+  int _currentDailySteps = 0;
+  double _currentDailyCaloriesBurned = 0;
   bool _isLoading = true;
   bool _isInitialized = false;
   Box<dynamic>? _workoutHistoryBox;
@@ -90,20 +93,25 @@ class WorkoutProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get highlightedExerciseName => _highlightedExerciseName;
   HomeUiModel get homeUi => _homeUi;
+  int get currentDailySteps => _currentDailySteps;
+  double get currentDailyCaloriesBurned => _currentDailyCaloriesBurned;
 
   int get selectedWeek => _selectedWeek;
   int get totalProgramWeeks => _totalProgramWeeks;
+  String get selectedWorkoutSplit => _selectedWorkoutSplit;
 
   List<brutl.ProgramDayModel> get currentWeekWorkouts {
     final baseList = _programDays
         .where((day) => day.weekNumber == _selectedWeek)
         .toList();
     baseList.sort((a, b) => a.dayNumber.compareTo(b.dayNumber));
-    return baseList.map((baseDay) {
-      final override = _selectedWeekOverrides[baseDay.id];
-      if (override == null) return baseDay;
-      return baseDay.copyWith(exercises: override.exercises);
-    }).toList(growable: false);
+    return baseList
+        .map((baseDay) {
+          final override = _selectedWeekOverrides[baseDay.id];
+          if (override == null) return baseDay;
+          return baseDay.copyWith(exercises: override.exercises);
+        })
+        .toList(growable: false);
   }
 
   void selectWeek(int week) {
@@ -141,17 +149,24 @@ class WorkoutProvider extends ChangeNotifier {
     await _loadWorkoutSplit(prefs);
     await _loadWorkoutPlan(prefs);
     _workoutHistoryBox = await Hive.openBox<dynamic>(_workoutHistoryBoxName);
-    
+
+    // Seed dashboard stats from local pedometer cache until Firestore stream arrives.
+    final stepService = StepService.instance;
+    _currentDailySteps = stepService.getTodaySteps();
+    _currentDailyCaloriesBurned = stepService.calculateCalories(
+      _currentDailySteps,
+    );
+
     // Sync exercises from server so reinstalling doesn't lose data
     final dbService = DatabaseService();
     await dbService.syncExercisesFromFirestore();
-    
+
     await refreshLastWorkoutInsights();
-    
+
     // Initial load of program days
     refreshProgramDays();
     await _loadWeekOverridesForSelectedWeek();
-    
+
     // Auto-refresh program days if exercises box changes
     final exercisesBox = Hive.box<String>('exercises');
     _exercisesBoxSubscription = exercisesBox.watch().listen((event) {
@@ -172,11 +187,24 @@ class WorkoutProvider extends ChangeNotifier {
                 final displayName =
                     (data['displayName'] as String?) ?? _user.name;
                 final stepGoal =
-                    (data['dailySteps'] as num?)?.toInt() ??
+                    (data['dailyStepGoal'] as num?)?.toInt() ??
+                    (data['stepGoal'] as num?)?.toInt() ??
                     _user.dailyStepGoal;
                 final calorieGoal =
                     (data['targetCalories'] as num?)?.toInt() ??
                     _user.dailyCalorieGoal;
+                final remoteCurrentSteps =
+                    (data['currentSteps'] as num?)?.toInt() ??
+                    // Backward compatibility: if a separate step-goal field exists,
+                    // treat legacy `dailySteps` as current live steps.
+                    ((data.containsKey('dailyStepGoal') ||
+                            data.containsKey('stepGoal'))
+                        ? (data['dailySteps'] as num?)?.toInt()
+                        : null) ??
+                    _currentDailySteps;
+                final remoteCalories =
+                    (data['dailyCaloriesBurned'] as num?)?.toDouble() ??
+                    StepService.instance.calculateCalories(remoteCurrentSteps);
                 final remoteSplit =
                     (data['workoutSplit'] as String?) ??
                     (data['split'] as String?) ??
@@ -187,6 +215,12 @@ class WorkoutProvider extends ChangeNotifier {
                   dailyStepGoal: stepGoal,
                   dailyCalorieGoal: calorieGoal,
                 );
+                _currentDailySteps = remoteCurrentSteps < 0
+                    ? 0
+                    : remoteCurrentSteps;
+                _currentDailyCaloriesBurned = remoteCalories
+                    .clamp(0, 5000)
+                    .toDouble();
                 _setWorkoutSplit(remoteSplit, persist: true);
                 unawaited(prefs.setString(_userPrefsKey, _user.toRawJson()));
                 notifyListeners();
@@ -266,10 +300,11 @@ class WorkoutProvider extends ChangeNotifier {
             .get();
         if (snapshot.exists && snapshot.data() != null) {
           final data = snapshot.data()!;
-          final remoteTemplate = (data['workoutMasterTemplate'] as List<dynamic>?)
-              ?.map((item) => item.toString())
-              .where((item) => item.trim().isNotEmpty)
-              .toList(growable: false);
+          final remoteTemplate =
+              (data['workoutMasterTemplate'] as List<dynamic>?)
+                  ?.map((item) => item.toString())
+                  .where((item) => item.trim().isNotEmpty)
+                  .toList(growable: false);
           if (remoteTemplate != null && remoteTemplate.isNotEmpty) {
             _masterTemplate = remoteTemplate;
             _selectedWorkoutSplit = _defaultWorkoutSplit;
@@ -299,10 +334,12 @@ class WorkoutProvider extends ChangeNotifier {
     final updatedDays = _programDays.map((day) {
       final isRestDay = day.splitName.toLowerCase() == 'rest';
       return day.copyWith(
-        exercises: isRestDay ? const [] : dbService.getExercisesForSplit(day.splitName),
+        exercises: isRestDay
+            ? const []
+            : dbService.getExercisesForSplit(day.splitName),
       );
     }).toList();
-    
+
     _programDays = updatedDays;
     notifyListeners();
   }
@@ -315,9 +352,10 @@ class WorkoutProvider extends ChangeNotifier {
       return;
     }
     _selectedWorkoutSplit = normalizedSplit;
-    _masterTemplate = (_splitTemplates[_selectedWorkoutSplit] ??
-            _splitTemplates[_defaultWorkoutSplit]!)
-        .toList(growable: false);
+    _masterTemplate =
+        (_splitTemplates[_selectedWorkoutSplit] ??
+                _splitTemplates[_defaultWorkoutSplit]!)
+            .toList(growable: false);
     _programDays = _buildProgramDaysFromTemplate(_masterTemplate);
     if (persist) {
       unawaited(_persistSelectedSplit(_selectedWorkoutSplit));

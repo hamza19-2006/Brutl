@@ -180,13 +180,15 @@ class StepProvider extends ChangeNotifier {
       if (uid == null) return;
 
       await FirebaseFirestore.instance.collection('users').doc(uid).set({
-        'dailySteps': 0,
+        'currentSteps': 0,
         'dailyCaloriesBurned': 0,
         'lastStepResetDate': DateTime.now().toIso8601String(),
       }, SetOptions(merge: true));
       debugPrint('BRUTL_STEPS: Firebase daily counters reset at midnight.');
     } catch (error) {
-      debugPrint('BRUTL_STEPS: Failed to reset Firebase daily counters — $error');
+      debugPrint(
+        'BRUTL_STEPS: Failed to reset Firebase daily counters — $error',
+      );
     }
   }
 
@@ -208,7 +210,8 @@ class StepProvider extends ChangeNotifier {
 
   Future<void> _syncDailyStatsToFirebase() async {
     if (_currentSteps == _lastSyncedSteps) return;
-    if (_lastSyncedSteps >= 0 && (_currentSteps - _lastSyncedSteps).abs() < 25) {
+    if (_lastSyncedSteps >= 0 &&
+        (_currentSteps - _lastSyncedSteps).abs() < 25) {
       return;
     }
     final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -217,7 +220,7 @@ class StepProvider extends ChangeNotifier {
     try {
       final calories = caloriesBurned.round().clamp(0, 5000);
       await FirebaseFirestore.instance.collection('users').doc(uid).set({
-        'dailySteps': _currentSteps,
+        'currentSteps': _currentSteps,
         'dailyCaloriesBurned': calories,
       }, SetOptions(merge: true));
       _lastSyncedSteps = _currentSteps;

@@ -180,7 +180,8 @@ class _HomeTab extends StatelessWidget {
                       final remoteCalories =
                           (remoteData?['dailyCaloriesBurned'] as num?)
                               ?.toDouble();
-                      final steps = remoteSteps ?? serviceSteps;
+                      final currentSteps = remoteSteps ?? serviceSteps;
+                      final stepGoal = workoutProvider.user.dailyStepGoal;
                       final calories = remoteCalories ?? serviceCalories;
 
                       return IntrinsicHeight(
@@ -192,7 +193,8 @@ class _HomeTab extends StatelessWidget {
                               child: _buildStepsCard(
                                 context,
                                 workoutProvider,
-                                steps,
+                                currentSteps,
+                                stepGoal,
                               ),
                             ),
                             const SizedBox(width: 12),
@@ -278,11 +280,12 @@ class _HomeTab extends StatelessWidget {
   Widget _buildStepsCard(
     BuildContext context,
     WorkoutProvider workoutProvider,
-    int todaySteps,
+    int currentSteps,
+    int stepGoal,
   ) {
     return StepsCard(
-      currentSteps: todaySteps,
-      goalSteps: workoutProvider.user.dailyStepGoal,
+      currentSteps: currentSteps,
+      goalSteps: stepGoal,
       stepsLabel: workoutProvider.homeUi.stepsLabel,
       stepsUnitLabel: workoutProvider.homeUi.stepsUnitLabel,
     );

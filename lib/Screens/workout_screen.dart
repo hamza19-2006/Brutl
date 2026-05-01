@@ -54,10 +54,18 @@ class WorkoutScreen extends StatelessWidget {
             }
 
             final userData = userSnapshot.data?.data();
-            final splitName = (userData?['workoutSplit'] as String?) ??
+            final splitName =
+                (userData?['workoutSplit'] as String?) ??
                 (userData?['workoutSplitTemplate'] as String?) ??
                 (userData?['split'] as String?) ??
                 'Full Body';
+            final sharedCalories =
+                (userData?['dailyCaloriesBurned'] as num?)?.toInt() ??
+                nutritionProvider.nutrition.totalCal;
+            final syncedNutrition = nutritionProvider.nutrition.copyWith(
+              totalCal: sharedCalories,
+              goalCal: workoutProvider.user.dailyCalorieGoal,
+            );
             final daysForSplit = getDaysForSplit(splitName);
             final weekId = 'week_${workoutProvider.selectedWeek}';
 
@@ -76,7 +84,9 @@ class WorkoutScreen extends StatelessWidget {
                         nutritionProvider.ui.bottomNavigationLabels.length,
                         (index) => BottomNavigationBarItem(
                           icon: Icon(_iconForIndex(index)),
-                          label: nutritionProvider.ui.bottomNavigationLabels[index],
+                          label: nutritionProvider
+                              .ui
+                              .bottomNavigationLabels[index],
                         ),
                       ),
                       onTap: nutritionProvider.setBottomNavIndex,
@@ -90,7 +100,8 @@ class WorkoutScreen extends StatelessWidget {
                       padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
                       child: Text(
                         nutritionProvider.ui.screenTitle,
-                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        style: Theme.of(context).textTheme.headlineSmall
+                            ?.copyWith(
                               color: Colors.white,
                               fontWeight: FontWeight.w700,
                             ),
@@ -99,7 +110,7 @@ class WorkoutScreen extends StatelessWidget {
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       child: MacroDashboardCard(
-                        nutrition: nutritionProvider.nutrition,
+                        nutrition: syncedNutrition,
                         ui: nutritionProvider.ui,
                         onTap: () => _openMealLoggerSheet(context),
                       ),
@@ -113,12 +124,15 @@ class WorkoutScreen extends StatelessWidget {
                         itemCount: workoutProvider.totalProgramWeeks,
                         itemBuilder: (context, index) {
                           final weekNumber = index + 1;
-                          final isSelected = workoutProvider.selectedWeek == weekNumber;
+                          final isSelected =
+                              workoutProvider.selectedWeek == weekNumber;
                           return GestureDetector(
                             onTap: () => workoutProvider.selectWeek(weekNumber),
                             child: Container(
                               margin: const EdgeInsets.only(right: 12),
-                              padding: const EdgeInsets.symmetric(horizontal: 24),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 24,
+                              ),
                               alignment: Alignment.center,
                               decoration: BoxDecoration(
                                 color: isSelected
@@ -127,7 +141,9 @@ class WorkoutScreen extends StatelessWidget {
                                 borderRadius: BorderRadius.circular(20),
                                 border: isSelected
                                     ? null
-                                    : Border.all(color: const Color(0xFF2A2A2A)),
+                                    : Border.all(
+                                        color: const Color(0xFF2A2A2A),
+                                      ),
                               ),
                               child: Text(
                                 'Week $weekNumber',
@@ -135,7 +151,9 @@ class WorkoutScreen extends StatelessWidget {
                                   color: isSelected
                                       ? const Color(0xFFFFFFFF)
                                       : const Color(0xFF888888),
-                                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                                  fontWeight: isSelected
+                                      ? FontWeight.bold
+                                      : FontWeight.w500,
                                   fontSize: 14,
                                 ),
                               ),
@@ -198,40 +216,47 @@ class WorkoutScreen extends StatelessWidget {
 }
 
 List<Map<String, dynamic>> getDaysForSplit(String splitName) {
-  switch (splitName) {
-    case 'Push/Pull/Legs':
-      return <Map<String, dynamic>>[
-        {'dayNumber': 'Day 1', 'name': 'Push', 'exercises': 0},
-        {'dayNumber': 'Day 2', 'name': 'Pull', 'exercises': 0},
-        {'dayNumber': 'Day 3', 'name': 'Legs', 'exercises': 0},
-        {'dayNumber': 'Day 4', 'name': 'Push', 'exercises': 0},
-        {'dayNumber': 'Day 5', 'name': 'Pull', 'exercises': 0},
-        {'dayNumber': 'Day 6', 'name': 'Legs', 'exercises': 0},
+  final normalized = splitName.trim().toLowerCase();
+
+  List<String> dayNames;
+  switch (normalized) {
+    case 'push pull legs':
+    case 'push/pull/legs':
+    case 'push, pull, legs':
+    case 'push, pull, legs, repeat':
+    case 'ppl':
+      dayNames = <String>[
+        'Push (Chest, Shoulders, Triceps)',
+        'Pull (Back, Biceps, Rear Delts)',
+        'Legs (Quads, Hamstrings, Calves)',
+        'Push (Chest, Shoulders, Triceps)',
+        'Pull (Back, Biceps, Rear Delts)',
+        'Legs (Quads, Hamstrings, Calves)',
       ];
-    case 'Bro Split':
-      return <Map<String, dynamic>>[
-        {'dayNumber': 'Day 1', 'name': 'Chest', 'exercises': 0},
-        {'dayNumber': 'Day 2', 'name': 'Back', 'exercises': 0},
-        {'dayNumber': 'Day 3', 'name': 'Shoulder', 'exercises': 0},
-        {'dayNumber': 'Day 4', 'name': 'Arms', 'exercises': 0},
-        {'dayNumber': 'Day 5', 'name': 'Legs', 'exercises': 0},
-      ];
-    case 'Upper/Lower':
-      return <Map<String, dynamic>>[
-        {'dayNumber': 'Day 1', 'name': 'Upper A (Chest focused)', 'exercises': 0},
-        {'dayNumber': 'Day 2', 'name': 'Lower A (Quad focused)', 'exercises': 0},
-        {'dayNumber': 'Day 3', 'name': 'Upper B (Back focused)', 'exercises': 0},
-        {'dayNumber': 'Day 4', 'name': 'Lower B (Hamstring focused)', 'exercises': 0},
-      ];
-    case 'Full Body':
-      return <Map<String, dynamic>>[
-        {'dayNumber': 'Day 1', 'name': 'Full Body A', 'exercises': 0},
-        {'dayNumber': 'Day 2', 'name': 'Full Body B', 'exercises': 0},
-        {'dayNumber': 'Day 3', 'name': 'Full Body C', 'exercises': 0},
-      ];
+      break;
+    case 'bro split':
+    case 'bro split (1 muscle per day)':
+      dayNames = <String>['Chest', 'Back', 'Shoulders', 'Arms', 'Legs'];
+      break;
+    case 'upper/lower':
+    case 'upper lower':
+    case 'upper, lower, rest, repeat':
+      dayNames = <String>['Upper A', 'Lower A', 'Upper B', 'Lower B'];
+      break;
+    case 'full body':
+      dayNames = <String>['Full Body'];
+      break;
     default:
-      return <Map<String, dynamic>>[
-        {'dayNumber': 'Day 1', 'name': 'Full Body', 'exercises': 0},
-      ];
+      dayNames = <String>['Full Body'];
+      break;
   }
+
+  return List<Map<String, dynamic>>.generate(
+    dayNames.length,
+    (index) => <String, dynamic>{
+      'dayNumber': 'Day ${index + 1}',
+      'name': dayNames[index],
+      'exercises': 0,
+    },
+  );
 }

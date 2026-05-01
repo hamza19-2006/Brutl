@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
@@ -205,16 +207,7 @@ class _HomeTab extends StatelessWidget {
                         const SizedBox(width: 12),
                         Expanded(
                           flex: 4,
-                          child: CaloriesCard(
-                            caloriesBurned: workoutProvider
-                                .currentDailyCaloriesBurned
-                                .clamp(0, 5000),
-                            calorieGoal: workoutProvider.user.dailyCalorieGoal,
-                            caloriesLabel: workoutProvider.homeUi.caloriesLabel,
-                            caloriesUnitLabel:
-                                workoutProvider.homeUi.caloriesUnitLabel,
-                            onTap: onCaloriesTap,
-                          ),
+                          child: _buildCaloriesCard(context, workoutProvider),
                         ),
                       ],
                     ),
@@ -291,6 +284,49 @@ class _HomeTab extends StatelessWidget {
       goalSteps: stepGoal,
       stepsLabel: workoutProvider.homeUi.stepsLabel,
       stepsUnitLabel: workoutProvider.homeUi.stepsUnitLabel,
+    );
+  }
+
+  Widget _buildCaloriesCard(
+    BuildContext context,
+    WorkoutProvider workoutProvider,
+  ) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) {
+      return CaloriesCard(
+        caloriesBurned: workoutProvider.currentDailyCaloriesBurned.clamp(
+          0,
+          5000,
+        ),
+        calorieGoal: workoutProvider.user.dailyCalorieGoal,
+        caloriesLabel: workoutProvider.homeUi.caloriesLabel,
+        caloriesUnitLabel: workoutProvider.homeUi.caloriesUnitLabel,
+        onTap: onCaloriesTap,
+      );
+    }
+
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .snapshots(),
+      builder: (context, snapshot) {
+        final data = snapshot.data?.data();
+        final firestoreCalories = (data?['dailyCaloriesBurned'] as num?)
+            ?.toDouble();
+        final calories =
+            (firestoreCalories ?? workoutProvider.currentDailyCaloriesBurned)
+                .clamp(0, 5000)
+                .toDouble();
+
+        return CaloriesCard(
+          caloriesBurned: calories,
+          calorieGoal: workoutProvider.user.dailyCalorieGoal,
+          caloriesLabel: workoutProvider.homeUi.caloriesLabel,
+          caloriesUnitLabel: workoutProvider.homeUi.caloriesUnitLabel,
+          onTap: onCaloriesTap,
+        );
+      },
     );
   }
 }

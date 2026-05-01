@@ -6,10 +6,16 @@ import '../providers/workout_nutrition_provider.dart';
 import '../services/database_service.dart';
 
 class ExerciseEditorSheet extends StatefulWidget {
-  const ExerciseEditorSheet({super.key, this.exercise, required this.splitName});
+  const ExerciseEditorSheet({
+    super.key,
+    this.exercise,
+    required this.splitName,
+    this.onSave,
+  });
 
   final ExerciseModel? exercise;
   final String splitName;
+  final Future<void> Function(ExerciseModel exercise)? onSave;
 
   @override
   State<ExerciseEditorSheet> createState() => _ExerciseEditorSheetState();
@@ -143,8 +149,8 @@ class _ExerciseEditorSheetState extends State<ExerciseEditorSheet> {
                       }
 
                       final exerciseToSave = ExerciseModel(
-                        id: _isEditMode 
-                            ? widget.exercise!.id 
+                        id: _isEditMode
+                            ? widget.exercise!.id
                             : 'exercise_${DateTime.now().microsecondsSinceEpoch}',
                         name: name,
                         sets: sets,
@@ -153,10 +159,14 @@ class _ExerciseEditorSheetState extends State<ExerciseEditorSheet> {
                         splitName: widget.splitName,
                       );
 
-                      await DatabaseService().saveExercise(exerciseToSave);
+                      if (widget.onSave != null) {
+                        await widget.onSave!(exerciseToSave);
+                      } else {
+                        await DatabaseService().saveExercise(exerciseToSave);
+                      }
 
                       if (context.mounted) {
-                        Navigator.of(context).pop();
+                        Navigator.of(context).pop(exerciseToSave);
                       }
                     },
                     child: Text(ui.saveActionLabel),

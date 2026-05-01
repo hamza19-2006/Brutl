@@ -5,7 +5,6 @@ import 'package:google_fonts/google_fonts.dart';
 import '../models/brutl_models.dart';
 import '../widgets/exercise_editor_sheet.dart';
 
-
 /// Firestore-backed workout day detail screen.
 ///
 /// Reads exercises from `users/{uid}/weeks/{weekId}/days/{dayId}` in real-time
@@ -24,53 +23,147 @@ class DayDetailScreen extends StatelessWidget {
   final String dayId;
   final String workoutName;
 
-  DocumentReference<Map<String, dynamic>> get _dayDocRef =>
-      FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .collection('weeks')
-          .doc(weekId)
-          .collection('days')
-          .doc(dayId);
+  DocumentReference<Map<String, dynamic>> get _dayDocRef => FirebaseFirestore
+      .instance
+      .collection('users')
+      .doc(uid)
+      .collection('weeks')
+      .doc(weekId)
+      .collection('days')
+      .doc(dayId);
+
+  Future<void> _saveExerciseToDay(ExerciseModel exercise) async {
+    await FirebaseFirestore.instance.runTransaction((transaction) async {
+      final snapshot = await transaction.get(_dayDocRef);
+      final data = snapshot.data();
+      final rawExercises =
+          (data?['exercises'] as List<dynamic>?) ?? <dynamic>[];
+
+      final updatedExercises = <Map<String, dynamic>>[];
+      var replaced = false;
+
+      for (final rawExercise in rawExercises) {
+        if (rawExercise is Map) {
+          final exerciseMap = Map<String, dynamic>.from(rawExercise);
+          if (exerciseMap['id']?.toString() == exercise.id) {
+            updatedExercises.add(exercise.toJson());
+            replaced = true;
+          } else {
+            updatedExercises.add(exerciseMap);
+          }
+        }
+      }
+
+      if (!replaced) {
+        updatedExercises.add(exercise.toJson());
+      }
+
+      transaction.set(_dayDocRef, <String, dynamic>{
+        'exercises': updatedExercises,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    });
+  }
+
+  Future<void> _showEditDayNameDialog(
+    BuildContext context,
+    String currentName,
+  ) async {
+    final controller = TextEditingController(text: currentName);
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Rename Day'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(hintText: 'Day name'),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () async {
+                final updatedName = controller.text.trim();
+                if (updatedName.isEmpty) {
+                  Navigator.of(dialogContext).pop();
+                  return;
+                }
+
+                await _dayDocRef.set(<String, dynamic>{
+                  'name': updatedName,
+                  'updatedAt': FieldValue.serverTimestamp(),
+                }, SetOptions(merge: true));
+
+                if (dialogContext.mounted) {
+                  Navigator.of(dialogContext).pop();
+                }
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+    controller.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF0A0A0A),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF0A0A0A),
-        elevation: 0,
-        iconTheme: const IconThemeData(color: Colors.white),
-        title: Text(
-          workoutName,
-          style: GoogleFonts.poppins(
-            color: Colors.white,
-            fontWeight: FontWeight.w700,
-            fontSize: 18,
-          ),
-        ),
-      ),
-      body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-        stream: _dayDocRef.snapshots(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: _dayDocRef.snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            backgroundColor: Color(0xFF0A0A0A),
+            body: Center(
               child: CircularProgressIndicator(color: Color(0xFFFF3D00)),
-            );
-          }
+            ),
+          );
+        }
 
-          final data = snapshot.data?.data();
-          final List<dynamic> rawExercises =
-              (data?['exercises'] as List<dynamic>?) ?? <dynamic>[];
+        final data = snapshot.data?.data();
+        final dayName = (data?['name'] as String?)?.trim().isNotEmpty == true
+            ? (data?['name'] as String).trim()
+            : workoutName;
+        final List<dynamic> rawExercises =
+            (data?['exercises'] as List<dynamic>?) ?? <dynamic>[];
 
-          final exercises = rawExercises
-              .whereType<Map<dynamic, dynamic>>()
-              .map(
-                (e) => ExerciseModel.fromJson(Map<String, dynamic>.from(e)),
-              )
-              .toList(growable: false);
+        final exercises = rawExercises
+            .whereType<Map<dynamic, dynamic>>()
+            .map((e) => ExerciseModel.fromJson(Map<String, dynamic>.from(e)))
+            .toList(growable: false);
 
-          return SafeArea(
+        return Scaffold(
+          backgroundColor: const Color(0xFF0A0A0A),
+          appBar: AppBar(
+            backgroundColor: const Color(0xFF0A0A0A),
+            elevation: 0,
+            iconTheme: const IconThemeData(color: Colors.white),
+            title: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    dayName,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.poppins(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 18,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.edit, color: Colors.white),
+                  onPressed: () => _showEditDayNameDialog(context, dayName),
+                ),
+              ],
+            ),
+          ),
+          body: SafeArea(
             child: Column(
               children: [
                 // ── Exercise List ──
@@ -125,7 +218,8 @@ class DayDetailScreen extends StatelessWidget {
                                   backgroundColor: Colors.transparent,
                                   builder: (_) => ExerciseEditorSheet(
                                     exercise: exercise,
-                                    splitName: workoutName,
+                                    splitName: dayName,
+                                    onSave: _saveExerciseToDay,
                                   ),
                                 );
                               },
@@ -188,12 +282,14 @@ class DayDetailScreen extends StatelessWidget {
                   padding: const EdgeInsets.all(16),
                   child: ElevatedButton(
                     onPressed: () async {
-                      await showModalBottomSheet<void>(
+                      await showModalBottomSheet<ExerciseModel>(
                         context: context,
                         isScrollControlled: true,
                         backgroundColor: Colors.transparent,
-                        builder: (_) =>
-                            ExerciseEditorSheet(splitName: workoutName),
+                        builder: (_) => ExerciseEditorSheet(
+                          splitName: dayName,
+                          onSave: _saveExerciseToDay,
+                        ),
                       );
                     },
                     style: ElevatedButton.styleFrom(
@@ -213,9 +309,9 @@ class DayDetailScreen extends StatelessWidget {
                 ),
               ],
             ),
-          );
-        },
-      ),
+          ),
+        );
+      },
     );
   }
 }

@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
 import 'workout_screen.dart';
@@ -31,6 +32,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      requestStepPermission();
+    });
   }
 
   @override
@@ -54,6 +58,44 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       debugPrint('BRUTL: Pending exercises synced on app resume');
     } catch (e) {
       debugPrint('BRUTL: Failed to sync pending exercises — $e');
+    }
+  }
+
+  Future<void> requestStepPermission() async {
+    var status = await Permission.activityRecognition.status;
+
+    if (status.isDenied) {
+      status = await Permission.activityRecognition.request();
+    }
+
+    if (!mounted) return;
+
+    if (status.isPermanentlyDenied) {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: const Text('Activity Permission Required'),
+            content: const Text(
+              'Step counting needs physical activity permission. '
+              'Please enable it in app settings to track your daily steps.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('Not Now'),
+              ),
+              TextButton(
+                onPressed: () async {
+                  Navigator.of(dialogContext).pop();
+                  await openAppSettings();
+                },
+                child: const Text('Open Settings'),
+              ),
+            ],
+          );
+        },
+      );
     }
   }
 

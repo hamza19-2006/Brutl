@@ -104,8 +104,15 @@ flutter_launcher_icons:
   image_path: "assets/Images/logo.png"
   adaptive_icon_background: "#0A0A0A" # Your app's dark background color
   adaptive_icon_foreground: "assets/Images/logo.png"
+
 flutter_native_splash:
   color: "#0A0A0A"
-  image: "assets/Images/logo.png"
+  image: "assets/Images/transparent.png"
   android: true
-  ios: true  
+  ios: true 
+  
+  # --- NEW: Android 12+ Specific Fix ---
+android_12:
+  image: "assets/Images/transparent.png"
+  color: "#0A0A0A"
+  icon_background_color: "#0A0A0A"  

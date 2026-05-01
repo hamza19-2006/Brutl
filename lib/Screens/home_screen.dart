@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'workout_screen.dart';
-import '../providers/health_provider.dart';
 import '../providers/workout_provider.dart';
 import '../services/database_service.dart';
 import '../services/step_service.dart';
@@ -40,18 +39,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  /// When the user returns from background, force-refresh the step count
-  /// so the UI is instantly up-to-date without waiting for the stream.
-  /// Also triggers pending exercise sync to server.
+  /// When the user returns from background, trigger pending exercise sync.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      // Trigger pending exercise sync on app resume
       _syncPendingExercises();
     }
   }
 
-  /// Syncs any pending exercises created offline to Firestore
+  /// Syncs any pending exercises created offline to Firestore.
   Future<void> _syncPendingExercises() async {
     try {
       await DatabaseService().syncPendingExercises();
@@ -128,8 +124,8 @@ class _HomeTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer2<WorkoutProvider, StepProvider>(
-      builder: (context, workoutProvider, stepProvider, _) {
+    return Consumer<WorkoutProvider>(
+      builder: (context, workoutProvider, _) {
         if (workoutProvider.isLoading) {
           return const Center(
             child: CircularProgressIndicator(color: Color(0xFFFF3D00)),
@@ -154,156 +150,141 @@ class _HomeTab extends StatelessWidget {
                 // ── Split Dashboard: Steps (left) + Calories (right) ──
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-                      stream: FirebaseAuth.instance.currentUser == null
-                          ? null
-                          : FirebaseFirestore.instance
-                                .collection('users')
-                                .doc(FirebaseAuth.instance.currentUser!.uid)
-                                .snapshots(),
-                      builder: (context, snapshot) {
-                        if (snapshot.connectionState == ConnectionState.waiting) {
-                          return const SizedBox(
-                            height: 170,
-                            child: Center(
-                              child: CircularProgressIndicator(
-                                color: Color(0xFFFF3D00),
-                              ),
+                  child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                    stream: FirebaseAuth.instance.currentUser == null
+                        ? null
+                        : FirebaseFirestore.instance
+                              .collection('users')
+                              .doc(FirebaseAuth.instance.currentUser!.uid)
+                              .snapshots(),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const SizedBox(
+                          height: 170,
+                          child: Center(
+                            child: CircularProgressIndicator(
+                              color: Color(0xFFFF3D00),
                             ),
-                          );
-                        }
-
-                        final remoteData = snapshot.data?.data();
-                        final service = StepService.instance;
-                        final serviceSteps = service.getTodaySteps();
-                        final serviceCalories = service.calculateCalories(
-                          serviceSteps,
-                        );
-                        final remoteSteps =
-                            (remoteData?['dailySteps'] as num?)?.toInt();
-                        final remoteCalories =
-                            (remoteData?['dailyCaloriesBurned'] as num?)
-                                ?.toDouble();
-                        final steps = remoteSteps ?? serviceSteps;
-                        final calories = remoteCalories ?? serviceCalories;
-
-                        return IntrinsicHeight(
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Expanded(
-                                flex: 6,
-                                child: _buildStepsCard(
-                                  context,
-                                  workoutProvider,
-                                  steps,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                flex: 4,
-                                child: CaloriesCard(
-                                  caloriesBurned: calories.clamp(0, 5000),
-                                  calorieGoal: workoutProvider.user.dailyCalorieGoal,
-                                  caloriesLabel: workoutProvider.homeUi.caloriesLabel,
-                                  caloriesUnitLabel:
-                                      workoutProvider.homeUi.caloriesUnitLabel,
-                                  onTap: onCaloriesTap,
-                                ),
-                              ),
-                            ],
                           ),
                         );
-                      },
-                    ),
+                      }
+
+                      final remoteData = snapshot.data?.data();
+                      final service = StepService.instance;
+                      final serviceSteps = service.getTodaySteps();
+                      final serviceCalories = service.calculateCalories(
+                        serviceSteps,
+                      );
+                      final remoteSteps = (remoteData?['dailySteps'] as num?)
+                          ?.toInt();
+                      final remoteCalories =
+                          (remoteData?['dailyCaloriesBurned'] as num?)
+                              ?.toDouble();
+                      final steps = remoteSteps ?? serviceSteps;
+                      final calories = remoteCalories ?? serviceCalories;
+
+                      return IntrinsicHeight(
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Expanded(
+                              flex: 6,
+                              child: _buildStepsCard(
+                                context,
+                                workoutProvider,
+                                steps,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              flex: 4,
+                              child: CaloriesCard(
+                                caloriesBurned: calories.clamp(0, 5000),
+                                calorieGoal:
+                                    workoutProvider.user.dailyCalorieGoal,
+                                caloriesLabel:
+                                    workoutProvider.homeUi.caloriesLabel,
+                                caloriesUnitLabel:
+                                    workoutProvider.homeUi.caloriesUnitLabel,
+                                onTap: onCaloriesTap,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
                 ),
 
                 const SizedBox(height: 20),
+
+                // ── Last Workout Section ──
+                Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-    int todaySteps,
+                  child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        workoutProvider.lastWorkoutTitle,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
                         workoutProvider.lastWorkoutSubtitle,
-      currentSteps: todaySteps,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: const Color(0xFF888888),
                           fontSize: 12,
                         ),
                       ),
+                      const SizedBox(height: 12),
+                      if (workoutProvider.topVolumeExercises.isEmpty)
+                        Text(
+                          workoutProvider.noWorkoutMessage,
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(color: const Color(0xFF666666)),
+                        )
+                      else
+                        ...workoutProvider.topVolumeExercises.map(
+                          (exercise) => Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: ExerciseHighlightCard(
+                              exercise: exercise,
+                              setsLabel: workoutProvider.homeUi.setsLabel,
+                              repsLabel: workoutProvider.homeUi.repsLabel,
+                              weightLabel: workoutProvider.homeUi.weightLabel,
+                              weightUnit: workoutProvider.homeUi.weightUnit,
+                              isHighlighted:
+                                  exercise.name ==
+                                  workoutProvider.highlightedExerciseName,
+                              onTap: () => onExerciseTap(exercise.name),
+                            ),
+                          ),
+                        ),
                     ],
                   ),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1A1A1A),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFF2A2A2A), width: 1),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Row(
-            children: [
-              Icon(
-                Icons.warning_amber_rounded,
-                color: const Color(0xFFFF6B00).withValues(alpha: 0.8),
-                size: 18,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Steps',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: const Color(0xFF888888),
-                    fontSize: 11,
-                  ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Text(
-            message,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: const Color(0xFFBDBDBD),
-              fontSize: 13,
-              height: 1.4,
+              ],
             ),
           ),
-          if (sensorError != null) ...[
-            const SizedBox(height: 6),
-            Text(
-              sensorError!,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: const Color(0xFF666666),
-                fontSize: 10,
-              ),
-            ),
-          ],
-          const SizedBox(height: 14),
-          SizedBox(
-            width: double.infinity,
-            height: 36,
-            child: OutlinedButton(
-              onPressed: action,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xFFFF3D00),
-                side: const BorderSide(color: Color(0xFFFF3D00)),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                padding: EdgeInsets.zero,
-              ),
-              child: Text(
-                actionLabel,
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
+        );
+      },
+    );
+  }
+
+  Widget _buildStepsCard(
+    BuildContext context,
+    WorkoutProvider workoutProvider,
+    int todaySteps,
+  ) {
+    return StepsCard(
+      currentSteps: todaySteps,
+      goalSteps: workoutProvider.user.dailyStepGoal,
+      stepsLabel: workoutProvider.homeUi.stepsLabel,
+      stepsUnitLabel: workoutProvider.homeUi.stepsUnitLabel,
     );
   }
 }

@@ -72,8 +72,8 @@ class StepService {
       return;
     }
     if (incomingSteps < _baselineSteps) {
-      _baselineSteps = 0;
-      _todaySteps += incomingSteps;
+      _baselineSteps = incomingSteps;
+      _todaySteps = 0;
       unawaited(_saveState());
       return;
     }

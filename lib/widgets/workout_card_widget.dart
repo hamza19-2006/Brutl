@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 
+import '../Screens/day_detail_screen.dart';
+
 Future<void> saveWorkoutDay({
   required String uid,
   required String weekId,
@@ -43,6 +45,7 @@ class WorkoutCardWidget extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // ── "Day X" label sits OUTSIDE and ABOVE the card ──
         Text(
           dayNumber,
           textAlign: TextAlign.left,
@@ -52,6 +55,8 @@ class WorkoutCardWidget extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 8),
+
+        // ── Individual StreamBuilder per card for independent timestamps ──
         StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
           stream: FirebaseFirestore.instance
               .collection('users')
@@ -70,44 +75,81 @@ class WorkoutCardWidget extends StatelessWidget {
             final Timestamp? updatedAt = data?['updatedAt'] as Timestamp?;
             final String updatedLabel = _formatUpdatedAt(updatedAt);
 
-            return Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1A1A1A),
+            // ── Clickable card → navigates to DayDetailScreen ──
+            return Material(
+              color: Colors.transparent,
+              child: InkWell(
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFF2A2A2A), width: 1),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: GoogleFonts.poppins(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
+                splashColor: const Color(0xFFFF3D00).withValues(alpha: 0.08),
+                highlightColor: const Color(0xFFFF3D00).withValues(alpha: 0.04),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => DayDetailScreen(
+                        uid: uid,
+                        weekId: weekId,
+                        dayId: dayId,
+                        workoutName: title,
+                      ),
+                    ),
+                  );
+                },
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1A1A1A),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: const Color(0xFF2A2A2A),
+                      width: 1,
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Total Exercises: ${exercises.length}',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: const Color(0xFF888888),
-                      fontSize: 12,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              title,
+                              style: GoogleFonts.poppins(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          const Icon(
+                            Icons.chevron_right,
+                            color: Color(0xFF555555),
+                            size: 22,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Total Exercises: ${exercises.length}',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFF888888),
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      Text(
+                        docExists
+                            ? 'Last Updated: $updatedLabel'
+                            : 'Last Updated: --',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFF666666),
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 20),
-                  Text(
-                    docExists
-                        ? 'Last Updated: $updatedLabel'
-                        : 'Last Updated: --',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: const Color(0xFF666666),
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
+                ),
               ),
             );
           },

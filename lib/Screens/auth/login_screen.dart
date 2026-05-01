@@ -397,8 +397,8 @@ class _BrutlSecondaryButton extends StatelessWidget {
       child: OutlinedButton(
         onPressed: onPressed,
         style: OutlinedButton.styleFrom(
-          backgroundColor: AppColors.backgroundTertiary,
-          side: const BorderSide(color: AppColors.borderDefault),
+          backgroundColor: Colors.white,
+          side: const BorderSide(color: Color(0xFFDDDDDD)),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(
               AppSpacing.borderRadiusMedium + 2,
@@ -415,13 +415,15 @@ class _BrutlSecondaryButton extends StatelessWidget {
               errorBuilder: (context, error, stackTrace) => const Icon(
                 Icons.g_mobiledata,
                 size: 22,
-                color: AppColors.textSecondary,
+                color: Color(0xFF1A1A1A),
               ),
             ),
             const SizedBox(width: AppSpacing.sm),
             Text(
               label,
-              style: AppTextStyles.headingSmall(color: AppColors.textPrimary),
+              style: AppTextStyles.headingSmall(
+                color: const Color(0xFF1A1A1A),
+              ),
             ),
           ],
         ),

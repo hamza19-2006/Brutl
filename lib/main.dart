@@ -129,8 +129,13 @@ class AuthWrapper extends StatelessWidget {
             if (profileSnapshot.connectionState == ConnectionState.waiting) {
               return const _BrutlLoadingScreen();
             }
-            final profileExists = profileSnapshot.data?.exists ?? false;
-            if (!profileExists) {
+            final doc = profileSnapshot.data;
+            final profileData = doc?.data();
+            final isProfileComplete =
+                doc != null &&
+                doc.exists &&
+                profileData?['isProfileComplete'] == true;
+            if (!isProfileComplete) {
               return const InfoCollectionScreen();
             }
             return const HomeScreen();

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -69,14 +71,17 @@ class _SignUpScreenState extends State<SignUpScreen> {
     }
 
     if (success) {
-      _showDialog(
-        'Account created successfully. Welcome to Brutl!',
-        isError: false,
-      );
       _emailController.clear();
       _passwordController.clear();
       _confirmPasswordController.clear();
       validation.resetValidationState();
+      unawaited(
+        _showDialog(
+          'Account created successfully. Welcome to Brutl!',
+          isError: false,
+          autoDismissAfter: const Duration(milliseconds: 700),
+        ),
+      );
       return;
     }
 
@@ -107,10 +112,19 @@ class _SignUpScreenState extends State<SignUpScreen> {
     return emailRegex.hasMatch(email);
   }
 
-  void _showDialog(String message, {required bool isError}) {
+  Future<void> _showDialog(
+    String message, {
+    required bool isError,
+    Duration? autoDismissAfter,
+  }) async {
+    if (!mounted) {
+      return;
+    }
+
     showDialog<void>(
       context: context,
-      builder: (context) => AlertDialog(
+      barrierDismissible: isError,
+      builder: (dialogContext) => AlertDialog(
         backgroundColor: AppColors.backgroundTertiary,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppSpacing.borderRadiusLarge),
@@ -128,7 +142,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: Text(
               'OK',
               style: AppTextStyles.headingSmall(color: AppColors.accentPrimary),
@@ -137,6 +151,16 @@ class _SignUpScreenState extends State<SignUpScreen> {
         ],
       ),
     );
+
+    if (autoDismissAfter != null) {
+      await Future<void>.delayed(autoDismissAfter);
+      if (!mounted) {
+        return;
+      }
+      if (Navigator.of(context, rootNavigator: true).canPop()) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+    }
   }
 
   @override
@@ -483,9 +507,7 @@ class _BrutlSecondaryButton extends StatelessWidget {
             const SizedBox(width: AppSpacing.sm),
             Text(
               label,
-              style: AppTextStyles.headingSmall(
-                color: const Color(0xFF1A1A1A),
-              ),
+              style: AppTextStyles.headingSmall(color: const Color(0xFF1A1A1A)),
             ),
           ],
         ),

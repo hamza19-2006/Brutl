@@ -24,8 +24,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final _displayNameCtrl = TextEditingController();
   final _usernameCtrl = TextEditingController();
   Timer? _debounce;
+  int _usernameCheckRequestId = 0;
   bool _isCheckingUsername = false;
   bool? _isUsernameAvailable;
+  String? _usernameCheckError;
 
   // --- Page 2: Biometrics ---
   String _heightUnit = 'cm';
@@ -143,29 +145,63 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   void _onUsernameChanged(String value) {
     if (_debounce?.isActive ?? false) _debounce!.cancel();
+    final normalizedUsername = value.trim().toLowerCase();
+    final requestId = ++_usernameCheckRequestId;
     setState(() {
       _isCheckingUsername = true;
       _isUsernameAvailable = null;
+      _usernameCheckError = null;
     });
 
     _debounce = Timer(const Duration(milliseconds: 500), () async {
-      if (value.trim().isEmpty) {
+      if (!mounted || requestId != _usernameCheckRequestId) {
+        return;
+      }
+
+      if (normalizedUsername.isEmpty) {
+        if (!mounted || requestId != _usernameCheckRequestId) {
+          return;
+        }
         setState(() {
           _isCheckingUsername = false;
           _isUsernameAvailable = null;
+          _usernameCheckError = null;
         });
         return;
       }
-      final query = await FirebaseFirestore.instance
-          .collection('users')
-          .where('username', isEqualTo: value.trim().toLowerCase())
-          .limit(1)
-          .get();
-      if (!mounted) return;
-      setState(() {
-        _isCheckingUsername = false;
-        _isUsernameAvailable = query.docs.isEmpty;
-      });
+
+      try {
+        final query = await FirebaseFirestore.instance
+            .collection('users')
+            .where('username', isEqualTo: normalizedUsername)
+            .limit(1)
+            .get();
+
+        if (!mounted || requestId != _usernameCheckRequestId) {
+          return;
+        }
+
+        setState(() {
+          _isUsernameAvailable = query.docs.isEmpty;
+          _usernameCheckError = null;
+        });
+      } catch (error) {
+        debugPrint('USERNAME_CHECK: Failed to validate username — $error');
+        if (!mounted || requestId != _usernameCheckRequestId) {
+          return;
+        }
+        setState(() {
+          _isUsernameAvailable = false;
+          _usernameCheckError = 'Error checking username';
+        });
+      } finally {
+        if (!mounted || requestId != _usernameCheckRequestId) {
+          return;
+        }
+        setState(() {
+          _isCheckingUsername = false;
+        });
+      }
     });
   }
 
@@ -264,6 +300,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     if (_currentPage == 0) {
       if (_displayNameCtrl.text.trim().isEmpty ||
           _usernameCtrl.text.trim().isEmpty ||
+          _isCheckingUsername ||
           _isUsernameAvailable != true) {
         return; // Validation failed
       }
@@ -394,6 +431,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   Widget _buildBottomBar() {
     final isLastPage = _currentPage == 5;
+    final isIdentityPage = _currentPage == 0;
+    final isNextButtonEnabled =
+        !_isSaving &&
+        (!isIdentityPage ||
+            (_displayNameCtrl.text.trim().isNotEmpty &&
+                _usernameCtrl.text.trim().isNotEmpty &&
+                !_isCheckingUsername &&
+                _isUsernameAvailable == true));
     return Padding(
       padding: const EdgeInsets.all(20),
       child: SizedBox(
@@ -408,7 +453,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ),
             elevation: 0,
           ),
-          onPressed: _isSaving ? null : _nextPage,
+          onPressed: isNextButtonEnabled ? _nextPage : null,
           child: _isSaving
               ? const SizedBox(
                   width: 24,
@@ -477,10 +522,25 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 ),
               ],
             ),
+          if (_usernameCheckError != null && _usernameCtrl.text.isNotEmpty)
+            const Row(
+              children: [
+                Icon(Icons.error_outline, color: Colors.redAccent, size: 16),
+                SizedBox(width: 8),
+                Text(
+                  'Error checking username',
+                  style: TextStyle(color: Colors.redAccent, fontSize: 12),
+                ),
+              ],
+            ),
           if (_isUsernameAvailable == true && _usernameCtrl.text.isNotEmpty)
             const Row(
               children: [
-                Icon(Icons.check_circle_outline, color: Colors.greenAccent, size: 16),
+                Icon(
+                  Icons.check_circle_outline,
+                  color: Colors.greenAccent,
+                  size: 16,
+                ),
                 SizedBox(width: 8),
                 Text(
                   'Username available!',
@@ -852,8 +912,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               child: Row(
                 children: [
                   Icon(
-                    !_isCustomMacro ? Icons.check_circle : Icons.circle_outlined,
-                    color: !_isCustomMacro ? const Color(0xFFFF3D00) : const Color(0xFF555555),
+                    !_isCustomMacro
+                        ? Icons.check_circle
+                        : Icons.circle_outlined,
+                    color: !_isCustomMacro
+                        ? const Color(0xFFFF3D00)
+                        : const Color(0xFF555555),
                   ),
                   const SizedBox(width: 16),
                   Expanded(
@@ -871,7 +935,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         const SizedBox(height: 4),
                         const Text(
                           'Your calculated daily energy expenditure',
-                          style: TextStyle(color: Color(0xFF9A9A9A), fontSize: 12),
+                          style: TextStyle(
+                            color: Color(0xFF9A9A9A),
+                            fontSize: 12,
+                          ),
                         ),
                       ],
                     ),
@@ -906,16 +973,24 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             child: Row(
               children: [
                 Icon(
-                  _isCustomMacro ? Icons.radio_button_checked : Icons.radio_button_unchecked,
-                  color: _isCustomMacro ? const Color(0xFFFF3D00) : const Color(0xFF555555),
+                  _isCustomMacro
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
+                  color: _isCustomMacro
+                      ? const Color(0xFFFF3D00)
+                      : const Color(0xFF555555),
                 ),
                 const SizedBox(width: 12),
                 Text(
                   'Customize My Own Macros',
                   style: TextStyle(
-                    color: _isCustomMacro ? Colors.white : const Color(0xFF9A9A9A),
+                    color: _isCustomMacro
+                        ? Colors.white
+                        : const Color(0xFF9A9A9A),
                     fontSize: 16,
-                    fontWeight: _isCustomMacro ? FontWeight.w600 : FontWeight.normal,
+                    fontWeight: _isCustomMacro
+                        ? FontWeight.w600
+                        : FontWeight.normal,
                   ),
                 ),
               ],

@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../core/theme/app_colors.dart';
+import '../core/theme/app_spacing.dart';
+import '../core/theme/app_text_styles.dart';
+
 /// REUSABLE PASSWORD INPUT FIELD WIDGET
 ///
 /// This widget provides a professional password input field with:
@@ -65,38 +69,30 @@ class _PasswordInputFieldState extends State<PasswordInputField> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Label
         Text(
           widget.label,
-          style: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
-            color: Color(0xFF1F2937),
-          ),
+          style: AppTextStyles.bodyMedium(color: AppColors.textSecondary),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: AppSpacing.sm),
 
-        // Password Input Field with Eye Icon
         Container(
+          height: 52,
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(AppSpacing.borderRadiusMedium),
             border: Border.all(
               color: _isFocused
-                  ? const Color(0xFF6366F1) // Indigo border on focus
+                  ? AppColors.accentPrimary
                   : widget.errorText != null
-                  ? const Color(0xFFF87171) // Red border on error
-                  : const Color(0xFFE5E7EB), // Light grey border by default
-              width: 2,
+                  ? AppColors.statusError
+                  : AppColors.borderDefault,
+              width: _isFocused ? 1.5 : 1,
             ),
-            color: _isFocused
-                ? const Color(0xFFF9FAFB)
-                : const Color(0xFFFFFFFF),
+            color: AppColors.backgroundQuaternary,
           ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
             child: Row(
               children: [
-                // Password Input
                 Expanded(
                   child: TextField(
                     controller: widget.controller,
@@ -107,24 +103,21 @@ class _PasswordInputFieldState extends State<PasswordInputField> {
                     decoration: InputDecoration(
                       border: InputBorder.none,
                       hintText: widget.hintText,
-                      hintStyle: const TextStyle(
-                        fontSize: 14,
-                        color: Color(0xFFD1D5DB),
+                      hintStyle: AppTextStyles.bodyLarge(
+                        color: AppColors.textTertiary,
                       ),
-                      contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 14),
                     ),
-                    style: const TextStyle(
-                      fontSize: 14,
-                      color: Color(0xFF1F2937),
+                    style: AppTextStyles.bodyLarge(
+                      color: AppColors.textPrimary,
                     ),
                   ),
                 ),
 
-                // Eye Icon Toggle Button
                 GestureDetector(
                   onTap: () => widget.onVisibilityToggle(!widget.isVisible),
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    padding: const EdgeInsets.only(left: AppSpacing.sm),
                     child: AnimatedSwitcher(
                       duration: const Duration(milliseconds: 200),
                       child: Icon(
@@ -133,8 +126,8 @@ class _PasswordInputFieldState extends State<PasswordInputField> {
                             : Icons.visibility_off,
                         key: ValueKey<bool>(widget.isVisible),
                         color: _isFocused
-                            ? const Color(0xFF6366F1)
-                            : const Color(0xFF9CA3AF),
+                            ? AppColors.accentPrimary
+                            : AppColors.textTertiary,
                         size: 20,
                       ),
                     ),
@@ -148,14 +141,10 @@ class _PasswordInputFieldState extends State<PasswordInputField> {
         // Error Text (if any)
         if (widget.errorText != null)
           Padding(
-            padding: const EdgeInsets.only(top: 6),
+            padding: const EdgeInsets.only(top: AppSpacing.xs + 2),
             child: Text(
               widget.errorText!,
-              style: const TextStyle(
-                fontSize: 12,
-                color: Color(0xFFF87171),
-                fontWeight: FontWeight.w500,
-              ),
+              style: AppTextStyles.labelLarge(color: AppColors.statusError),
             ),
           ),
       ],

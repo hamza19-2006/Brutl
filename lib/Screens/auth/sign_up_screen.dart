@@ -1,18 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
+import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_gradients.dart';
+import '../../core/theme/app_spacing.dart';
+import '../../core/theme/app_text_styles.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/auth_validation_provider.dart';
 import '../../widgets/password_input_field.dart';
-
-/// SIGN-UP SCREEN
-///
-/// Complete sign-up flow with:
-/// - Email input
-/// - Password input with eye icon toggle
-/// - Confirm password input with eye icon toggle
-/// - Real-time validation for password rules
-/// - Dynamic "Sign Up" button (enabled only when all rules are met)
-/// - Professional UI with smooth animations
 
 class SignUpScreen extends StatefulWidget {
   const SignUpScreen({super.key});
@@ -22,10 +17,9 @@ class SignUpScreen extends StatefulWidget {
 }
 
 class _SignUpScreenState extends State<SignUpScreen> {
-  late TextEditingController _emailController;
-  late TextEditingController _passwordController;
-  late TextEditingController _confirmPasswordController;
-  late AuthValidationProvider _validationProvider;
+  late final TextEditingController _emailController;
+  late final TextEditingController _passwordController;
+  late final TextEditingController _confirmPasswordController;
 
   @override
   void initState() {
@@ -44,62 +38,66 @@ class _SignUpScreenState extends State<SignUpScreen> {
   }
 
   Future<void> _handleSignUp() async {
-    _validationProvider = context.read<AuthValidationProvider>();
+    final validation = context.read<AuthValidationProvider>();
+    final authProvider = context.read<BrutlAuthProvider>();
 
     final email = _emailController.text.trim();
     final password = _passwordController.text.trim();
 
-    // Validate email
     if (email.isEmpty) {
-      _showErrorDialog('Please enter your email address.');
+      _showDialog('Please enter your email address.', isError: true);
       return;
     }
 
-    // Validate email format
     if (!_isValidEmail(email)) {
-      _showErrorDialog('Please enter a valid email address.');
+      _showDialog('Please enter a valid email address.', isError: true);
       return;
     }
 
-    // All validations are already checked by the button being enabled,
-    // but we verify once more for security
-    if (!_validationProvider.isSixCharactersValid) {
-      _showErrorDialog('Password must be at least 6 characters.');
+    if (!validation.isSignUpButtonEnabled) {
+      _showDialog('Please satisfy all password rules first.', isError: true);
       return;
     }
 
-    if (!_validationProvider.hasSpecialCharacter) {
-      _showErrorDialog('Password must contain at least one special character.');
-      return;
-    }
-
-    if (!_validationProvider.doPasswordsMatch) {
-      _showErrorDialog('Passwords do not match.');
-      return;
-    }
-
-    // Call the auth provider to register
-    final authProvider = context.read<BrutlAuthProvider>();
     final success = await authProvider.signUpWithEmail(
       email: email,
       password: password,
     );
 
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
 
     if (success) {
-      // Sign-up successful, navigate to next screen or home
-      _showSuccessDialog('Account created successfully!');
-      // Clear form
+      _showDialog(
+        'Account created successfully. Welcome to Brutl!',
+        isError: false,
+      );
       _emailController.clear();
       _passwordController.clear();
       _confirmPasswordController.clear();
-      _validationProvider.resetValidationState();
-    } else {
-      _showErrorDialog(
-        authProvider.errorMessage ?? 'Sign-up failed. Please try again.',
-      );
+      validation.resetValidationState();
+      return;
     }
+
+    _showDialog(
+      authProvider.errorMessage ?? 'Sign-up failed. Please try again.',
+      isError: true,
+    );
+  }
+
+  Future<void> _handleGoogleSignUp() async {
+    final authProvider = context.read<BrutlAuthProvider>();
+    final success = await authProvider.signInWithGoogle();
+
+    if (!mounted || success) {
+      return;
+    }
+
+    _showDialog(
+      authProvider.errorMessage ?? 'Google sign-up failed. Please try again.',
+      isError: true,
+    );
   }
 
   bool _isValidEmail(String email) {
@@ -109,32 +107,32 @@ class _SignUpScreenState extends State<SignUpScreen> {
     return emailRegex.hasMatch(email);
   }
 
-  void _showErrorDialog(String message) {
-    showDialog(
+  void _showDialog(String message, {required bool isError}) {
+    showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Oops!'),
-        content: Text(message),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
+        backgroundColor: AppColors.backgroundTertiary,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppSpacing.borderRadiusLarge),
+          side: BorderSide(
+            color: isError ? AppColors.statusError : AppColors.borderDefault,
           ),
-        ],
-      ),
-    );
-  }
-
-  void _showSuccessDialog(String message) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Success!'),
-        content: Text(message),
+        ),
+        title: Text(
+          isError ? 'Sign Up Error' : 'Success',
+          style: AppTextStyles.headingMedium(color: AppColors.textPrimary),
+        ),
+        content: Text(
+          message,
+          style: AppTextStyles.bodyMedium(color: AppColors.textSecondary),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
+            child: Text(
+              'OK',
+              style: AppTextStyles.headingSmall(color: AppColors.accentPrimary),
+            ),
           ),
         ],
       ),
@@ -144,111 +142,115 @@ class _SignUpScreenState extends State<SignUpScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Create Account'),
-        centerTitle: true,
-        elevation: 0,
-        backgroundColor: const Color(0xFFF9FAFB),
-      ),
-      backgroundColor: const Color(0xFFF9FAFB),
+      appBar: AppBar(title: const Text('Create Account')),
+      backgroundColor: AppColors.backgroundPrimary,
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-          child: Consumer<AuthValidationProvider>(
-            builder: (context, validationProvider, _) {
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.xl,
+            vertical: AppSpacing.xxl,
+          ),
+          child: Consumer2<AuthValidationProvider, BrutlAuthProvider>(
+            builder: (context, validation, authProvider, _) {
               return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Header
-                  const Text(
-                    'Join Brutl Today',
-                    style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF1F2937),
+                  Text('JOIN BRUTL', style: AppTextStyles.accentLabel()),
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    'Build your strongest self.',
+                    style: AppTextStyles.displayMedium(),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    'Create your account with Email or continue with Google.',
+                    style: AppTextStyles.bodyMedium(),
+                  ),
+                  const SizedBox(height: AppSpacing.xxl),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(AppSpacing.lg),
+                    decoration: BoxDecoration(
+                      color: AppColors.backgroundSecondary,
+                      borderRadius: BorderRadius.circular(
+                        AppSpacing.borderRadiusXL,
+                      ),
+                      border: Border.all(color: AppColors.borderSubtle),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _buildEmailInput(),
+                        const SizedBox(height: AppSpacing.lg),
+                        PasswordInputField(
+                          controller: _passwordController,
+                          label: 'Password',
+                          hintText: 'Create your password',
+                          isVisible: validation.isPasswordVisible,
+                          onVisibilityToggle: (_) {
+                            validation.togglePasswordVisibility();
+                          },
+                          onChanged: validation.updatePassword,
+                          textInputAction: TextInputAction.next,
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                        _buildPasswordRulesDisplay(validation),
+                        const SizedBox(height: AppSpacing.lg),
+                        PasswordInputField(
+                          controller: _confirmPasswordController,
+                          label: 'Confirm Password',
+                          hintText: 'Re-enter your password',
+                          isVisible: validation.isConfirmPasswordVisible,
+                          onVisibilityToggle: (_) {
+                            validation.toggleConfirmPasswordVisibility();
+                          },
+                          onChanged: validation.updateConfirmPassword,
+                          textInputAction: TextInputAction.done,
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                        if (_passwordController.text.isNotEmpty ||
+                            _confirmPasswordController.text.isNotEmpty)
+                          _buildPasswordMatchIndicator(validation),
+                        const SizedBox(height: AppSpacing.xl),
+                        _BrutlGradientButton(
+                          label: authProvider.isLoading
+                              ? 'Creating Account...'
+                              : 'Sign Up with Email',
+                          isLoading: authProvider.isLoading,
+                          onPressed:
+                              validation.isSignUpButtonEnabled &&
+                                  !authProvider.isLoading
+                              ? _handleSignUp
+                              : null,
+                        ),
+                        const SizedBox(height: AppSpacing.lg),
+                        _buildOrDivider(),
+                        const SizedBox(height: AppSpacing.lg),
+                        _BrutlSecondaryButton(
+                          label: 'Sign Up with Google',
+                          iconAssetPath: 'assets/Images/google_logo.jpg',
+                          onPressed: authProvider.isLoading
+                              ? null
+                              : _handleGoogleSignUp,
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Create your account to get started with your fitness journey',
-                    style: TextStyle(fontSize: 14, color: Color(0xFF6B7280)),
-                  ),
-                  const SizedBox(height: 28),
-
-                  // ============ EMAIL INPUT ============
-                  _buildEmailInput(),
-                  const SizedBox(height: 20),
-
-                  // ============ PASSWORD INPUT WITH EYE ICON ============
-                  PasswordInputField(
-                    controller: _passwordController,
-                    label: 'Password',
-                    hintText: 'Enter your password',
-                    isVisible: validationProvider.isPasswordVisible,
-                    onVisibilityToggle: (value) {
-                      validationProvider.togglePasswordVisibility();
-                    },
-                    onChanged: (value) {
-                      validationProvider.updatePassword(value);
-                    },
-                  ),
-                  const SizedBox(height: 12),
-
-                  // ============ GREEN TEXT VALIDATION ============
-                  // PASSWORD INSTRUCTION RULES: Display below first password box
-                  // These rules change color to GREEN when requirements are met
-                  _buildPasswordRulesDisplay(validationProvider),
-                  const SizedBox(height: 20),
-
-                  // ============ CONFIRM PASSWORD INPUT WITH EYE ICON ============
-                  PasswordInputField(
-                    controller: _confirmPasswordController,
-                    label: 'Confirm Password',
-                    hintText: 'Re-enter your password',
-                    isVisible: validationProvider.isConfirmPasswordVisible,
-                    onVisibilityToggle: (value) {
-                      validationProvider.toggleConfirmPasswordVisibility();
-                    },
-                    onChanged: (value) {
-                      validationProvider.updateConfirmPassword(value);
-                    },
-                  ),
-                  const SizedBox(height: 12),
-
-                  // Password match indicator
-                  if (_passwordController.text.isNotEmpty &&
-                      _confirmPasswordController.text.isNotEmpty)
-                    _buildPasswordMatchIndicator(validationProvider),
-                  const SizedBox(height: 28),
-
-                  // ============ DISABLED BUTTON LOGIC ============
-                  // SIGN-UP BUTTON: Only enabled when ALL conditions are met
-                  // 1. Password has 6+ characters
-                  // 2. Password has special character
-                  // 3. Both password fields match
-                  _buildSignUpButton(validationProvider),
-                  const SizedBox(height: 16),
-
-                  // Login link
+                  const SizedBox(height: AppSpacing.xl),
                   Center(
                     child: Wrap(
                       crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        const Text(
+                        Text(
                           'Already have an account? ',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Color(0xFF6B7280),
-                          ),
+                          style: AppTextStyles.bodySmall(),
                         ),
                         GestureDetector(
                           onTap: () => Navigator.pop(context),
-                          child: const Text(
-                            'Login',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: Color(0xFF6366F1),
-                              fontWeight: FontWeight.w600,
+                          child: Text(
+                            'Sign In',
+                            style: AppTextStyles.headingSmall(
+                              color: AppColors.accentPrimary,
                             ),
                           ),
                         ),
@@ -264,217 +266,228 @@ class _SignUpScreenState extends State<SignUpScreen> {
     );
   }
 
-  /// EMAIL INPUT FIELD
   Widget _buildEmailInput() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        Text(
           'Email',
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
-            color: Color(0xFF1F2937),
-          ),
+          style: AppTextStyles.bodyMedium(color: AppColors.textSecondary),
         ),
-        const SizedBox(height: 8),
-        TextField(
-          controller: _emailController,
-          keyboardType: TextInputType.emailAddress,
-          textInputAction: TextInputAction.next,
-          decoration: InputDecoration(
-            hintText: 'Enter your email',
-            hintStyle: const TextStyle(fontSize: 14, color: Color(0xFFD1D5DB)),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Color(0xFFE5E7EB), width: 2),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Color(0xFFE5E7EB), width: 2),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Color(0xFF6366F1), width: 2),
-            ),
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: 12,
-            ),
-            filled: true,
-            fillColor: const Color(0xFFFFFFFF),
+        const SizedBox(height: AppSpacing.sm),
+        SizedBox(
+          height: 52,
+          child: TextField(
+            controller: _emailController,
+            keyboardType: TextInputType.emailAddress,
+            textInputAction: TextInputAction.next,
+            style: AppTextStyles.bodyLarge(color: AppColors.textPrimary),
+            decoration: const InputDecoration(hintText: 'Enter your email'),
           ),
-          style: const TextStyle(fontSize: 14, color: Color(0xFF1F2937)),
         ),
       ],
     );
   }
 
-  /// GREEN TEXT VALIDATION FEATURE
-  ///
-  /// Displays password rules below the first password input.
-  /// Rules dynamically change color based on validation:
-  /// - GREY (default): Rule not met
-  /// - GREEN: Rule met and active
-  ///
-  /// This provides real-time visual feedback to the user
-  Widget _buildPasswordRulesDisplay(AuthValidationProvider validationProvider) {
+  Widget _buildPasswordRulesDisplay(AuthValidationProvider validation) {
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
-        color: const Color(0xFFF3F4F6),
-        borderRadius: BorderRadius.circular(8),
+        color: AppColors.backgroundQuaternary,
+        borderRadius: BorderRadius.circular(AppSpacing.borderRadiusMedium),
+        border: Border.all(color: AppColors.borderDefault),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Rule 1: At least 6 characters
-          // GREEN TEXT when valid, GREY when invalid
-          Row(
-            children: [
-              Icon(
-                validationProvider.isSixCharactersValid
-                    ? Icons.check_circle
-                    : Icons.radio_button_unchecked,
-                size: 16,
-                color: validationProvider.isSixCharactersValid
-                    ? const Color(0xFF10B981) // Green checkmark
-                    : const Color(0xFF9CA3AF), // Grey unchecked
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Password should be at least 6 characters.',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: validationProvider.isSixCharactersValid
-                        ? const Color(0xFF10B981) // Green text when valid
-                        : const Color(0xFF6B7280), // Grey text when invalid
-                  ),
-                ),
-              ),
-            ],
+          _buildRuleItem(
+            isValid: validation.isSixCharactersValid,
+            text: 'Password should be at least 6 characters.',
           ),
-          const SizedBox(height: 8),
-
-          // Rule 2: At least one special character
-          // GREEN TEXT when valid, GREY when invalid
-          Row(
-            children: [
-              Icon(
-                validationProvider.hasSpecialCharacter
-                    ? Icons.check_circle
-                    : Icons.radio_button_unchecked,
-                size: 16,
-                color: validationProvider.hasSpecialCharacter
-                    ? const Color(0xFF10B981) // Green checkmark
-                    : const Color(0xFF9CA3AF), // Grey unchecked
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Include at least one special character (e.g., @, #, \$, %, etc.).',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: validationProvider.hasSpecialCharacter
-                        ? const Color(0xFF10B981) // Green text when valid
-                        : const Color(0xFF6B7280), // Grey text when invalid
-                  ),
-                ),
-              ),
-            ],
+          const SizedBox(height: AppSpacing.sm),
+          _buildRuleItem(
+            isValid: validation.hasSpecialCharacter,
+            text: 'Include at least one special character.',
           ),
         ],
       ),
     );
   }
 
-  /// Password match indicator
-  Widget _buildPasswordMatchIndicator(
-    AuthValidationProvider validationProvider,
-  ) {
+  Widget _buildRuleItem({required bool isValid, required String text}) {
     return Row(
       children: [
         Icon(
-          validationProvider.doPasswordsMatch
-              ? Icons.check_circle
-              : Icons.cancel,
+          isValid ? Icons.check_circle : Icons.radio_button_unchecked,
           size: 16,
-          color: validationProvider.doPasswordsMatch
-              ? const Color(0xFF10B981)
-              : const Color(0xFFF87171),
+          color: isValid ? AppColors.statusSuccess : AppColors.textTertiary,
         ),
-        const SizedBox(width: 8),
-        Text(
-          validationProvider.doPasswordsMatch
-              ? 'Passwords match'
-              : 'Passwords do not match',
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w500,
-            color: validationProvider.doPasswordsMatch
-                ? const Color(0xFF10B981)
-                : const Color(0xFFF87171),
+        const SizedBox(width: AppSpacing.sm),
+        Expanded(
+          child: Text(
+            text,
+            style: AppTextStyles.labelLarge(
+              color: isValid
+                  ? AppColors.statusSuccess
+                  : AppColors.textSecondary,
+            ),
           ),
         ),
       ],
     );
   }
 
-  /// DISABLED BUTTON LOGIC
-  ///
-  /// Sign-Up button state depends on:
-  /// 1. Rule 1 met: 6+ characters
-  /// 2. Rule 2 met: Special character
-  /// 3. Passwords match
-  ///
-  /// Button is disabled (faded grey) until ALL conditions are true,
-  /// then it becomes active (primary color) and clickable
-  Widget _buildSignUpButton(AuthValidationProvider validationProvider) {
-    final isEnabled = validationProvider.isSignUpButtonEnabled;
-
-    return Consumer<BrutlAuthProvider>(
-      builder: (context, authProvider, _) {
-        return ElevatedButton(
-          onPressed: isEnabled && !authProvider.isLoading
-              ? _handleSignUp
-              : null,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: isEnabled
-                ? const Color(0xFF6366F1) // Active primary color
-                : const Color(0xFFE5E7EB), // Faded light grey when disabled
-            disabledBackgroundColor: const Color(0xFFE5E7EB),
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-            elevation: isEnabled ? 2 : 0,
+  Widget _buildPasswordMatchIndicator(AuthValidationProvider validation) {
+    return Row(
+      children: [
+        Icon(
+          validation.doPasswordsMatch ? Icons.check_circle : Icons.cancel,
+          size: 16,
+          color: validation.doPasswordsMatch
+              ? AppColors.statusSuccess
+              : AppColors.statusError,
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        Text(
+          validation.doPasswordsMatch
+              ? 'Passwords match'
+              : 'Passwords do not match',
+          style: AppTextStyles.labelLarge(
+            color: validation.doPasswordsMatch
+                ? AppColors.statusSuccess
+                : AppColors.statusError,
           ),
-          child: authProvider.isLoading
-              ? const SizedBox(
-                  height: 20,
-                  width: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      Color(0xFF6366F1),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildOrDivider() {
+    return Row(
+      children: [
+        const Expanded(
+          child: Divider(color: AppColors.borderSubtle, thickness: 1),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+          child: Text('OR', style: AppTextStyles.labelSmall()),
+        ),
+        const Expanded(
+          child: Divider(color: AppColors.borderSubtle, thickness: 1),
+        ),
+      ],
+    );
+  }
+}
+
+class _BrutlGradientButton extends StatelessWidget {
+  const _BrutlGradientButton({
+    required this.label,
+    required this.onPressed,
+    this.isLoading = false,
+  });
+
+  final String label;
+  final VoidCallback? onPressed;
+  final bool isLoading;
+
+  @override
+  Widget build(BuildContext context) {
+    return Opacity(
+      opacity: onPressed == null ? 0.55 : 1,
+      child: Container(
+        height: 56,
+        decoration: BoxDecoration(
+          gradient: AppGradients.accentGradient,
+          borderRadius: BorderRadius.circular(
+            AppSpacing.borderRadiusMedium + 2,
+          ),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x40FF3D00),
+              blurRadius: 20,
+              offset: Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(
+              AppSpacing.borderRadiusMedium + 2,
+            ),
+            onTap: onPressed,
+            child: Center(
+              child: isLoading
+                  ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : Text(
+                      label,
+                      style: AppTextStyles.headingSmall(
+                        color: AppColors.textPrimary,
+                      ).copyWith(letterSpacing: 0.5),
                     ),
-                  ),
-                )
-              : Text(
-                  'Sign Up',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: isEnabled
-                        ? Colors.white
-                        : const Color(0xFF9CA3AF), // Grey text when disabled
-                  ),
-                ),
-        );
-      },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BrutlSecondaryButton extends StatelessWidget {
+  const _BrutlSecondaryButton({
+    required this.label,
+    required this.iconAssetPath,
+    required this.onPressed,
+  });
+
+  final String label;
+  final String iconAssetPath;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 56,
+      child: OutlinedButton(
+        onPressed: onPressed,
+        style: OutlinedButton.styleFrom(
+          backgroundColor: AppColors.backgroundTertiary,
+          side: const BorderSide(color: AppColors.borderDefault),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(
+              AppSpacing.borderRadiusMedium + 2,
+            ),
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Image.asset(
+              iconAssetPath,
+              width: 20,
+              height: 20,
+              errorBuilder: (context, error, stackTrace) => const Icon(
+                Icons.g_mobiledata,
+                size: 22,
+                color: AppColors.textSecondary,
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Text(
+              label,
+              style: AppTextStyles.headingSmall(color: AppColors.textPrimary),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

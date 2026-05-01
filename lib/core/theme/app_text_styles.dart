@@ -3,7 +3,14 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'app_colors.dart';
 
-abstract final class AppTextStyles {
+/// Brutl typography scale powered by Poppins.
+///
+/// Use these semantic text styles to keep hierarchy consistent and avoid
+/// ad-hoc font overrides in feature screens.
+final class AppTextStyles {
+  const AppTextStyles._();
+
+  /// Hero metrics and high-emphasis numbers.
   static TextStyle displayLarge({Color color = AppColors.textPrimary}) =>
       GoogleFonts.poppins(
         fontSize: 32,
@@ -12,6 +19,7 @@ abstract final class AppTextStyles {
         letterSpacing: -1.0,
       );
 
+  /// Page titles and section hero headers.
   static TextStyle displayMedium({Color color = AppColors.textPrimary}) =>
       GoogleFonts.poppins(
         fontSize: 28,
@@ -20,6 +28,7 @@ abstract final class AppTextStyles {
         letterSpacing: -0.5,
       );
 
+  /// Section headings and dominant card titles.
   static TextStyle headingLarge({Color color = AppColors.textPrimary}) =>
       GoogleFonts.poppins(
         fontSize: 20,
@@ -28,6 +37,7 @@ abstract final class AppTextStyles {
         letterSpacing: -0.3,
       );
 
+  /// Item-level headings and exercise titles.
   static TextStyle headingMedium({Color color = AppColors.textPrimary}) =>
       GoogleFonts.poppins(
         fontSize: 17,
@@ -36,6 +46,7 @@ abstract final class AppTextStyles {
         letterSpacing: -0.2,
       );
 
+  /// Compact headings and grouped list labels.
   static TextStyle headingSmall({Color color = AppColors.textPrimary}) =>
       GoogleFonts.poppins(
         fontSize: 15,
@@ -44,6 +55,7 @@ abstract final class AppTextStyles {
         letterSpacing: 0,
       );
 
+  /// Main body copy.
   static TextStyle bodyLarge({Color color = AppColors.textSecondary}) =>
       GoogleFonts.poppins(
         fontSize: 15,
@@ -52,6 +64,7 @@ abstract final class AppTextStyles {
         letterSpacing: 0,
       );
 
+  /// Default body content.
   static TextStyle bodyMedium({Color color = AppColors.textSecondary}) =>
       GoogleFonts.poppins(
         fontSize: 14,
@@ -60,6 +73,7 @@ abstract final class AppTextStyles {
         letterSpacing: 0,
       );
 
+  /// Supporting and compact descriptions.
   static TextStyle bodySmall({Color color = AppColors.textSecondary}) =>
       GoogleFonts.poppins(
         fontSize: 13,
@@ -68,6 +82,7 @@ abstract final class AppTextStyles {
         letterSpacing: 0,
       );
 
+  /// Chips, tags, and labels.
   static TextStyle labelLarge({Color color = AppColors.textTertiary}) =>
       GoogleFonts.poppins(
         fontSize: 12,
@@ -76,6 +91,7 @@ abstract final class AppTextStyles {
         letterSpacing: 0.3,
       );
 
+  /// Captions and metadata.
   static TextStyle labelSmall({Color color = AppColors.textTertiary}) =>
       GoogleFonts.poppins(
         fontSize: 11,
@@ -84,6 +100,7 @@ abstract final class AppTextStyles {
         letterSpacing: 0.5,
       );
 
+  /// Accent labels for active and highlighted states.
   static TextStyle accentLabel({Color color = AppColors.accentPrimary}) =>
       GoogleFonts.poppins(
         fontSize: 11,

@@ -1,19 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
+import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_gradients.dart';
+import '../../core/theme/app_spacing.dart';
+import '../../core/theme/app_text_styles.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/auth_validation_provider.dart';
 import '../../widgets/password_input_field.dart';
 import 'forgot_password_screen.dart';
 import 'sign_up_screen.dart';
-
-/// LOGIN SCREEN
-///
-/// Complete login flow with:
-/// - Email input
-/// - Password input with eye icon toggle
-/// - Error handling with dynamic "Forgot Password?" link
-/// - The "Forgot Password?" link appears in RED when wrong password error occurs
-/// - Professional UI with smooth animations
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -23,9 +19,8 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  late TextEditingController _emailController;
-  late TextEditingController _passwordController;
-  late AuthValidationProvider _validationProvider;
+  late final TextEditingController _emailController;
+  late final TextEditingController _passwordController;
 
   @override
   void initState() {
@@ -42,51 +37,60 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _handleLogin() async {
-    _validationProvider = context.read<AuthValidationProvider>();
+    final validation = context.read<AuthValidationProvider>();
+    final authProvider = context.read<BrutlAuthProvider>();
 
     final email = _emailController.text.trim();
     final password = _passwordController.text.trim();
 
-    // Validate email
     if (email.isEmpty) {
-      _validationProvider.clearLoginError();
+      validation.clearLoginError();
       _showErrorDialog('Please enter your email address.');
       return;
     }
 
-    // Validate password
     if (password.isEmpty) {
-      _validationProvider.clearLoginError();
+      validation.clearLoginError();
       _showErrorDialog('Please enter your password.');
       return;
     }
 
-    // Call the auth provider to login
-    final authProvider = context.read<BrutlAuthProvider>();
     final success = await authProvider.signInWithEmail(
       email: email,
       password: password,
     );
 
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
 
     if (success) {
-      // Login successful, navigate to home screen
-      _validationProvider.clearLoginError();
-      // The app will automatically navigate based on auth state
-    } else {
-      // Login failed - show error and set "Forgot Password?" link to visible
-      final errorMessage =
-          authProvider.errorMessage ?? 'Login failed. Please try again.';
-      final isWrongPasswordError = _isWrongPasswordError(errorMessage);
-
-      // Set login error to trigger "Forgot Password?" link visibility
-      _validationProvider.setLoginError(
-        errorMessage,
-        showForgotPasswordLink: isWrongPasswordError,
-      );
-      _showErrorDialog(errorMessage);
+      validation.clearLoginError();
+      return;
     }
+
+    final errorMessage =
+        authProvider.errorMessage ?? 'Login failed. Please try again.';
+    final isWrongPasswordError = _isWrongPasswordError(errorMessage);
+
+    validation.setLoginError(
+      errorMessage,
+      showForgotPasswordLink: isWrongPasswordError,
+    );
+    _showErrorDialog(errorMessage);
+  }
+
+  Future<void> _handleGoogleSignIn() async {
+    final authProvider = context.read<BrutlAuthProvider>();
+    final success = await authProvider.signInWithGoogle();
+
+    if (!mounted || success) {
+      return;
+    }
+
+    _showErrorDialog(
+      authProvider.errorMessage ?? 'Google sign-in failed. Please try again.',
+    );
   }
 
   bool _isWrongPasswordError(String message) {
@@ -97,15 +101,29 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _showErrorDialog(String message) {
-    showDialog(
+    showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Login Error'),
-        content: Text(message),
+        backgroundColor: AppColors.backgroundTertiary,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppSpacing.borderRadiusLarge),
+          side: const BorderSide(color: AppColors.borderDefault),
+        ),
+        title: Text(
+          'Login Error',
+          style: AppTextStyles.headingMedium(color: AppColors.textPrimary),
+        ),
+        content: Text(
+          message,
+          style: AppTextStyles.bodyMedium(color: AppColors.textSecondary),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
+            child: Text(
+              'OK',
+              style: AppTextStyles.headingSmall(color: AppColors.accentPrimary),
+            ),
           ),
         ],
       ),
@@ -115,96 +133,106 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Login'),
-        centerTitle: true,
-        elevation: 0,
-        backgroundColor: const Color(0xFFF9FAFB),
-      ),
-      backgroundColor: const Color(0xFFF9FAFB),
+      appBar: AppBar(title: const Text('Sign In'), centerTitle: false),
+      backgroundColor: AppColors.backgroundPrimary,
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-          child: Consumer<AuthValidationProvider>(
-            builder: (context, validationProvider, _) {
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.xl,
+            vertical: AppSpacing.xxl,
+          ),
+          child: Consumer2<AuthValidationProvider, BrutlAuthProvider>(
+            builder: (context, validation, authProvider, _) {
               return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Header
-                  const Text(
-                    'Welcome Back',
-                    style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF1F2937),
+                  Text('WELCOME BACK', style: AppTextStyles.accentLabel()),
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    'Train hard. Track harder.',
+                    style: AppTextStyles.displayMedium(),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    'Sign in with Email or continue with Google.',
+                    style: AppTextStyles.bodyMedium(),
+                  ),
+                  const SizedBox(height: AppSpacing.xxl),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(AppSpacing.lg),
+                    decoration: BoxDecoration(
+                      color: AppColors.backgroundSecondary,
+                      borderRadius: BorderRadius.circular(
+                        AppSpacing.borderRadiusXL,
+                      ),
+                      border: Border.all(color: AppColors.borderSubtle),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _buildEmailInput(),
+                        const SizedBox(height: AppSpacing.lg),
+                        PasswordInputField(
+                          controller: _passwordController,
+                          label: 'Password',
+                          hintText: 'Enter your password',
+                          isVisible: validation.isLoginPasswordVisible,
+                          onVisibilityToggle: (_) {
+                            validation.toggleLoginPasswordVisibility();
+                          },
+                          onChanged: (_) => validation.clearLoginError(),
+                          textInputAction: TextInputAction.done,
+                        ),
+                        if (validation.showForgotPasswordLink) ...[
+                          const SizedBox(height: AppSpacing.sm),
+                          _buildForgotPasswordLink(),
+                        ],
+                        const SizedBox(height: AppSpacing.xl),
+                        _BrutlGradientButton(
+                          label: authProvider.isLoading
+                              ? 'Signing In...'
+                              : 'Sign In with Email',
+                          isLoading: authProvider.isLoading,
+                          onPressed: authProvider.isLoading
+                              ? null
+                              : _handleLogin,
+                        ),
+                        const SizedBox(height: AppSpacing.lg),
+                        _buildOrDivider(),
+                        const SizedBox(height: AppSpacing.lg),
+                        _BrutlSecondaryButton(
+                          label: 'Sign In with Google',
+                          iconAssetPath: 'assets/Images/google_logo.jpg',
+                          onPressed: authProvider.isLoading
+                              ? null
+                              : _handleGoogleSignIn,
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Login to your account to continue your fitness journey',
-                    style: TextStyle(fontSize: 14, color: Color(0xFF6B7280)),
-                  ),
-                  const SizedBox(height: 28),
-
-                  // ============ EMAIL INPUT ============
-                  _buildEmailInput(),
-                  const SizedBox(height: 20),
-
-                  // ============ PASSWORD INPUT WITH EYE ICON ============
-                  PasswordInputField(
-                    controller: _passwordController,
-                    label: 'Password',
-                    hintText: 'Enter your password',
-                    isVisible: validationProvider.isLoginPasswordVisible,
-                    onVisibilityToggle: (value) {
-                      validationProvider.toggleLoginPasswordVisibility();
-                    },
-                    onChanged: (value) {
-                      // Keep login error state clean while user edits.
-                      validationProvider.clearLoginError();
-                    },
-                  ),
-                  const SizedBox(height: 12),
-
-                  // ============ DYNAMIC "FORGOT PASSWORD?" LINK ============
-                  // ERROR HANDLING: Link appears in RED only when login error occurs
-                  // This link appears below the password box when wrong password error happens
-                  if (validationProvider.showForgotPasswordLink)
-                    _buildForgotPasswordLink(),
-
-                  const SizedBox(height: 28),
-
-                  // ============ LOGIN BUTTON ============
-                  _buildLoginButton(),
-                  const SizedBox(height: 16),
-
-                  // Sign up link
+                  const SizedBox(height: AppSpacing.xl),
                   Center(
                     child: Wrap(
                       crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        const Text(
+                        Text(
                           "Don't have an account? ",
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Color(0xFF6B7280),
-                          ),
+                          style: AppTextStyles.bodySmall(),
                         ),
                         GestureDetector(
                           onTap: () {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (context) => const SignUpScreen(),
+                                builder: (_) => const SignUpScreen(),
                               ),
                             );
                           },
-                          child: const Text(
+                          child: Text(
                             'Sign Up',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: Color(0xFF6366F1),
-                              fontWeight: FontWeight.w600,
+                            style: AppTextStyles.headingSmall(
+                              color: AppColors.accentPrimary,
                             ),
                           ),
                         ),
@@ -220,128 +248,184 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  /// EMAIL INPUT FIELD
   Widget _buildEmailInput() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        Text(
           'Email',
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
-            color: Color(0xFF1F2937),
-          ),
+          style: AppTextStyles.bodyMedium(color: AppColors.textSecondary),
         ),
-        const SizedBox(height: 8),
-        TextField(
-          controller: _emailController,
-          keyboardType: TextInputType.emailAddress,
-          textInputAction: TextInputAction.next,
-          decoration: InputDecoration(
-            hintText: 'Enter your email',
-            hintStyle: const TextStyle(fontSize: 14, color: Color(0xFFD1D5DB)),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Color(0xFFE5E7EB), width: 2),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Color(0xFFE5E7EB), width: 2),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Color(0xFF6366F1), width: 2),
-            ),
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: 12,
-            ),
-            filled: true,
-            fillColor: const Color(0xFFFFFFFF),
+        const SizedBox(height: AppSpacing.sm),
+        SizedBox(
+          height: 52,
+          child: TextField(
+            controller: _emailController,
+            keyboardType: TextInputType.emailAddress,
+            textInputAction: TextInputAction.next,
+            style: AppTextStyles.bodyLarge(color: AppColors.textPrimary),
+            decoration: const InputDecoration(hintText: 'Enter your email'),
           ),
-          style: const TextStyle(fontSize: 14, color: Color(0xFF1F2937)),
         ),
       ],
     );
   }
 
-  /// DYNAMIC "FORGOT PASSWORD?" LINK
-  ///
-  /// ERROR HANDLING: This link only appears when a wrong password error occurs.
-  /// It's displayed in RED color to grab user attention.
-  /// Clicking it navigates to the forgot password reset screen.
   Widget _buildForgotPasswordLink() {
     return GestureDetector(
       onTap: () {
         Navigator.push(
           context,
-          MaterialPageRoute(builder: (context) => const ForgotPasswordScreen()),
+          MaterialPageRoute(builder: (_) => const ForgotPasswordScreen()),
         );
       },
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        child: Row(
-          children: [
-            Icon(
-              Icons.error_outline,
-              size: 16,
-              color: const Color(0xFFF87171), // Red icon
+      child: Row(
+        children: [
+          const Icon(
+            Icons.error_outline,
+            size: 16,
+            color: AppColors.statusError,
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              'Forgot Password? Reset it now',
+              style: AppTextStyles.labelLarge(
+                color: AppColors.statusError,
+              ).copyWith(decoration: TextDecoration.underline),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                'Forgot Password? Click here to reset',
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  color: Color(0xFFF87171), // Red text
-                  decoration: TextDecoration.underline,
-                ),
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
-  /// LOGIN BUTTON
-  Widget _buildLoginButton() {
-    return Consumer<BrutlAuthProvider>(
-      builder: (context, authProvider, _) {
-        return ElevatedButton(
-          onPressed: authProvider.isLoading ? null : _handleLogin,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF6366F1),
-            disabledBackgroundColor: const Color(0xFFE5E7EB),
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-            elevation: 2,
+  Widget _buildOrDivider() {
+    return Row(
+      children: [
+        const Expanded(
+          child: Divider(color: AppColors.borderSubtle, thickness: 1),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+          child: Text('OR', style: AppTextStyles.labelSmall()),
+        ),
+        const Expanded(
+          child: Divider(color: AppColors.borderSubtle, thickness: 1),
+        ),
+      ],
+    );
+  }
+}
+
+class _BrutlGradientButton extends StatelessWidget {
+  const _BrutlGradientButton({
+    required this.label,
+    required this.onPressed,
+    this.isLoading = false,
+  });
+
+  final String label;
+  final VoidCallback? onPressed;
+  final bool isLoading;
+
+  @override
+  Widget build(BuildContext context) {
+    return Opacity(
+      opacity: onPressed == null ? 0.55 : 1,
+      child: Container(
+        height: 56,
+        decoration: BoxDecoration(
+          gradient: AppGradients.accentGradient,
+          borderRadius: BorderRadius.circular(
+            AppSpacing.borderRadiusMedium + 2,
           ),
-          child: authProvider.isLoading
-              ? const SizedBox(
-                  height: 20,
-                  width: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      Color(0xFF6366F1),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x40FF3D00),
+              blurRadius: 20,
+              offset: Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(
+              AppSpacing.borderRadiusMedium + 2,
+            ),
+            onTap: onPressed,
+            child: Center(
+              child: isLoading
+                  ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : Text(
+                      label,
+                      style: AppTextStyles.headingSmall(
+                        color: AppColors.textPrimary,
+                      ).copyWith(letterSpacing: 0.5),
                     ),
-                  ),
-                )
-              : const Text(
-                  'Login',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
-                  ),
-                ),
-        );
-      },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BrutlSecondaryButton extends StatelessWidget {
+  const _BrutlSecondaryButton({
+    required this.label,
+    required this.iconAssetPath,
+    required this.onPressed,
+  });
+
+  final String label;
+  final String iconAssetPath;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 56,
+      child: OutlinedButton(
+        onPressed: onPressed,
+        style: OutlinedButton.styleFrom(
+          backgroundColor: AppColors.backgroundTertiary,
+          side: const BorderSide(color: AppColors.borderDefault),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(
+              AppSpacing.borderRadiusMedium + 2,
+            ),
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Image.asset(
+              iconAssetPath,
+              width: 20,
+              height: 20,
+              errorBuilder: (context, error, stackTrace) => const Icon(
+                Icons.g_mobiledata,
+                size: 22,
+                color: AppColors.textSecondary,
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Text(
+              label,
+              style: AppTextStyles.headingSmall(color: AppColors.textPrimary),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

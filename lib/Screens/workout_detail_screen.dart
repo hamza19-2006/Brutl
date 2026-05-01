@@ -33,48 +33,62 @@ class WorkoutDetailScreen extends StatelessWidget {
                 itemCount: session.exercises.length,
                 itemBuilder: (context, index) {
                   final exercise = session.exercises[index];
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1A1A1A),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFF2A2A2A)),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(
-                          child: Text(
-                            exercise.name,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
+                  return InkWell(
+                    onTap: () {
+                      showModalBottomSheet<void>(
+                        context: context,
+                        isScrollControlled: true,
+                        backgroundColor: Colors.transparent,
+                        builder: (_) => ExerciseEditorSheet(
+                          exercise: exercise,
+                          splitName: session.splitName,
+                        ),
+                      );
+                    },
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1A1A1A),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFF2A2A2A)),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              exercise.name,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ),
-                        ),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Text(
-                              '${exercise.sets} sets',
-                              style: const TextStyle(
-                                color: Color(0xFF888888),
-                                fontSize: 14,
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                '${exercise.sets} sets',
+                                style: const TextStyle(
+                                  color: Color(0xFF888888),
+                                  fontSize: 14,
+                                ),
                               ),
-                            ),
-                            Text(
-                              exercise.reps,
-                              style: const TextStyle(
-                                color: Color(0xFFAAAAAA),
-                                fontSize: 14,
-                                fontWeight: FontWeight.w500,
+                              Text(
+                                exercise.reps,
+                                style: const TextStyle(
+                                  color: Color(0xFFAAAAAA),
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                ),
                               ),
-                            ),
-                          ],
-                        ),
-                      ],
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   );
                 },
@@ -88,7 +102,7 @@ class WorkoutDetailScreen extends StatelessWidget {
                     context: context,
                     isScrollControlled: true,
                     backgroundColor: Colors.transparent,
-                    builder: (_) => const ExerciseEditorSheet(),
+                    builder: (_) => ExerciseEditorSheet(splitName: session.splitName),
                   );
                 },
                 style: ElevatedButton.styleFrom(

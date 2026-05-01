@@ -25,10 +25,7 @@ Future<void> main() async {
   await Hive.openBox<int>('steps_history');
 
   // ── Initialize Workmanager for silent background step sync ──
-  await Workmanager().initialize(
-    callbackDispatcher,
-    isInDebugMode: false,
-  );
+  await Workmanager().initialize(callbackDispatcher, isInDebugMode: false);
 
   // Register a periodic task that runs approximately every 15 minutes.
   // Android enforces a minimum of 15 minutes for periodic tasks.
@@ -46,7 +43,9 @@ Future<void> main() async {
     backoffPolicy: BackoffPolicy.linear,
     backoffPolicyDelay: const Duration(minutes: 10),
   );
-  debugPrint('BRUTL_STEPS: Workmanager initialized & periodic task registered.');
+  debugPrint(
+    'BRUTL_STEPS: Workmanager initialized & periodic task registered.',
+  );
 
   final workoutProvider = WorkoutProvider();
   final stepProvider = StepProvider();

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../models/user_model.dart';
+import '../home_screen.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -287,9 +288,20 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
       // Only mark profile complete AFTER successful write
       await docRef.update({'isProfileComplete': true});
+
+      // --- CRITICAL: Async Gap Fix ---
+      if (!mounted) {
+        return;
+      }
+
+      // --- Navigation Fix: Clear stack and route to HomeScreen ---
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute<void>(builder: (_) => const HomeScreen()),
+        (route) => false,
+      );
     } catch (e) {
-      debugPrint(e.toString());
-    } finally {
+      debugPrint('ONBOARDING: Failed to finalize profile — $e');
       if (mounted) {
         setState(() => _isSaving = false);
       }

@@ -9,7 +9,8 @@ import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/auth_validation_provider.dart';
-import '../../widgets/password_input_field.dart';
+import 'login_screen.dart';
+import '../onboarding/onboarding_screen.dart';
 
 class SignUpScreen extends StatefulWidget {
   const SignUpScreen({super.key});
@@ -23,12 +24,25 @@ class _SignUpScreenState extends State<SignUpScreen> {
   late final TextEditingController _passwordController;
   late final TextEditingController _confirmPasswordController;
 
+  bool _isPasswordHidden = true;
+  bool _isConfirmPasswordHidden = true;
+  bool _showPasswordRules = false;
+  final FocusNode _passwordFocusNode = FocusNode();
+
   @override
   void initState() {
     super.initState();
     _emailController = TextEditingController();
     _passwordController = TextEditingController();
     _confirmPasswordController = TextEditingController();
+
+    _passwordFocusNode.addListener(() {
+      if (_passwordFocusNode.hasFocus) {
+        setState(() {
+          _showPasswordRules = true;
+        });
+      }
+    });
   }
 
   @override
@@ -36,6 +50,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
+    _passwordFocusNode.dispose();
     super.dispose();
   }
 
@@ -75,11 +90,13 @@ class _SignUpScreenState extends State<SignUpScreen> {
       _passwordController.clear();
       _confirmPasswordController.clear();
       validation.resetValidationState();
-      unawaited(
-        _showDialog(
-          'Account created successfully. Welcome to Brutl!',
-          isError: false,
-          autoDismissAfter: const Duration(milliseconds: 700),
+
+      // Fix 6: No popup, direct navigation
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              const OnboardingScreen(), // Use OnboardingScreen instead of InfoCollectionScreen
         ),
       );
       return;
@@ -206,31 +223,131 @@ class _SignUpScreenState extends State<SignUpScreen> {
                       children: [
                         _buildEmailInput(),
                         const SizedBox(height: AppSpacing.lg),
-                        PasswordInputField(
-                          controller: _passwordController,
-                          label: 'Password',
-                          hintText: 'Create your password',
-                          isVisible: validation.isPasswordVisible,
-                          onVisibilityToggle: (_) {
-                            validation.togglePasswordVisibility();
-                          },
-                          onChanged: validation.updatePassword,
-                          textInputAction: TextInputAction.next,
+
+                        // Password Field (Bug 4 Fix)
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Password',
+                              style: AppTextStyles.bodyMedium(
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                            const SizedBox(height: AppSpacing.sm),
+                            TextField(
+                              controller: _passwordController,
+                              focusNode: _passwordFocusNode,
+                              obscureText: _isPasswordHidden,
+                              style: AppTextStyles.bodyLarge(
+                                color: AppColors.textPrimary,
+                              ),
+                              decoration: InputDecoration(
+                                hintText: 'Create your password',
+                                hintStyle: AppTextStyles.bodyMedium(
+                                  color: AppColors.textSecondary,
+                                ),
+                                filled: true,
+                                fillColor: AppColors.backgroundSecondary,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: const BorderSide(
+                                    color: AppColors.borderDefault,
+                                  ),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: const BorderSide(
+                                    color: AppColors.accentPrimary,
+                                    width: 1.5,
+                                  ),
+                                ),
+                                suffixIcon: IconButton(
+                                  icon: Icon(
+                                    _isPasswordHidden
+                                        ? Icons.visibility_off
+                                        : Icons.visibility,
+                                    color: AppColors.textSecondary,
+                                  ),
+                                  onPressed: () {
+                                    setState(() {
+                                      _isPasswordHidden = !_isPasswordHidden;
+                                    });
+                                  },
+                                ),
+                              ),
+                              onChanged: validation.updatePassword,
+                              textInputAction: TextInputAction.next,
+                            ),
+                          ],
                         ),
+
                         const SizedBox(height: AppSpacing.md),
-                        _buildPasswordRulesDisplay(validation),
-                        const SizedBox(height: AppSpacing.lg),
-                        PasswordInputField(
-                          controller: _confirmPasswordController,
-                          label: 'Confirm Password',
-                          hintText: 'Re-enter your password',
-                          isVisible: validation.isConfirmPasswordVisible,
-                          onVisibilityToggle: (_) {
-                            validation.toggleConfirmPasswordVisibility();
-                          },
-                          onChanged: validation.updateConfirmPassword,
-                          textInputAction: TextInputAction.done,
+
+                        // Password Rules Visibility (Bug 5 Fix)
+                        if (_showPasswordRules) ...[
+                          _buildPasswordRulesDisplay(validation),
+                          const SizedBox(height: AppSpacing.lg),
+                        ],
+
+                        // Confirm Password Field (Bug 4 Fix)
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Confirm Password',
+                              style: AppTextStyles.bodyMedium(
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                            const SizedBox(height: AppSpacing.sm),
+                            TextField(
+                              controller: _confirmPasswordController,
+                              obscureText: _isConfirmPasswordHidden,
+                              style: AppTextStyles.bodyLarge(
+                                color: AppColors.textPrimary,
+                              ),
+                              decoration: InputDecoration(
+                                hintText: 'Re-enter your password',
+                                hintStyle: AppTextStyles.bodyMedium(
+                                  color: AppColors.textSecondary,
+                                ),
+                                filled: true,
+                                fillColor: AppColors.backgroundSecondary,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: const BorderSide(
+                                    color: AppColors.borderDefault,
+                                  ),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: const BorderSide(
+                                    color: AppColors.accentPrimary,
+                                    width: 1.5,
+                                  ),
+                                ),
+                                suffixIcon: IconButton(
+                                  icon: Icon(
+                                    _isConfirmPasswordHidden
+                                        ? Icons.visibility_off
+                                        : Icons.visibility,
+                                    color: AppColors.textSecondary,
+                                  ),
+                                  onPressed: () {
+                                    setState(() {
+                                      _isConfirmPasswordHidden =
+                                          !_isConfirmPasswordHidden;
+                                    });
+                                  },
+                                ),
+                              ),
+                              onChanged: validation.updateConfirmPassword,
+                              textInputAction: TextInputAction.done,
+                            ),
+                          ],
                         ),
+
                         const SizedBox(height: AppSpacing.md),
                         if (_passwordController.text.isNotEmpty ||
                             _confirmPasswordController.text.isNotEmpty)
@@ -270,7 +387,15 @@ class _SignUpScreenState extends State<SignUpScreen> {
                           style: AppTextStyles.bodySmall(),
                         ),
                         GestureDetector(
-                          onTap: () => Navigator.pop(context),
+                          // Fix 6: Correct routing to LoginScreen
+                          onTap: () {
+                            Navigator.pushReplacement(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const LoginScreen(),
+                              ),
+                            );
+                          },
                           child: Text(
                             'Sign In',
                             style: AppTextStyles.headingSmall(

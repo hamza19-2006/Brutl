@@ -6,7 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:pedometer/pedometer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-class StepService {
+class StepService extends ChangeNotifier {
   StepService._();
 
   static final StepService instance = StepService._();
@@ -39,10 +39,12 @@ class StepService {
     _lastSavedDate = preferences.getString(_lastSavedDateKey) ?? '';
     _hasStoredBaseline = preferences.containsKey(_baselineStepsKey);
     final currentDate = _dateKeyFor(DateTime.now());
+
     if (_lastSavedDate.isEmpty) {
       _lastSavedDate = currentDate;
       await _saveState();
     }
+
     _stepSubscription ??= Pedometer.stepCountStream.listen(
       onStepCount,
       onError: (Object error) {
@@ -55,39 +57,56 @@ class StepService {
   void onStepCount(StepCount event) {
     final currentDate = _dateKeyFor(DateTime.now());
     final incomingSteps = event.steps < 0 ? 0 : event.steps;
+
+    // Initialization check: First install/run
     if (!_hasStoredBaseline) {
       _baselineSteps = incomingSteps;
       _todaySteps = 0;
       _lastSavedDate = currentDate;
       _hasStoredBaseline = true;
       unawaited(_saveState());
+      notifyListeners();
       return;
     }
+
+    // Check 1 — New Day Detection (Midnight passed)
     if (_lastSavedDate != currentDate) {
       _baselineSteps = incomingSteps;
       _todaySteps = 0;
       _lastSavedDate = currentDate;
       _hasStoredBaseline = true;
       unawaited(_saveState());
+      notifyListeners();
       return;
     }
+
+    // Check 2 — Phone Reboot Detection
     if (incomingSteps < _baselineSteps) {
-      _baselineSteps = incomingSteps;
-      _todaySteps = 0;
+      _baselineSteps = 0;
+      _todaySteps += incomingSteps;
       unawaited(_saveState());
+      notifyListeners();
       return;
     }
-    _todaySteps = incomingSteps - _baselineSteps;
+
+    // Check 3 — Normal Step Calculation
+    int calculatedSteps = incomingSteps - _baselineSteps;
+    if (calculatedSteps < 0) {
+      calculatedSteps = 0;
+    }
+
+    _todaySteps = calculatedSteps;
     unawaited(_saveState());
+    notifyListeners();
   }
 
   double calculateCalories(int todaySteps) {
     final calories = todaySteps * 0.04;
-    if (calories > 5000) {
-      return 5000;
+    if (calories > 5000.0) {
+      return 5000.0;
     }
-    if (calories < 0) {
-      return 0;
+    if (calories < 0.0) {
+      return 0.0;
     }
     return calories;
   }
@@ -113,16 +132,18 @@ class StepService {
       return;
     }
     final calories = calculateCalories(_todaySteps);
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(currentUser.uid)
-        .set(<String, dynamic>{
-          'baseline_steps': _baselineSteps,
-          'currentSteps': _todaySteps,
-          'dailyCaloriesBurned': calories,
-          'lastStepResetDate': _lastSavedDate,
-          'last_saved_date': _lastSavedDate,
-        }, SetOptions(merge: true));
+    await FirebaseFirestore.instance.collection('users').doc(currentUser.uid).set(<
+      String,
+      dynamic
+    >{
+      'baseline_steps': _baselineSteps,
+      'currentSteps': _todaySteps,
+      'dailyCaloriesBurned': calories,
+      'calories':
+          calories, // Ensures Bug 2 home_screen.dart StreamBuilder catches the update
+      'lastStepResetDate': _lastSavedDate,
+      'last_saved_date': _lastSavedDate,
+    }, SetOptions(merge: true));
   }
 
   String _dateKeyFor(DateTime date) {
@@ -130,5 +151,11 @@ class StepService {
     final month = date.month.toString().padLeft(2, '0');
     final day = date.day.toString().padLeft(2, '0');
     return '$year-$month-$day';
+  }
+
+  @override
+  void dispose() {
+    _stepSubscription?.cancel();
+    super.dispose();
   }
 }

@@ -16,7 +16,6 @@ import 'providers/auth_validation_provider.dart';
 import 'providers/health_provider.dart';
 import 'providers/workout_nutrition_provider.dart';
 import 'providers/workout_provider.dart';
-import 'services/step_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -74,10 +73,10 @@ class _AppWarmupGateState extends State<AppWarmupGate> {
     try {
       await Hive.initFlutter();
       await Hive.openBox<String>('exercises');
-      await StepService.instance.initializeStepService();
-      if (!mounted) {
-        return;
-      }
+
+      // Add check to ensure context is still valid
+      if (!mounted) return;
+
       await context.read<WorkoutProvider>().initialize();
       await context.read<WorkoutNutritionProvider>().initialize();
     } catch (error) {
@@ -135,8 +134,9 @@ class AuthWrapper extends StatelessWidget {
                 doc != null &&
                 doc.exists &&
                 profileData?['isProfileComplete'] == true;
+
             if (!isProfileComplete) {
-              return const InfoCollectionScreen();
+              return const OnboardingScreen();
             }
             return const HomeScreen();
           },

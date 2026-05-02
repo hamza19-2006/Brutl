@@ -4,12 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
-import 'workout_screen.dart';
 import '../providers/workout_provider.dart';
 import '../services/database_service.dart';
 import '../widgets/biometric_card.dart';
 import '../widgets/exercise_highlight_card.dart';
 import '../widgets/header_widget.dart';
+import 'workout_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -120,7 +120,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             onCaloriesTap: () => _navigateToWorkout(),
             onExerciseTap: _navigateToWorkout,
           ),
-          const WorkoutScreen(showBottomNavigationBar: false),
+          const workout_screen(showBottomNavigationBar: false),
           _ShopTab(label: navLabels[2]),
           _ChatTab(label: navLabels[3]),
         ],

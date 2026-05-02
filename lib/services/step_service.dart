@@ -143,7 +143,7 @@ class StepService extends ChangeNotifier {
     super.dispose();
   }
 
-  /// Emits today's steps to listeners, skipping duplicate values. // Describe stream emit.
+  /// Emits today's steps to listeners, skipping duplicate values.
   void _emitSteps(int steps) { // Emit today steps to stream.
     if (steps == _lastEmittedSteps) { // Skip duplicate emissions.
       return; // Exit early.

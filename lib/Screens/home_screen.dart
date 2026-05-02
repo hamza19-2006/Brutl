@@ -162,16 +162,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 // HOME TAB — Steps + Calories Dashboard with graceful fallbacks
 // ═══════════════════════════════════════════════════════════════════════════════
 
-class _HomeLocalData { // Holds locally stored dashboard data.
-  const _HomeLocalData({ // Creates local data snapshot.
-    required this.stepGoal, // Daily step goal from prefs.
-    required this.calorieGoal, // Daily calorie goal from prefs.
-    required this.todayCalories, // Today's calories from prefs.
+class _HomeLocalData {
+  const _HomeLocalData({
+    required this.stepGoal,
+    required this.calorieGoal,
+    required this.todayCalories,
   });
 
-  final int stepGoal; // Step goal value.
-  final int calorieGoal; // Calorie goal value.
-  final int todayCalories; // Today's calories value.
+  final int stepGoal;
+  final int calorieGoal;
+  final int todayCalories;
 }
 
 class _HomeTab extends StatefulWidget {

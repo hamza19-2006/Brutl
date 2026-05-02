@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../models/user_model.dart';
@@ -189,12 +190,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           _usernameCheckError = 'Error checking username';
         });
       } finally {
-        if (!mounted || requestId != _usernameCheckRequestId) {
-          return;
+        if (mounted && requestId == _usernameCheckRequestId) {
+          setState(() {
+            _isCheckingUsername = false;
+          });
         }
-        setState(() {
-          _isCheckingUsername = false;
-        });
       }
     });
   }

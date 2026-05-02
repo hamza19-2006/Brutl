@@ -6,9 +6,9 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../providers/workout_nutrition_provider.dart';
+import '../providers/nutrition_service.dart';
 import '../providers/workout_provider.dart';
 import '../services/database_service.dart';
-import '../services/nutrition_service.dart';
 import '../services/step_service.dart';
 import '../widgets/biometric_card.dart';
 import '../widgets/exercise_highlight_card.dart';

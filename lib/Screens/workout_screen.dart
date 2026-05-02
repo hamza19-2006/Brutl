@@ -6,10 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/workout_nutrition_provider.dart';
+import '../providers/nutrition_service.dart';
 import '../providers/workout_provider.dart';
-import '../services/nutrition_service.dart';
 import '../widgets/macro_dashboard_card.dart';
-import '../widgets/meal_logger_sheet.dart';
 import '../widgets/workout_card_widget.dart';
 import '../models/brutl_models.dart';
 
@@ -108,7 +107,6 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
         }
 
         final workoutProvider = context.watch<WorkoutProvider>();
-        final splitName = workoutProvider.selectedWorkoutSplit;
         final weekId = 'week_${workoutProvider.selectedWeek}';
 
         return Scaffold(

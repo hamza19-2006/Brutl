@@ -71,14 +71,17 @@ class _AppWarmupGateState extends State<AppWarmupGate> {
 
   Future<void> _warmupServices() async {
     try {
+      final workoutProvider = context.read<WorkoutProvider>();
+      final nutritionProvider = context.read<WorkoutNutritionProvider>();
+
       await Hive.initFlutter();
       await Hive.openBox<String>('exercises');
 
       // Add check to ensure context is still valid
       if (!mounted) return;
 
-      await context.read<WorkoutProvider>().initialize();
-      await context.read<WorkoutNutritionProvider>().initialize();
+      await workoutProvider.initialize();
+      await nutritionProvider.initialize();
     } catch (error) {
       debugPrint('BRUTL_BOOT: Startup warmup failed — $error');
     }

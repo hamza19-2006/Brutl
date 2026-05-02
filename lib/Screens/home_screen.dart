@@ -32,7 +32,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    
+
     // Initialize StepService safely AFTER HomeScreen begins loading
     StepService.instance.initializeStepService();
     StepService.instance.addListener(_onStepUpdate);
@@ -308,9 +308,9 @@ class _HomeTab extends StatelessWidget {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) {
       return CaloriesCard(
-        caloriesBurned: StepService.instance.calculateCalories(
-          StepService.instance.getTodaySteps(),
-        ).clamp(0.0, 5000.0),
+        caloriesBurned: StepService.instance
+            .calculateCalories(StepService.instance.getTodaySteps())
+            .clamp(0.0, 5000.0),
         calorieGoal: workoutProvider.user.dailyCalorieGoal,
         caloriesLabel: workoutProvider.homeUi.caloriesLabel,
         caloriesUnitLabel: workoutProvider.homeUi.caloriesUnitLabel,
@@ -339,7 +339,9 @@ class _HomeTab extends StatelessWidget {
         }
 
         final data = snapshot.data?.data();
-        final firestoreCalories = (data?['calories'] as num?)?.toDouble() ?? (data?['dailyCaloriesBurned'] as num?)?.toDouble();
+        final firestoreCalories =
+            (data?['calories'] as num?)?.toDouble() ??
+            (data?['dailyCaloriesBurned'] as num?)?.toDouble();
         final calories =
             (firestoreCalories ?? workoutProvider.currentDailyCaloriesBurned)
                 .clamp(0.0, 5000.0)

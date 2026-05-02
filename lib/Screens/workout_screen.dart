@@ -92,16 +92,20 @@ class WorkoutScreen extends StatelessWidget {
                         .snapshots(),
                     builder: (context, snapshot) {
                       final data = snapshot.data?.data();
-                      final firestoreCalories = (data?['calories'] as num?)?.toDouble() ?? 
+                      final firestoreCalories =
+                          (data?['calories'] as num?)?.toDouble() ??
                           (data?['dailyCaloriesBurned'] as num?)?.toDouble();
-                      final calories = (firestoreCalories ?? workoutProvider.currentDailyCaloriesBurned)
-                          .clamp(0.0, 5000.0)
-                          .round();
-                      
-                      final streamSyncedNutrition = nutritionProvider.nutrition.copyWith(
-                        totalCal: calories,
-                        goalCal: workoutProvider.user.dailyCalorieGoal,
-                      );
+                      final calories =
+                          (firestoreCalories ??
+                                  workoutProvider.currentDailyCaloriesBurned)
+                              .clamp(0.0, 5000.0)
+                              .round();
+
+                      final streamSyncedNutrition = nutritionProvider.nutrition
+                          .copyWith(
+                            totalCal: calories,
+                            goalCal: workoutProvider.user.dailyCalorieGoal,
+                          );
 
                       return MacroDashboardCard(
                         nutrition: streamSyncedNutrition,
@@ -164,14 +168,17 @@ class WorkoutScreen extends StatelessWidget {
                     builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting) {
                         return const Center(
-                          child: CircularProgressIndicator(color: Color(0xFFFF3D00)),
+                          child: CircularProgressIndicator(
+                            color: Color(0xFFFF3D00),
+                          ),
                         );
                       }
 
                       final data = snapshot.data?.data();
                       List<dynamic> customSplitDays = [];
                       if (data != null && data.containsKey('customSplitDays')) {
-                        customSplitDays = data['customSplitDays'] as List<dynamic>;
+                        customSplitDays =
+                            data['customSplitDays'] as List<dynamic>;
                       }
 
                       if (customSplitDays.isEmpty) {

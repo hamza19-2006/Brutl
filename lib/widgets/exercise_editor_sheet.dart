@@ -147,7 +147,7 @@ class _ExerciseEditorSheetState extends State<ExerciseEditorSheet> {
                     Expanded(
                       flex: 3,
                       child: DropdownButtonFormField<String>(
-                        value: _selectedWeightUnit,
+                        initialValue: _selectedWeightUnit,
                         dropdownColor: const Color(0xFF1A1A1A),
                         decoration: const InputDecoration(
                           labelText: 'Unit',

@@ -365,7 +365,7 @@ class _HomeTabState extends State<_HomeTab> {
   ) {
     return ValueListenableBuilder<int>(
       valueListenable: _todayCaloriesNotifier,
-      builder: (context, todayCalories, __) {
+      builder: (context, todayCalories, _) {
         final clampedCalories = _clampCalories(todayCalories);
         return CaloriesCard(
           caloriesBurned: clampedCalories.toDouble(),

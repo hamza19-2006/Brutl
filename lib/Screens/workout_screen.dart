@@ -230,14 +230,10 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // Defer to after frame.
       _isSyncScheduled = false; // Clear scheduled flag.
-      final pendingTotal = _pendingCaloriesTotal; // Capture latest total.
+      final pendingTotal = _pendingCaloriesTotal!; // Capture latest total.
       _pendingCaloriesTotal = null; // Clear pending total.
       if (!mounted) {
         // Guard unmounted state.
-        return; // Exit early.
-      }
-      if (pendingTotal == null) {
-        // Guard missing total.
         return; // Exit early.
       }
       _syncTodayCalories(pendingTotal); // Persist calories.

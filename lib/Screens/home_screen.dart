@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
+import '../providers/workout_nutrition_provider.dart';
 import '../providers/workout_provider.dart';
 import '../services/database_service.dart';
 import '../services/step_service.dart';
@@ -176,9 +177,9 @@ class _HomeTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<WorkoutProvider>(
-      builder: (context, workoutProvider, _) {
-        if (workoutProvider.isLoading) {
+    return Consumer2<WorkoutProvider, WorkoutNutritionProvider>(
+      builder: (context, workoutProvider, nutritionProvider, _) {
+        if (workoutProvider.isLoading || nutritionProvider.isLoading) {
           return const Center(
             child: CircularProgressIndicator(color: Color(0xFFFF3D00)),
           );
@@ -211,14 +212,16 @@ class _HomeTab extends StatelessWidget {
                           child: _buildStepsCard(
                             context,
                             workoutProvider,
-                            workoutProvider.currentDailySteps,
-                            workoutProvider.user.dailyStepGoal,
                           ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
                           flex: 4,
-                          child: _buildCaloriesCard(context, workoutProvider),
+                          child: _buildCaloriesCard(
+                            context,
+                            workoutProvider,
+                            nutritionProvider,
+                          ),
                         ),
                       ],
                     ),
@@ -287,73 +290,70 @@ class _HomeTab extends StatelessWidget {
   Widget _buildStepsCard(
     BuildContext context,
     WorkoutProvider workoutProvider,
-    int currentSteps,
-    int stepGoal,
   ) {
     // Rely strictly on local StepService for real-time pedometer reading
     final actualSteps = StepService.instance.getTodaySteps();
+    final uid = FirebaseAuth.instance.currentUser?.uid;
 
-    return StepsCard(
-      currentSteps: actualSteps,
-      goalSteps: stepGoal,
-      stepsLabel: workoutProvider.homeUi.stepsLabel,
-      stepsUnitLabel: workoutProvider.homeUi.stepsUnitLabel,
+    if (uid == null) {
+      return StepsCard(
+        currentSteps: actualSteps,
+        goalSteps: workoutProvider.user.dailyStepGoal,
+        stepsLabel: workoutProvider.homeUi.stepsLabel,
+        stepsUnitLabel: workoutProvider.homeUi.stepsUnitLabel,
+      );
+    }
+
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
+      builder: (context, snapshot) {
+        final data = snapshot.data?.data();
+        final stepGoal =
+            (data?['dailySteps'] as num?)?.toInt() ??
+            workoutProvider.user.dailyStepGoal;
+
+        return StepsCard(
+          currentSteps: actualSteps,
+          goalSteps: stepGoal,
+          stepsLabel: workoutProvider.homeUi.stepsLabel,
+          stepsUnitLabel: workoutProvider.homeUi.stepsUnitLabel,
+        );
+      },
     );
   }
 
   Widget _buildCaloriesCard(
     BuildContext context,
     WorkoutProvider workoutProvider,
+    WorkoutNutritionProvider nutritionProvider,
   ) {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) {
-      return CaloriesCard(
-        caloriesBurned: StepService.instance.calculateCalories(
-          StepService.instance.getTodaySteps(),
-        ).clamp(0.0, 5000.0),
-        calorieGoal: workoutProvider.user.dailyCalorieGoal,
-        caloriesLabel: workoutProvider.homeUi.caloriesLabel,
-        caloriesUnitLabel: workoutProvider.homeUi.caloriesUnitLabel,
-        onTap: onCaloriesTap,
-      );
-    }
-
-    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          // Show CircularProgressIndicator while stream loads
-          return Container(
-            decoration: BoxDecoration(
-              color: const Color(0xFF1A1A1A),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFF2A2A2A)),
-            ),
-            child: const Center(
-              child: CircularProgressIndicator(color: Color(0xFFFF3D00)),
-            ),
-          );
-        }
-
-        final data = snapshot.data?.data();
-        final firestoreCalories = (data?['calories'] as num?)?.toDouble() ?? (data?['dailyCaloriesBurned'] as num?)?.toDouble();
-        final calories =
-            (firestoreCalories ?? workoutProvider.currentDailyCaloriesBurned)
-                .clamp(0.0, 5000.0)
-                .toDouble();
-
-        return CaloriesCard(
-          caloriesBurned: calories,
-          calorieGoal: workoutProvider.user.dailyCalorieGoal,
-          caloriesLabel: workoutProvider.homeUi.caloriesLabel,
-          caloriesUnitLabel: workoutProvider.homeUi.caloriesUnitLabel,
-          onTap: onCaloriesTap,
-        );
-      },
+    final nutrition = nutritionProvider.nutrition;
+    final currentCalories = _calculateMacroCalories(
+      carbs: nutrition.carbs.consumed,
+      protein: nutrition.protein.consumed,
+      fats: nutrition.fats.consumed,
     );
+    final targetCalories = _calculateMacroCalories(
+      carbs: nutrition.carbs.goal,
+      protein: nutrition.protein.goal,
+      fats: nutrition.fats.goal,
+    );
+
+    return CaloriesCard(
+      caloriesBurned: currentCalories.toDouble(),
+      calorieGoal: targetCalories,
+      caloriesLabel: workoutProvider.homeUi.caloriesLabel,
+      caloriesUnitLabel: workoutProvider.homeUi.caloriesUnitLabel,
+      onTap: onCaloriesTap,
+    );
+  }
+
+  int _calculateMacroCalories({
+    required int carbs,
+    required int protein,
+    required int fats,
+  }) {
+    return (carbs * 4) + (protein * 4) + (fats * 9);
   }
 }
 

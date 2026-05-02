@@ -39,11 +39,20 @@ class WorkoutScreen extends StatelessWidget {
         }
 
         final splitName = workoutProvider.selectedWorkoutSplit;
-        final sharedCalories = workoutProvider.currentDailyCaloriesBurned
-            .round();
-        final syncedNutrition = nutritionProvider.nutrition.copyWith(
-          totalCal: sharedCalories,
-          goalCal: workoutProvider.user.dailyCalorieGoal,
+        final nutrition = nutritionProvider.nutrition;
+        final currentCalories = _calculateMacroCalories(
+          carbs: nutrition.carbs.consumed,
+          protein: nutrition.protein.consumed,
+          fats: nutrition.fats.consumed,
+        );
+        final targetCalories = _calculateMacroCalories(
+          carbs: nutrition.carbs.goal,
+          protein: nutrition.protein.goal,
+          fats: nutrition.fats.goal,
+        );
+        final syncedNutrition = nutrition.copyWith(
+          totalCal: currentCalories,
+          goalCal: targetCalories,
         );
         final daysForSplit = getDaysForSplit(splitName);
         final weekId = 'week_${workoutProvider.selectedWeek}';
@@ -85,30 +94,10 @@ class WorkoutScreen extends StatelessWidget {
                 ),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-                    stream: FirebaseFirestore.instance
-                        .collection('users')
-                        .doc(currentUser.uid)
-                        .snapshots(),
-                    builder: (context, snapshot) {
-                      final data = snapshot.data?.data();
-                      final firestoreCalories = (data?['calories'] as num?)?.toDouble() ?? 
-                          (data?['dailyCaloriesBurned'] as num?)?.toDouble();
-                      final calories = (firestoreCalories ?? workoutProvider.currentDailyCaloriesBurned)
-                          .clamp(0.0, 5000.0)
-                          .round();
-                      
-                      final streamSyncedNutrition = nutritionProvider.nutrition.copyWith(
-                        totalCal: calories,
-                        goalCal: workoutProvider.user.dailyCalorieGoal,
-                      );
-
-                      return MacroDashboardCard(
-                        nutrition: streamSyncedNutrition,
-                        ui: nutritionProvider.ui,
-                        onTap: () => _openMealLoggerSheet(context),
-                      );
-                    },
+                  child: MacroDashboardCard(
+                    nutrition: syncedNutrition,
+                    ui: nutritionProvider.ui,
+                    onTap: () => _openMealLoggerSheet(context),
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -213,6 +202,14 @@ class WorkoutScreen extends StatelessWidget {
       backgroundColor: Colors.transparent,
       builder: (_) => const MealLoggerSheet(),
     );
+  }
+
+  int _calculateMacroCalories({
+    required int carbs,
+    required int protein,
+    required int fats,
+  }) {
+    return (carbs * 4) + (protein * 4) + (fats * 9);
   }
 
   IconData _iconForIndex(int index) {

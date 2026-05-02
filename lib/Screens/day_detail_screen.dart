@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -9,7 +11,7 @@ import '../widgets/exercise_editor_sheet.dart';
 ///
 /// Reads exercises from `users/{uid}/weeks/{weekId}/days/{dayId}` in real-time
 /// via a StreamBuilder so updates are reflected immediately.
-class DayDetailScreen extends StatelessWidget {
+class DayDetailScreen extends StatefulWidget {
   const DayDetailScreen({
     super.key,
     required this.uid,
@@ -23,14 +25,21 @@ class DayDetailScreen extends StatelessWidget {
   final String dayId;
   final String workoutName;
 
+  @override
+  State<DayDetailScreen> createState() => _DayDetailScreenState();
+}
+
+class _DayDetailScreenState extends State<DayDetailScreen> {
+  final List<ExerciseModel> _optimisticExercises = <ExerciseModel>[];
+
   DocumentReference<Map<String, dynamic>> get _dayDocRef => FirebaseFirestore
       .instance
       .collection('users')
-      .doc(uid)
+      .doc(widget.uid)
       .collection('weeks')
-      .doc(weekId)
+      .doc(widget.weekId)
       .collection('days')
-      .doc(dayId);
+      .doc(widget.dayId);
 
   Future<void> _saveExerciseToDay(ExerciseModel exercise) async {
     await FirebaseFirestore.instance.runTransaction((transaction) async {
@@ -63,6 +72,21 @@ class DayDetailScreen extends StatelessWidget {
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
     });
+  }
+
+  void _saveExerciseLocally(ExerciseModel exercise) {
+    setState(() {
+      final existingIndex = _optimisticExercises.indexWhere(
+        (item) => item.id == exercise.id,
+      );
+      if (existingIndex >= 0) {
+        _optimisticExercises[existingIndex] = exercise;
+      } else {
+        _optimisticExercises.add(exercise);
+      }
+    });
+
+    unawaited(_saveExerciseToDay(exercise));
   }
 
   Future<void> _showEditDayNameDialog(
@@ -128,14 +152,20 @@ class DayDetailScreen extends StatelessWidget {
         final data = snapshot.data?.data();
         final dayName = (data?['name'] as String?)?.trim().isNotEmpty == true
             ? (data?['name'] as String).trim()
-            : workoutName;
+            : widget.workoutName;
         final List<dynamic> rawExercises =
             (data?['exercises'] as List<dynamic>?) ?? <dynamic>[];
 
-        final exercises = rawExercises
+        final firestoreExercises = rawExercises
             .whereType<Map<dynamic, dynamic>>()
             .map((e) => ExerciseModel.fromJson(Map<String, dynamic>.from(e)))
             .toList(growable: false);
+
+        final exercisesById = <String, ExerciseModel>{
+          for (final exercise in firestoreExercises) exercise.id: exercise,
+          for (final exercise in _optimisticExercises) exercise.id: exercise,
+        };
+        final exercises = exercisesById.values.toList(growable: false);
 
         return Scaffold(
           backgroundColor: const Color(0xFF0A0A0A),
@@ -219,7 +249,7 @@ class DayDetailScreen extends StatelessWidget {
                                   builder: (_) => ExerciseEditorSheet(
                                     exercise: exercise,
                                     splitName: dayName,
-                                    onSave: _saveExerciseToDay,
+                                    onSave: _saveExerciseLocally,
                                   ),
                                 );
                               },
@@ -288,7 +318,7 @@ class DayDetailScreen extends StatelessWidget {
                         backgroundColor: Colors.transparent,
                         builder: (_) => ExerciseEditorSheet(
                           splitName: dayName,
-                          onSave: _saveExerciseToDay,
+                          onSave: _saveExerciseLocally,
                         ),
                       );
                     },

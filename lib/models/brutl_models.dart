@@ -151,10 +151,11 @@ class ExerciseModel {
     final repsSource = json['reps'];
     final normalizedReps = switch (repsSource) {
       String value => value.trim(),
-      List<dynamic> value => value
-          .map((item) => item.toString().trim())
-          .where((item) => item.isNotEmpty)
-          .join(', '),
+      List<dynamic> value =>
+        value
+            .map((item) => item.toString().trim())
+            .where((item) => item.isNotEmpty)
+            .join(', '),
       num value => value.toInt().toString(),
       _ => '',
     };
@@ -277,11 +278,10 @@ class ProgramDayModel {
       weekNumber: (json['weekNumber'] as num?)?.toInt() ?? 1,
       dayNumber: (json['dayNumber'] as num?)?.toInt() ?? 1,
       splitName: json['splitName']?.toString() ?? '',
-      exercises: (json['exercises'] as List<dynamic>?)
+      exercises:
+          (json['exercises'] as List<dynamic>?)
               ?.whereType<Map<dynamic, dynamic>>()
-              .map(
-                (e) => ExerciseModel.fromJson(Map<String, dynamic>.from(e)),
-              )
+              .map((e) => ExerciseModel.fromJson(Map<String, dynamic>.from(e)))
               .toList(growable: false) ??
           const <ExerciseModel>[],
     );

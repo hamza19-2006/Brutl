@@ -17,11 +17,11 @@ class MacroDashboardCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final totalProgress = (nutrition.goalCal <= 0
-            ? 0
-            : nutrition.totalCal / nutrition.goalCal)
-        .clamp(0.0, 1.0)
-        .toDouble();
+    final currentCalories = nutrition.totalCal.toDouble();
+    final targetCalories = nutrition.goalCal.toDouble();
+    final totalProgress = targetCalories <= 0.0
+        ? 0.0
+        : (currentCalories / targetCalories).clamp(0.0, 1.0);
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),

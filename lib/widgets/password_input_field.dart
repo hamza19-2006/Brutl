@@ -102,6 +102,10 @@ class _PasswordInputFieldState extends State<PasswordInputField> {
                     onChanged: widget.onChanged,
                     decoration: InputDecoration(
                       border: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      errorBorder: InputBorder.none,
+                      disabledBorder: InputBorder.none,
                       hintText: widget.hintText,
                       hintStyle: AppTextStyles.bodyLarge(
                         color: AppColors.textTertiary,

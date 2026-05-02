@@ -162,7 +162,7 @@ class CaloriesCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final safeGoal = calorieGoal <= 0 ? 1 : calorieGoal;
+    final safeGoal = calorieGoal <= 0 ? 1.0 : calorieGoal.toDouble();
     final progress = (caloriesBurned / safeGoal).clamp(0.0, 1.0);
 
     return InkWell(

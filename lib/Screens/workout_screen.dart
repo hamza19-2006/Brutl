@@ -1,4 +1,5 @@
-﻿import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -84,10 +85,30 @@ class WorkoutScreen extends StatelessWidget {
                 ),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: MacroDashboardCard(
-                    nutrition: syncedNutrition,
-                    ui: nutritionProvider.ui,
-                    onTap: () => _openMealLoggerSheet(context),
+                  child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                    stream: FirebaseFirestore.instance
+                        .collection('users')
+                        .doc(currentUser.uid)
+                        .snapshots(),
+                    builder: (context, snapshot) {
+                      final data = snapshot.data?.data();
+                      final firestoreCalories = (data?['calories'] as num?)?.toDouble() ?? 
+                          (data?['dailyCaloriesBurned'] as num?)?.toDouble();
+                      final calories = (firestoreCalories ?? workoutProvider.currentDailyCaloriesBurned)
+                          .clamp(0.0, 5000.0)
+                          .round();
+                      
+                      final streamSyncedNutrition = nutritionProvider.nutrition.copyWith(
+                        totalCal: calories,
+                        goalCal: workoutProvider.user.dailyCalorieGoal,
+                      );
+
+                      return MacroDashboardCard(
+                        nutrition: streamSyncedNutrition,
+                        ui: nutritionProvider.ui,
+                        onTap: () => _openMealLoggerSheet(context),
+                      );
+                    },
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -135,20 +156,44 @@ class WorkoutScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 16),
                 Expanded(
-                  child: ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                    itemCount: daysForSplit.length,
-                    itemBuilder: (context, index) {
-                      final day = daysForSplit[index];
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: WorkoutCardWidget(
-                          weekId: weekId,
-                          dayId: 'day_${index + 1}',
-                          dayNumber: day['dayNumber'] as String,
-                          workoutName: day['name'] as String,
-                          uid: currentUser.uid,
-                        ),
+                  child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                    stream: FirebaseFirestore.instance
+                        .collection('users')
+                        .doc(currentUser.uid)
+                        .snapshots(),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(
+                          child: CircularProgressIndicator(color: Color(0xFFFF3D00)),
+                        );
+                      }
+
+                      final data = snapshot.data?.data();
+                      List<dynamic> customSplitDays = [];
+                      if (data != null && data.containsKey('customSplitDays')) {
+                        customSplitDays = data['customSplitDays'] as List<dynamic>;
+                      }
+
+                      if (customSplitDays.isEmpty) {
+                        customSplitDays = ['Full Body'];
+                      }
+
+                      return ListView.builder(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                        itemCount: customSplitDays.length,
+                        itemBuilder: (context, index) {
+                          final dayName = customSplitDays[index].toString();
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: WorkoutCardWidget(
+                              weekId: weekId,
+                              dayId: 'day_${index + 1}',
+                              dayNumber: 'Day ${index + 1}',
+                              workoutName: dayName,
+                              uid: currentUser.uid,
+                            ),
+                          );
+                        },
                       );
                     },
                   ),

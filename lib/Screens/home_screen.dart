@@ -187,7 +187,7 @@ class _HomeTabState extends State<_HomeTab> {
   int _lastTotalCalories = -1;
   final ValueNotifier<int> _todayCaloriesNotifier = ValueNotifier<int>(0);
   late final WorkoutNutritionProvider _nutritionProvider;
-  VoidCallback? _nutritionListener;
+  late final VoidCallback _nutritionListener;
 
   @override
   void initState() {
@@ -195,16 +195,14 @@ class _HomeTabState extends State<_HomeTab> {
     _localDataFuture = _loadLocalData();
     _nutritionProvider = context.read<WorkoutNutritionProvider>();
     _nutritionListener = () {
-      _syncCaloriesFromPreferences(_nutritionProvider.nutrition.totalCal);
+      _refreshCaloriesDisplay(_nutritionProvider.nutrition.totalCal);
     };
-    _nutritionProvider.addListener(_nutritionListener!);
+    _nutritionProvider.addListener(_nutritionListener);
   }
 
   @override
   void dispose() {
-    if (_nutritionListener != null) {
-      _nutritionProvider.removeListener(_nutritionListener!);
-    }
+    _nutritionProvider.removeListener(_nutritionListener);
     _todayCaloriesNotifier.dispose();
     super.dispose();
   }
@@ -388,7 +386,7 @@ class _HomeTabState extends State<_HomeTab> {
     );
   }
 
-  Future<void> _syncCaloriesFromPreferences(int totalCalories) async {
+  Future<void> _refreshCaloriesDisplay(int totalCalories) async {
     if (_lastTotalCalories == totalCalories) {
       return;
     }

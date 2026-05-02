@@ -184,7 +184,7 @@ class _HomeTab extends StatefulWidget {
 
 class _HomeTabState extends State<_HomeTab> {
   late Future<_HomeLocalData> _localDataFuture;
-  int _lastCalorieToken = -1;
+  int _lastTotalCalories = -1;
   final ValueNotifier<int> _todayCaloriesNotifier = ValueNotifier<int>(0);
 
   @override
@@ -351,8 +351,8 @@ class _HomeTabState extends State<_HomeTab> {
   ) {
     return Selector<WorkoutNutritionProvider, int>(
       selector: (context, provider) => provider.nutrition.totalCal,
-      builder: (context, calorieToken, _) {
-        _refreshTodayCalories(calorieToken);
+      builder: (context, totalCalories, _) {
+        _refreshTodayCalories(totalCalories);
         return ValueListenableBuilder<int>(
           valueListenable: _todayCaloriesNotifier,
           builder: (context, todayCalories, __) {
@@ -384,11 +384,11 @@ class _HomeTabState extends State<_HomeTab> {
     );
   }
 
-  Future<void> _refreshTodayCalories(int calorieToken) async {
-    if (_lastCalorieToken == calorieToken) {
+  Future<void> _refreshTodayCalories(int totalCalories) async {
+    if (_lastTotalCalories == totalCalories) {
       return;
     }
-    _lastCalorieToken = calorieToken;
+    _lastTotalCalories = totalCalories;
     final prefs = await SharedPreferences.getInstance();
     final todayCalories = prefs.getInt('today_calories') ?? 0;
     if (!mounted) {

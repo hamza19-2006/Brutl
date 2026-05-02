@@ -186,15 +186,25 @@ class _HomeTabState extends State<_HomeTab> {
   late Future<_HomeLocalData> _localDataFuture;
   int _lastTotalCalories = -1;
   final ValueNotifier<int> _todayCaloriesNotifier = ValueNotifier<int>(0);
+  late final WorkoutNutritionProvider _nutritionProvider;
+  VoidCallback? _nutritionListener;
 
   @override
   void initState() {
     super.initState();
     _localDataFuture = _loadLocalData();
+    _nutritionProvider = context.read<WorkoutNutritionProvider>();
+    _nutritionListener = () {
+      _refreshTodayCalories(_nutritionProvider.nutrition.totalCal);
+    };
+    _nutritionProvider.addListener(_nutritionListener!);
   }
 
   @override
   void dispose() {
+    if (_nutritionListener != null) {
+      _nutritionProvider.removeListener(_nutritionListener!);
+    }
     _todayCaloriesNotifier.dispose();
     super.dispose();
   }
@@ -349,22 +359,16 @@ class _HomeTabState extends State<_HomeTab> {
     WorkoutProvider workoutProvider,
     int calorieGoal,
   ) {
-    return Selector<WorkoutNutritionProvider, int>(
-      selector: (context, provider) => provider.nutrition.totalCal,
-      builder: (context, totalCalories, _) {
-        _refreshTodayCalories(totalCalories);
-        return ValueListenableBuilder<int>(
-          valueListenable: _todayCaloriesNotifier,
-          builder: (context, todayCalories, __) {
-            final clampedCalories = _clampCalories(todayCalories);
-            return CaloriesCard(
-              caloriesBurned: clampedCalories.toDouble(),
-              calorieGoal: calorieGoal,
-              caloriesLabel: workoutProvider.homeUi.caloriesLabel,
-              caloriesUnitLabel: workoutProvider.homeUi.caloriesUnitLabel,
-              onTap: widget.onCaloriesTap,
-            );
-          },
+    return ValueListenableBuilder<int>(
+      valueListenable: _todayCaloriesNotifier,
+      builder: (context, todayCalories, __) {
+        final clampedCalories = _clampCalories(todayCalories);
+        return CaloriesCard(
+          caloriesBurned: clampedCalories.toDouble(),
+          calorieGoal: calorieGoal,
+          caloriesLabel: workoutProvider.homeUi.caloriesLabel,
+          caloriesUnitLabel: workoutProvider.homeUi.caloriesUnitLabel,
+          onTap: widget.onCaloriesTap,
         );
       },
     );

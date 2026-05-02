@@ -1,7 +1,5 @@
 import 'dart:async';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:pedometer/pedometer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -13,17 +11,20 @@ class StepService extends ChangeNotifier {
 
   static const String _baselineStepsKey = 'baseline_steps';
   static const String _todayStepsKey = 'today_steps';
-  static const String _lastSavedDateKey = 'last_saved_date';
+  static const String _lastResetDateKey = 'last_reset_date'; // Stores last reset date.
 
   StreamSubscription<StepCount>? _stepSubscription;
   SharedPreferences? _preferences;
   int _baselineSteps = 0;
   int _todaySteps = 0;
-  String _lastSavedDate = '';
+  String _lastResetDate = ''; // Tracks last reset date.
   bool _hasStoredBaseline = false;
   bool _isInitialized = false;
+  int _lastEmittedSteps = -1; // Keeps last stream emission. 
+  final StreamController<int> _stepsController = StreamController<int>.broadcast(); // Stream for today steps. 
 
   bool get isInitialized => _isInitialized;
+  Stream<int> get todayStepsStream => _stepsController.stream; // Expose today steps stream.
 
   Future<void> initializeStepService() async {
     if (_isInitialized) {
@@ -36,14 +37,9 @@ class StepService extends ChangeNotifier {
     }
     _baselineSteps = preferences.getInt(_baselineStepsKey) ?? 0;
     _todaySteps = preferences.getInt(_todayStepsKey) ?? 0;
-    _lastSavedDate = preferences.getString(_lastSavedDateKey) ?? '';
+    _lastResetDate = preferences.getString(_lastResetDateKey) ?? ''; // Load last reset date.
     _hasStoredBaseline = preferences.containsKey(_baselineStepsKey);
-    final currentDate = _dateKeyFor(DateTime.now());
-
-    if (_lastSavedDate.isEmpty) {
-      _lastSavedDate = currentDate;
-      await _saveState();
-    }
+    _emitSteps(_todaySteps); // Emit stored steps on init.
 
     _stepSubscription ??= Pedometer.stepCountStream.listen(
       onStepCount,
@@ -55,49 +51,53 @@ class StepService extends ChangeNotifier {
   }
 
   void onStepCount(StepCount event) {
-    final currentDate = _dateKeyFor(DateTime.now());
-    final incomingSteps = event.steps < 0 ? 0 : event.steps;
+    final currentDate = _dateKeyFor(DateTime.now()); // Build date key.
+    final incomingSteps = event.steps < 0 ? 0 : event.steps; // Normalize hardware steps.
 
     // Initialization check: First install/run
-    if (!_hasStoredBaseline) {
-      _baselineSteps = incomingSteps;
-      _todaySteps = 0;
-      _lastSavedDate = currentDate;
-      _hasStoredBaseline = true;
-      unawaited(_saveState());
-      notifyListeners();
-      return;
+    if (!_hasStoredBaseline || _lastResetDate.isEmpty) { // First-run check.
+      _baselineSteps = incomingSteps; // Store baseline steps.
+      _todaySteps = 0; // Reset today steps.
+      _lastResetDate = currentDate; // Set reset date.
+      _hasStoredBaseline = true; // Mark baseline stored.
+      unawaited(_saveState()); // Persist state.
+      _emitSteps(_todaySteps); // Emit today steps.
+      notifyListeners(); // Notify listeners.
+      return; // Exit early.
     }
 
     // Check 1 — New Day Detection (Midnight passed)
-    if (_lastSavedDate != currentDate) {
-      _baselineSteps = incomingSteps;
-      _todaySteps = 0;
-      _lastSavedDate = currentDate;
-      _hasStoredBaseline = true;
-      unawaited(_saveState());
-      notifyListeners();
-      return;
+    if (_lastResetDate != currentDate) { // Detect day change.
+      _baselineSteps = incomingSteps; // Reset baseline for new day.
+      _todaySteps = 0; // Reset today steps.
+      _lastResetDate = currentDate; // Update reset date.
+      _hasStoredBaseline = true; // Keep baseline flag.
+      unawaited(_saveState()); // Persist state.
+      _emitSteps(_todaySteps); // Emit today steps.
+      notifyListeners(); // Notify listeners.
+      return; // Exit early.
     }
 
     // Check 2 — Phone Reboot Detection
-    if (incomingSteps < _baselineSteps) {
-      _baselineSteps = 0;
-      _todaySteps += incomingSteps;
-      unawaited(_saveState());
-      notifyListeners();
-      return;
+    if (incomingSteps < _baselineSteps) { // Detect reboot (raw < baseline).
+      _baselineSteps = 0; // Reset baseline for reboot.
+      _todaySteps += incomingSteps; // Add incoming steps to today total.
+      unawaited(_saveState()); // Persist state.
+      _emitSteps(_todaySteps); // Emit today steps.
+      notifyListeners(); // Notify listeners.
+      return; // Exit early.
     }
 
     // Check 3 — Normal Step Calculation
-    int calculatedSteps = incomingSteps - _baselineSteps;
-    if (calculatedSteps < 0) {
-      calculatedSteps = 0;
+    int calculatedSteps = incomingSteps - _baselineSteps; // Compute daily steps.
+    if (calculatedSteps < 0) { // Guard negative totals.
+      calculatedSteps = 0; // Clamp to zero.
     }
 
-    _todaySteps = calculatedSteps;
-    unawaited(_saveState());
-    notifyListeners();
+    _todaySteps = calculatedSteps; // Store today steps.
+    unawaited(_saveState()); // Persist state.
+    _emitSteps(_todaySteps); // Emit today steps.
+    notifyListeners(); // Notify listeners.
   }
 
   double calculateCalories(int todaySteps) {
@@ -122,28 +122,7 @@ class StepService extends ChangeNotifier {
     }
     await preferences.setInt(_baselineStepsKey, _baselineSteps);
     await preferences.setInt(_todayStepsKey, _todaySteps);
-    await preferences.setString(_lastSavedDateKey, _lastSavedDate);
-    await _syncFirestore();
-  }
-
-  Future<void> _syncFirestore() async {
-    final currentUser = FirebaseAuth.instance.currentUser;
-    if (currentUser == null) {
-      return;
-    }
-    final calories = calculateCalories(_todaySteps);
-    await FirebaseFirestore.instance.collection('users').doc(currentUser.uid).set(<
-      String,
-      dynamic
-    >{
-      'baseline_steps': _baselineSteps,
-      'currentSteps': _todaySteps,
-      'dailyCaloriesBurned': calories,
-      'calories':
-          calories, // Ensures Bug 2 home_screen.dart StreamBuilder catches the update
-      'lastStepResetDate': _lastSavedDate,
-      'last_saved_date': _lastSavedDate,
-    }, SetOptions(merge: true));
+    await preferences.setString(_lastResetDateKey, _lastResetDate); // Store reset date.
   }
 
   String _dateKeyFor(DateTime date) {
@@ -156,6 +135,17 @@ class StepService extends ChangeNotifier {
   @override
   void dispose() {
     _stepSubscription?.cancel();
+    _stepsController.close(); // Close stream controller.
     super.dispose();
+  }
+
+  void _emitSteps(int steps) { // Emit today steps to stream.
+    if (steps == _lastEmittedSteps) { // Skip duplicate emissions.
+      return; // Exit early.
+    }
+    _lastEmittedSteps = steps; // Track last emitted steps.
+    if (!_stepsController.isClosed) { // Ensure stream is open.
+      _stepsController.add(steps); // Publish steps.
+    }
   }
 }

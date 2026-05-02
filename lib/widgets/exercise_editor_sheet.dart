@@ -26,6 +26,7 @@ class _ExerciseEditorSheetState extends State<ExerciseEditorSheet> {
   late final TextEditingController _setsController;
   late final TextEditingController _repsController;
   late final TextEditingController _weightController;
+  late String _selectedWeightUnit;
 
   bool get _isEditMode => widget.exercise != null;
 
@@ -39,8 +40,9 @@ class _ExerciseEditorSheetState extends State<ExerciseEditorSheet> {
     );
     _repsController = TextEditingController(text: exercise?.reps ?? '10');
     _weightController = TextEditingController(
-      text: (exercise?.weight ?? 20).toStringAsFixed(1),
+      text: (exercise?.weight ?? 20).toStringAsFixed(0),
     );
+    _selectedWeightUnit = exercise?.weightUnit ?? 'Kg';
   }
 
   @override
@@ -112,12 +114,71 @@ class _ExerciseEditorSheetState extends State<ExerciseEditorSheet> {
                   hintText: 'e.g., 10,8,8,5',
                 ),
                 const SizedBox(height: 10),
-                _EditorField(
-                  controller: _weightController,
-                  label: '${ui.weightLabel} (${ui.weightUnit})',
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 7,
+                      child: TextField(
+                        controller: _weightController,
+                        keyboardType: TextInputType.number,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: const InputDecoration(
+                          labelText: 'Weight',
+                          labelStyle: TextStyle(color: Color(0xFF8A8A8A)),
+                          hintText: 'Weight',
+                          hintStyle: TextStyle(color: Color(0xFF666666)),
+                          enabledBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: Color(0xFF2A2A2A)),
+                            borderRadius: BorderRadius.all(Radius.circular(12)),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: Color(0xFFFF3D00)),
+                            borderRadius: BorderRadius.all(Radius.circular(12)),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      flex: 3,
+                      child: DropdownButtonFormField<String>(
+                        value: _selectedWeightUnit,
+                        dropdownColor: const Color(0xFF1A1A1A),
+                        decoration: const InputDecoration(
+                          labelText: 'Unit',
+                          labelStyle: TextStyle(color: Color(0xFF8A8A8A)),
+                          enabledBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: Color(0xFF2A2A2A)),
+                            borderRadius: BorderRadius.all(Radius.circular(12)),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: Color(0xFFFF3D00)),
+                            borderRadius: BorderRadius.all(Radius.circular(12)),
+                          ),
+                        ),
+                        iconEnabledColor: const Color(0xFFFF3D00),
+                        style: const TextStyle(color: Colors.white),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'Kg',
+                            child: Text('Kg'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'Plates',
+                            child: Text('Plates'),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          if (value == null) {
+                            return;
+                          }
+                          setState(() {
+                            _selectedWeightUnit = value;
+                          });
+                        },
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 14),
                 SizedBox(
@@ -156,6 +217,7 @@ class _ExerciseEditorSheetState extends State<ExerciseEditorSheet> {
                         sets: sets,
                         reps: reps,
                         weight: weight,
+                        weightUnit: _selectedWeightUnit,
                         splitName: widget.splitName,
                       );
 

@@ -267,6 +267,13 @@ class DayDetailScreen extends StatelessWidget {
                                             fontWeight: FontWeight.w500,
                                           ),
                                         ),
+                                        Text(
+                                          '${exercise.weight.toStringAsFixed(0)} ${exercise.weightUnit}',
+                                          style: const TextStyle(
+                                            color: Color(0xFF777777),
+                                            fontSize: 12,
+                                          ),
+                                        ),
                                       ],
                                     ),
                                   ],

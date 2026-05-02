@@ -84,6 +84,7 @@ class ExerciseModel {
     required this.sets,
     required this.reps,
     required this.weight,
+    this.weightUnit = 'Kg',
     this.isSynced = false,
     this.splitName = '',
   });
@@ -93,6 +94,7 @@ class ExerciseModel {
   final int sets;
   final String reps;
   final double weight;
+  final String weightUnit;
   final bool isSynced;
   final String splitName;
 
@@ -119,6 +121,7 @@ class ExerciseModel {
     int? sets,
     String? reps,
     double? weight,
+    String? weightUnit,
     bool? isSynced,
     String? splitName,
   }) {
@@ -128,18 +131,22 @@ class ExerciseModel {
       sets: sets ?? this.sets,
       reps: reps ?? this.reps,
       weight: weight ?? this.weight,
+      weightUnit: weightUnit ?? this.weightUnit,
       isSynced: isSynced ?? this.isSynced,
       splitName: splitName ?? this.splitName,
     );
   }
 
   Map<String, dynamic> toJson() {
+    final formattedWeight =
+        weight % 1 == 0 ? weight.toStringAsFixed(0) : weight.toString();
     return <String, dynamic>{
       'id': id,
       'name': name,
       'sets': sets,
       'reps': reps,
-      'weight': weight,
+      'weight': '$formattedWeight $weightUnit',
+      'weightUnit': weightUnit,
       'isSynced': isSynced,
       'splitName': splitName,
     };
@@ -148,6 +155,7 @@ class ExerciseModel {
   factory ExerciseModel.fromJson(Map<String, dynamic> json) {
     final setsSource = json['sets'];
     final weightSource = json['weight'];
+    final weightUnitSource = json['weightUnit'];
     final repsSource = json['reps'];
     final normalizedReps = switch (repsSource) {
       String value => value.trim(),
@@ -159,6 +167,8 @@ class ExerciseModel {
       _ => '',
     };
 
+    final parsedWeight = _parseWeight(weightSource, weightUnitSource);
+
     return ExerciseModel(
       id: json['id']?.toString() ?? '',
       name: json['name']?.toString() ?? '',
@@ -166,13 +176,44 @@ class ExerciseModel {
           ? setsSource.toInt()
           : int.tryParse(setsSource?.toString() ?? '') ?? 1,
       reps: normalizedReps.isEmpty ? '10' : normalizedReps,
-      weight: weightSource is num
-          ? weightSource.toDouble()
-          : double.tryParse(weightSource?.toString() ?? '') ?? 0,
+      weight: parsedWeight.value,
+      weightUnit: parsedWeight.unit,
       isSynced: json['isSynced'] as bool? ?? false,
       splitName: json['splitName']?.toString() ?? '',
     );
   }
+}
+
+class _ParsedWeight {
+  const _ParsedWeight({required this.value, required this.unit});
+
+  final double value;
+  final String unit;
+}
+
+_ParsedWeight _parseWeight(dynamic weightSource, dynamic unitSource) {
+  const defaultUnit = 'Kg';
+  String unit = unitSource?.toString() ?? defaultUnit;
+  double value = 0;
+
+  if (weightSource is num) {
+    value = weightSource.toDouble();
+    return _ParsedWeight(value: value, unit: unit);
+  }
+
+  final raw = weightSource?.toString() ?? '';
+  final parts = raw.trim().split(RegExp(r'\s+'));
+  if (parts.isNotEmpty) {
+    value = double.tryParse(parts.first) ?? 0;
+  }
+  if (parts.length > 1) {
+    unit = parts.sublist(1).join(' ').trim();
+  }
+  if (unit.isEmpty) {
+    unit = defaultUnit;
+  }
+
+  return _ParsedWeight(value: value, unit: unit);
 }
 
 @immutable

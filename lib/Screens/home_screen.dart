@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../providers/workout_provider.dart';
 import '../services/database_service.dart';
+import '../services/step_service.dart';
 import '../widgets/biometric_card.dart';
 import '../widgets/exercise_highlight_card.dart';
 import '../widgets/header_widget.dart';
@@ -31,13 +32,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    
+    // Initialize StepService safely AFTER HomeScreen begins loading
+    StepService.instance.initializeStepService();
+    StepService.instance.addListener(_onStepUpdate);
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       requestStepPermission();
     });
   }
 
+  void _onStepUpdate() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
+    StepService.instance.removeListener(_onStepUpdate);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -120,7 +131,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             onCaloriesTap: () => _navigateToWorkout(),
             onExerciseTap: _navigateToWorkout,
           ),
-          const workout_screen(showBottomNavigationBar: false),
+          const WorkoutScreen(showBottomNavigationBar: false),
           _ShopTab(label: navLabels[2]),
           _ChatTab(label: navLabels[3]),
         ],
@@ -279,8 +290,11 @@ class _HomeTab extends StatelessWidget {
     int currentSteps,
     int stepGoal,
   ) {
+    // Rely strictly on local StepService for real-time pedometer reading
+    final actualSteps = StepService.instance.getTodaySteps();
+
     return StepsCard(
-      currentSteps: currentSteps,
+      currentSteps: actualSteps,
       goalSteps: stepGoal,
       stepsLabel: workoutProvider.homeUi.stepsLabel,
       stepsUnitLabel: workoutProvider.homeUi.stepsUnitLabel,
@@ -294,10 +308,9 @@ class _HomeTab extends StatelessWidget {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) {
       return CaloriesCard(
-        caloriesBurned: workoutProvider.currentDailyCaloriesBurned.clamp(
-          0,
-          5000,
-        ),
+        caloriesBurned: StepService.instance.calculateCalories(
+          StepService.instance.getTodaySteps(),
+        ).clamp(0.0, 5000.0),
         calorieGoal: workoutProvider.user.dailyCalorieGoal,
         caloriesLabel: workoutProvider.homeUi.caloriesLabel,
         caloriesUnitLabel: workoutProvider.homeUi.caloriesUnitLabel,
@@ -311,12 +324,25 @@ class _HomeTab extends StatelessWidget {
           .doc(uid)
           .snapshots(),
       builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          // Show CircularProgressIndicator while stream loads
+          return Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFF1A1A1A),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFF2A2A2A)),
+            ),
+            child: const Center(
+              child: CircularProgressIndicator(color: Color(0xFFFF3D00)),
+            ),
+          );
+        }
+
         final data = snapshot.data?.data();
-        final firestoreCalories = (data?['dailyCaloriesBurned'] as num?)
-            ?.toDouble();
+        final firestoreCalories = (data?['calories'] as num?)?.toDouble() ?? (data?['dailyCaloriesBurned'] as num?)?.toDouble();
         final calories =
             (firestoreCalories ?? workoutProvider.currentDailyCaloriesBurned)
-                .clamp(0, 5000)
+                .clamp(0.0, 5000.0)
                 .toDouble();
 
         return CaloriesCard(

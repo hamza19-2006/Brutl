@@ -15,7 +15,8 @@ class ExerciseCardWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final repsDisplay = exercise.reps.trim().isEmpty ? '--' : exercise.reps;
+    final repValues = exercise.repValues;
+    final repsDisplay = repValues.isEmpty ? '--' : repValues.join(', ');
 
     final weightDisplay = (exercise.weight <= 0)
         ? '--'
@@ -54,7 +55,7 @@ class ExerciseCardWidget extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.poppins(
                         color: Colors.white,
-                        fontSize: 16,
+                        fontSize: 18,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -62,18 +63,18 @@ class ExerciseCardWidget extends StatelessWidget {
                     Text(
                       'Sets: ${exercise.sets}',
                       style: const TextStyle(
-                        color: Color(0xFF888888),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w400,
+                        color: Color(0xFFB5B5B5),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       'Reps: $repsDisplay',
                       style: const TextStyle(
-                        color: Color(0xFF888888),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w400,
+                        color: Color(0xFFB5B5B5),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
                   ],
@@ -106,7 +107,7 @@ class ExerciseCardWidget extends StatelessWidget {
                         textAlign: TextAlign.center,
                         style: GoogleFonts.poppins(
                           color: Colors.white,
-                          fontSize: 15,
+                          fontSize: 20,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -115,9 +116,9 @@ class ExerciseCardWidget extends StatelessWidget {
                         unit,
                         textAlign: TextAlign.center,
                         style: const TextStyle(
-                          color: Color(0xFF888888),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w400,
+                          color: Color(0xFFB0B0B0),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
                         ),
                       ),
                     ],

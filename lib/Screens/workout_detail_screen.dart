@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/brutl_models.dart';
+import '../widgets/exercise_card_widget.dart';
 import '../widgets/exercise_editor_sheet.dart';
 
 class WorkoutDetailScreen extends StatelessWidget {
@@ -29,11 +30,15 @@ class WorkoutDetailScreen extends StatelessWidget {
           children: [
             Expanded(
               child: ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
                 itemCount: session.exercises.length,
                 itemBuilder: (context, index) {
                   final exercise = session.exercises[index];
-                  return InkWell(
+                  return ExerciseCardWidget(
+                    exercise: exercise,
                     onTap: () {
                       showModalBottomSheet<void>(
                         context: context,
@@ -45,51 +50,6 @@ class WorkoutDetailScreen extends StatelessWidget {
                         ),
                       );
                     },
-                    borderRadius: BorderRadius.circular(12),
-                    child: Container(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1A1A1A),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: const Color(0xFF2A2A2A)),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Expanded(
-                            child: Text(
-                              exercise.name,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              Text(
-                                '${exercise.sets} sets',
-                                style: const TextStyle(
-                                  color: Color(0xFF888888),
-                                  fontSize: 14,
-                                ),
-                              ),
-                              Text(
-                                exercise.reps,
-                                style: const TextStyle(
-                                  color: Color(0xFFAAAAAA),
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
                   );
                 },
               ),
@@ -102,7 +62,8 @@ class WorkoutDetailScreen extends StatelessWidget {
                     context: context,
                     isScrollControlled: true,
                     backgroundColor: Colors.transparent,
-                    builder: (_) => ExerciseEditorSheet(splitName: session.splitName),
+                    builder: (_) =>
+                        ExerciseEditorSheet(splitName: session.splitName),
                   );
                 },
                 style: ElevatedButton.styleFrom(

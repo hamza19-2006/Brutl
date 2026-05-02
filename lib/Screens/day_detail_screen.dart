@@ -7,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/brutl_models.dart';
+import '../widgets/exercise_card_widget.dart';
 import '../widgets/exercise_editor_sheet.dart';
 
 class DayDetailScreen extends StatefulWidget {
@@ -411,7 +412,8 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
       itemCount: _exercises.length,
       itemBuilder: (context, index) {
         final exercise = _exercises[index];
-        return InkWell(
+        return ExerciseCardWidget(
+          exercise: exercise,
           onTap: () {
             showModalBottomSheet<void>(
               context: context,
@@ -424,58 +426,6 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
               ),
             );
           },
-          borderRadius: BorderRadius.circular(12),
-          child: Container(
-            margin: const EdgeInsets.only(bottom: 12),
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: const Color(0xFF1A1A1A),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFF2A2A2A)),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Text(
-                    exercise.name,
-                    style: GoogleFonts.poppins(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      '${exercise.sets} sets',
-                      style: const TextStyle(
-                        color: Color(0xFF888888),
-                        fontSize: 14,
-                      ),
-                    ),
-                    Text(
-                      exercise.reps,
-                      style: const TextStyle(
-                        color: Color(0xFFAAAAAA),
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    Text(
-                      exercise.weightDisplay,
-                      style: const TextStyle(
-                        color: Color(0xFF777777),
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
         );
       },
     );

@@ -42,39 +42,49 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
       .doc(widget.dayId);
 
   Future<void> _saveExerciseToDay(ExerciseModel exercise) async {
-    await FirebaseFirestore.instance.runTransaction((transaction) async {
-      final snapshot = await transaction.get(_dayDocRef);
-      final data = snapshot.data();
-      final rawExercises =
-          (data?['exercises'] as List<dynamic>?) ?? <dynamic>[];
+    try {
+      await FirebaseFirestore.instance.runTransaction((transaction) async {
+        final snapshot = await transaction.get(_dayDocRef);
+        final data = snapshot.data();
+        final exercisesData = data?['exercises'];
+        final rawExercises = exercisesData is List ? exercisesData : <dynamic>[];
 
-      final updatedExercises = <Map<String, dynamic>>[];
-      var replaced = false;
+        final updatedExercises = <dynamic>[];
+        var replaced = false;
 
-      for (final rawExercise in rawExercises) {
-        if (rawExercise is Map) {
-          final exerciseMap = Map<String, dynamic>.from(rawExercise);
-          if (exerciseMap['id']?.toString() == exercise.id) {
-            updatedExercises.add(exercise.toJson());
-            replaced = true;
+        for (final rawExercise in rawExercises) {
+          if (rawExercise is Map) {
+            final exerciseMap = Map<String, dynamic>.from(rawExercise);
+            if (exerciseMap['id']?.toString() == exercise.id) {
+              updatedExercises.add(exercise.toJson());
+              replaced = true;
+            } else {
+              updatedExercises.add(exerciseMap);
+            }
           } else {
-            updatedExercises.add(exerciseMap);
+            updatedExercises.add(rawExercise);
           }
         }
-      }
 
-      if (!replaced) {
-        updatedExercises.add(exercise.toJson());
-      }
+        if (!replaced) {
+          updatedExercises.add(exercise.toJson());
+        }
 
-      transaction.set(_dayDocRef, <String, dynamic>{
-        'exercises': updatedExercises,
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-    });
+        transaction.set(_dayDocRef, <String, dynamic>{
+          'exercises': updatedExercises,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _optimisticExercises.removeWhere((item) => item.id == exercise.id);
+        });
+      }
+    }
   }
 
-  void _saveExerciseLocally(ExerciseModel exercise) {
+  Future<void> _saveExerciseLocally(ExerciseModel exercise) async {
     setState(() {
       final existingIndex = _optimisticExercises.indexWhere(
         (item) => item.id == exercise.id,
@@ -140,6 +150,18 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: _dayDocRef.snapshots(),
       builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Scaffold(
+            backgroundColor: const Color(0xFF0A0A0A),
+            body: Center(
+              child: Text(
+                'Something went wrong',
+                style: GoogleFonts.poppins(color: const Color(0xFFFF3D00)),
+              ),
+            ),
+          );
+        }
+
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
             backgroundColor: Color(0xFF0A0A0A),
@@ -150,11 +172,13 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
         }
 
         final data = snapshot.data?.data();
-        final dayName = (data?['name'] as String?)?.trim().isNotEmpty == true
-            ? (data?['name'] as String).trim()
+        final rawName = data?['name'];
+        final dayName = (rawName is String && rawName.trim().isNotEmpty)
+            ? rawName.trim()
             : widget.workoutName;
-        final List<dynamic> rawExercises =
-            (data?['exercises'] as List<dynamic>?) ?? <dynamic>[];
+            
+        final exercisesData = data?['exercises'];
+        final List<dynamic> rawExercises = exercisesData is List ? exercisesData : <dynamic>[];
 
         final firestoreExercises = rawExercises
             .whereType<Map<dynamic, dynamic>>()

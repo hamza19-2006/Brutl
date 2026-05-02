@@ -37,7 +37,7 @@ class DayDetailScreen extends StatelessWidget {
       final snapshot = await transaction.get(_dayDocRef);
       final data = snapshot.data();
       final rawExercises =
-          (data?['exercises'] as List<dynamic>?) ?? <dynamic>[];
+          (data?['exercises'] as List<dynamic>?) ?? const <dynamic>[];
 
       final updatedExercises = <Map<String, dynamic>>[];
       var replaced = false;

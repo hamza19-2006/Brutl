@@ -107,7 +107,7 @@ class ExerciseCardWidget extends StatelessWidget {
                         textAlign: TextAlign.center,
                         style: GoogleFonts.poppins(
                           color: Colors.white,
-                          fontSize: 20,
+                          fontSize: 22,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -117,7 +117,7 @@ class ExerciseCardWidget extends StatelessWidget {
                         textAlign: TextAlign.center,
                         style: const TextStyle(
                           color: Color(0xFFB0B0B0),
-                          fontSize: 12,
+                          fontSize: 14,
                           fontWeight: FontWeight.w500,
                         ),
                       ),

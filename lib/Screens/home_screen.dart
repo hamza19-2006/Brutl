@@ -188,21 +188,33 @@ class _HomeTabState extends State<_HomeTab> {
   final ValueNotifier<int> _todayCaloriesNotifier = ValueNotifier<int>(0);
   late final WorkoutNutritionProvider _nutritionProvider;
   late final VoidCallback _nutritionListener;
+  bool _hasNutritionListener = false;
 
   @override
   void initState() {
     super.initState();
     _localDataFuture = _loadLocalData();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_hasNutritionListener) {
+      return;
+    }
     _nutritionProvider = context.read<WorkoutNutritionProvider>();
     _nutritionListener = () {
       _refreshCaloriesDisplay(_nutritionProvider.nutrition.totalCal);
     };
     _nutritionProvider.addListener(_nutritionListener);
+    _hasNutritionListener = true;
   }
 
   @override
   void dispose() {
-    _nutritionProvider.removeListener(_nutritionListener);
+    if (_hasNutritionListener) {
+      _nutritionProvider.removeListener(_nutritionListener);
+    }
     _todayCaloriesNotifier.dispose();
     super.dispose();
   }

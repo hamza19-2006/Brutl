@@ -195,7 +195,7 @@ class _HomeTabState extends State<_HomeTab> {
     _localDataFuture = _loadLocalData();
     _nutritionProvider = context.read<WorkoutNutritionProvider>();
     _nutritionListener = () {
-      _refreshTodayCalories(_nutritionProvider.nutrition.totalCal);
+      _syncCaloriesFromPreferences(_nutritionProvider.nutrition.totalCal);
     };
     _nutritionProvider.addListener(_nutritionListener!);
   }
@@ -388,7 +388,7 @@ class _HomeTabState extends State<_HomeTab> {
     );
   }
 
-  Future<void> _refreshTodayCalories(int totalCalories) async {
+  Future<void> _syncCaloriesFromPreferences(int totalCalories) async {
     if (_lastTotalCalories == totalCalories) {
       return;
     }

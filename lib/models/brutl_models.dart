@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import '../utils/formatters.dart';
+
 enum WorkoutSplitType { chestTriceps, backBiceps, legsShoulders }
 
 extension WorkoutSplitTypeX on WorkoutSplitType {
@@ -112,6 +114,8 @@ class ExerciseModel {
         .where((value) => value > 0)
         .toList(growable: false);
   }
+
+  String formattedWeight(String unit) => formatWeight(weight, unit);
 
   ExerciseModel copyWith({
     String? id,

@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../models/brutl_models.dart';
 import '../providers/workout_nutrition_provider.dart';
 import '../services/database_service.dart';
+import '../utils/formatters.dart';
 
 class ExerciseEditorSheet extends StatefulWidget {
   const ExerciseEditorSheet({
@@ -92,6 +93,15 @@ class _ExerciseEditorSheetState extends State<ExerciseEditorSheet> {
                     fontWeight: FontWeight.w700,
                   ),
                 ),
+                if (_isEditMode && widget.exercise != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    'Current: ${formatWeight(widget.exercise!.weight, ui.weightUnit)}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: const Color(0xFF888888),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 14),
                 _EditorField(
                   controller: _nameController,

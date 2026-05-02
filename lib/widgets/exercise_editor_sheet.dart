@@ -39,9 +39,11 @@ class _ExerciseEditorSheetState extends State<ExerciseEditorSheet> {
       text: (exercise?.sets ?? 4).toString(),
     );
     _repsController = TextEditingController(text: exercise?.reps ?? '10');
-    _weightController = TextEditingController(
-      text: (exercise?.weight ?? 20).toStringAsFixed(0),
-    );
+    final weightValue = exercise?.weight ?? 20;
+    final formattedWeight = weightValue % 1 == 0
+        ? weightValue.toStringAsFixed(0)
+        : weightValue.toString();
+    _weightController = TextEditingController(text: formattedWeight);
     _selectedWeightUnit = exercise?.weightUnit ?? 'Kg';
   }
 
@@ -120,7 +122,9 @@ class _ExerciseEditorSheetState extends State<ExerciseEditorSheet> {
                       flex: 7,
                       child: TextField(
                         controller: _weightController,
-                        keyboardType: TextInputType.number,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
                         style: const TextStyle(color: Colors.white),
                         decoration: const InputDecoration(
                           labelText: 'Weight',

@@ -97,6 +97,7 @@ class ExerciseModel {
   final String weightUnit;
   final bool isSynced;
   final String splitName;
+  String get weightDisplay => _formatWeightDisplay(weight, weightUnit);
 
   double get averageReps {
     final parsedReps = repValues;
@@ -138,15 +139,14 @@ class ExerciseModel {
   }
 
   Map<String, dynamic> toJson() {
-    final formattedWeight =
-        weight % 1 == 0 ? weight.toStringAsFixed(0) : weight.toString();
     return <String, dynamic>{
       'id': id,
       'name': name,
       'sets': sets,
       'reps': reps,
-      'weight': '$formattedWeight $weightUnit',
+      'weight': weight,
       'weightUnit': weightUnit,
+      'weightDisplay': weightDisplay,
       'isSynced': isSynced,
       'splitName': splitName,
     };
@@ -156,6 +156,7 @@ class ExerciseModel {
     final setsSource = json['sets'];
     final weightSource = json['weight'];
     final weightUnitSource = json['weightUnit'];
+    final weightDisplaySource = json['weightDisplay'];
     final repsSource = json['reps'];
     final normalizedReps = switch (repsSource) {
       String value => value.trim(),
@@ -167,7 +168,11 @@ class ExerciseModel {
       _ => '',
     };
 
-    final parsedWeight = _parseWeight(weightSource, weightUnitSource);
+    final parsedWeight = _parseWeight(
+      weightSource,
+      weightUnitSource,
+      weightDisplaySource,
+    );
 
     return ExerciseModel(
       id: json['id']?.toString() ?? '',
@@ -191,7 +196,11 @@ class _ParsedWeight {
   final String unit;
 }
 
-_ParsedWeight _parseWeight(dynamic weightSource, dynamic unitSource) {
+_ParsedWeight _parseWeight(
+  dynamic weightSource,
+  dynamic unitSource,
+  dynamic displaySource,
+) {
   const defaultUnit = 'Kg';
   String unit = unitSource?.toString() ?? defaultUnit;
   double value = 0;
@@ -201,19 +210,31 @@ _ParsedWeight _parseWeight(dynamic weightSource, dynamic unitSource) {
     return _ParsedWeight(value: value, unit: unit);
   }
 
-  final raw = weightSource?.toString() ?? '';
-  final parts = raw.trim().split(RegExp(r'\s+'));
-  if (parts.isNotEmpty) {
-    value = double.tryParse(parts.first) ?? 0;
+  final rawValue = weightSource?.toString() ?? '';
+  final rawValueParts = rawValue.trim().split(RegExp(r'\s+'));
+  if (rawValueParts.isNotEmpty && rawValueParts.first.isNotEmpty) {
+    value = double.tryParse(rawValueParts.first) ?? 0;
   }
-  if (parts.length > 1) {
-    unit = parts.sublist(1).join(' ').trim();
+  if (rawValueParts.length > 1 && unitSource == null) {
+    unit = rawValueParts.sublist(1).join(' ').trim();
+  }
+
+  final rawDisplay = displaySource?.toString() ?? '';
+  final displayParts = rawDisplay.trim().split(RegExp(r'\s+'));
+  if (displayParts.length > 1 && unitSource == null) {
+    unit = displayParts.sublist(1).join(' ').trim();
   }
   if (unit.isEmpty) {
     unit = defaultUnit;
   }
 
   return _ParsedWeight(value: value, unit: unit);
+}
+
+String _formatWeightDisplay(double weight, String unit) {
+  final formatted =
+      weight % 1 == 0 ? weight.toStringAsFixed(0) : weight.toString();
+  return '$formatted $unit';
 }
 
 @immutable

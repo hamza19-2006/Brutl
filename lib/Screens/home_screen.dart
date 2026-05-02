@@ -352,7 +352,7 @@ class _HomeTab extends StatelessWidget {
     return _HomeLocalData(
       stepGoal: stepGoal,
       calorieGoal: calorieGoal,
-      todayCalories: _clampCalories(todayCalories),
+      todayCalories: todayCalories,
     );
   }
 

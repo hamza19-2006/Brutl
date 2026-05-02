@@ -268,7 +268,7 @@ class DayDetailScreen extends StatelessWidget {
                                           ),
                                         ),
                                         Text(
-                                          '${exercise.weight.toStringAsFixed(0)} ${exercise.weightUnit}',
+                                          exercise.weightDisplay,
                                           style: const TextStyle(
                                             color: Color(0xFF777777),
                                             fontSize: 12,

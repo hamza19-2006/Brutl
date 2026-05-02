@@ -135,7 +135,6 @@ class StepService extends ChangeNotifier {
   @override
   void dispose() {
     _stepSubscription?.cancel();
-    _stepsController.close(); // Close stream controller.
     super.dispose();
   }
 

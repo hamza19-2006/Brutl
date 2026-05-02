@@ -1,31 +1,88 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart'; // SharedPreferences access.
 
 import '../providers/workout_nutrition_provider.dart';
 import '../providers/workout_provider.dart';
+import '../services/nutrition_service.dart';
 import '../widgets/macro_dashboard_card.dart';
 import '../widgets/meal_logger_sheet.dart';
 import '../widgets/workout_card_widget.dart';
+import '../models/brutl_models.dart';
 
 class WorkoutScreen extends StatefulWidget {
-  // Workout screen widget.
   const WorkoutScreen({super.key, this.showBottomNavigationBar = true});
 
   final bool showBottomNavigationBar;
 
   @override
-  State<WorkoutScreen> createState() => _WorkoutScreenState(); // Create state.
+  State<WorkoutScreen> createState() => _WorkoutScreenState();
 }
 
 class _WorkoutScreenState extends State<WorkoutScreen> {
-  // Stateful workout screen.
-  int _lastSeenTotalCalories = 0; // Tracks last seen total calories.
-  bool _hasInitializedCalories = false; // Tracks initial sync.
-  int? _pendingCaloriesTotal; // Guards duplicate sync scheduling.
-  bool _isSyncScheduled = false; // Prevents duplicate frame scheduling.
+  int _caloriesEaten = 0;
+  int _calorieGoal = 2000;
+  int _carbs = 0;
+  int _carbsGoal = 200;
+  int _protein = 0;
+  int _proteinGoal = 150;
+  int _fats = 0;
+  int _fatsGoal = 60;
+
+  StreamSubscription<NutritionData>? _nutritionSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadNutrition();
+  }
+
+  Future<void> _loadNutrition() async {
+    final data = await NutritionService.instance.loadTodayNutrition();
+    if (!mounted) return;
+    setState(() {
+      _caloriesEaten = data.caloriesEaten;
+      _calorieGoal = data.calorieGoal;
+      _carbs = data.carbs;
+      _carbsGoal = data.carbsGoal;
+      _protein = data.protein;
+      _proteinGoal = data.proteinGoal;
+      _fats = data.fats;
+      _fatsGoal = data.fatsGoal;
+    });
+
+    _nutritionSub = NutritionService.instance.stream.listen((data) {
+      if (!mounted) return;
+      setState(() {
+        _caloriesEaten = data.caloriesEaten;
+        _calorieGoal = data.calorieGoal;
+        _carbs = data.carbs;
+        _carbsGoal = data.carbsGoal;
+        _protein = data.protein;
+        _proteinGoal = data.proteinGoal;
+        _fats = data.fats;
+        _fatsGoal = data.fatsGoal;
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _nutritionSub?.cancel();
+    super.dispose();
+  }
+
+  NutritionModel get _builtNutrition => NutritionModel(
+    totalCal: _caloriesEaten,
+    goalCal: _calorieGoal,
+    carbs: MacroNutrientModel(consumed: _carbs, goal: _carbsGoal),
+    protein: MacroNutrientModel(consumed: _protein, goal: _proteinGoal),
+    fats: MacroNutrientModel(consumed: _fats, goal: _fatsGoal),
+    meals: const {},
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -40,7 +97,6 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
           );
         }
 
-        final workoutProvider = context.watch<WorkoutProvider>();
         final currentUser = FirebaseAuth.instance.currentUser;
         if (currentUser == null) {
           return const Scaffold(
@@ -51,18 +107,8 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
           );
         }
 
-        final splitName =
-            workoutProvider.selectedWorkoutSplit; // Selected split name.
-        final nutrition =
-            nutritionProvider.nutrition; // Current nutrition model.
-        _scheduleCaloriesSync(
-          nutrition.totalCal,
-        ); // Sync today_calories locally.
-        final syncedNutrition = nutrition.copyWith(
-          // Clamp displayed calories.
-          totalCal: _clampCalories(nutrition.totalCal), // Clamp total calories.
-        );
-        final daysForSplit = getDaysForSplit(splitName);
+        final workoutProvider = context.watch<WorkoutProvider>();
+        final splitName = workoutProvider.selectedWorkoutSplit;
         final weekId = 'week_${workoutProvider.selectedWeek}';
 
         return Scaffold(
@@ -103,9 +149,10 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: MacroDashboardCard(
-                    nutrition: syncedNutrition,
+                    nutrition: _builtNutrition,
                     ui: nutritionProvider.ui,
-                    onTap: () => _openMealLoggerSheet(context),
+                    onTap: () =>
+                        _openMealLoggerSheet(context, nutritionProvider),
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -173,7 +220,6 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
                         customSplitDays =
                             data['customSplitDays'] as List<dynamic>;
                       }
-
                       if (customSplitDays.isEmpty) {
                         customSplitDays = ['Full Body'];
                       }
@@ -206,79 +252,20 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     );
   }
 
-  Future<void> _openMealLoggerSheet(BuildContext context) async {
+  Future<void> _openMealLoggerSheet(
+    BuildContext context,
+    WorkoutNutritionProvider provider,
+  ) async {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => const MealLoggerSheet(),
+      builder: (_) => _NutritionLoggerSheet(
+        ui: provider.ui,
+        caloriesEaten: _caloriesEaten,
+        calorieGoal: _calorieGoal,
+      ),
     );
-  }
-
-  /// Schedules a post-frame sync to avoid updates during build and coalesce totals.
-  void _scheduleCaloriesSync(int currentTotalCalories) {
-    if (_hasInitializedCalories &&
-        currentTotalCalories == _lastSeenTotalCalories) {
-      return;
-    }
-    _pendingCaloriesTotal = currentTotalCalories; // Track pending total.
-    if (_isSyncScheduled) {
-      // Skip if already scheduled.
-      return; // Exit early.
-    }
-    _isSyncScheduled = true; // Mark as scheduled.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Defer to after frame.
-      _isSyncScheduled = false; // Clear scheduled flag.
-      final pendingTotal = _pendingCaloriesTotal!; // Capture latest total.
-      _pendingCaloriesTotal = null; // Clear pending total.
-      if (!mounted) {
-        // Guard unmounted state.
-        return; // Exit early.
-      }
-      _syncTodayCalories(pendingTotal); // Persist calories.
-    });
-  }
-
-  Future<void> _syncTodayCalories(int currentMealCalories) async {
-    // Persist today calories.
-    if (!_hasInitializedCalories) {
-      // Skip initial sync.
-      _hasInitializedCalories = true; // Mark initialized.
-      _lastSeenTotalCalories = currentMealCalories; // Seed last calories.
-      return; // Exit early.
-    }
-
-    final delta =
-        currentMealCalories - _lastSeenTotalCalories; // Calculate delta.
-    _lastSeenTotalCalories = currentMealCalories; // Update last total.
-    if (delta <= 0) {
-      // Ignore non-positive deltas.
-      return; // Exit early.
-    }
-
-    final prefs = await SharedPreferences.getInstance(); // Load preferences.
-    final existing = prefs.getInt('today_calories') ?? 0; // Read current total.
-    final updated = existing + delta; // Add delta calories.
-    final clamped = _clampCalories(updated); // Clamp to 0..5000.
-    await prefs.setInt('today_calories', clamped); // Persist updated total.
-    if (mounted) {
-      // Guard mounted state.
-      setState(() {}); // Refresh UI.
-    }
-  }
-
-  int _clampCalories(int calories) {
-    // Clamp calories to 0..5000.
-    if (calories < 0) {
-      // Guard negative calories.
-      return 0; // Clamp to zero.
-    }
-    if (calories > 5000) {
-      // Guard upper bound.
-      return 5000; // Clamp to max.
-    }
-    return calories; // Return normalized calories.
   }
 
   IconData _iconForIndex(int index) {
@@ -295,48 +282,164 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   }
 }
 
-List<Map<String, dynamic>> getDaysForSplit(String splitName) {
-  final normalized = splitName.trim().toLowerCase();
+class _NutritionLoggerSheet extends StatefulWidget {
+  const _NutritionLoggerSheet({
+    required this.ui,
+    required this.caloriesEaten,
+    required this.calorieGoal,
+  });
 
-  List<String> dayNames;
-  switch (normalized) {
-    case 'push pull legs':
-    case 'push/pull/legs':
-    case 'push, pull, legs':
-    case 'push, pull, legs, repeat':
-    case 'ppl':
-      dayNames = <String>[
-        'Push (Chest, Shoulders, Triceps)',
-        'Pull (Back, Biceps, Rear Delts)',
-        'Legs (Quads, Hamstrings, Calves)',
-        'Push (Chest, Shoulders, Triceps)',
-        'Pull (Back, Biceps, Rear Delts)',
-        'Legs (Quads, Hamstrings, Calves)',
-      ];
-      break;
-    case 'bro split':
-    case 'bro split (1 muscle per day)':
-      dayNames = <String>['Chest', 'Back', 'Shoulders', 'Arms', 'Legs'];
-      break;
-    case 'upper/lower':
-    case 'upper lower':
-    case 'upper, lower, rest, repeat':
-      dayNames = <String>['Upper A', 'Lower A', 'Upper B', 'Lower B'];
-      break;
-    case 'full body':
-      dayNames = <String>['Full Body'];
-      break;
-    default:
-      dayNames = <String>['Full Body'];
-      break;
+  final WorkoutNutritionUiModel ui;
+  final int caloriesEaten;
+  final int calorieGoal;
+
+  @override
+  State<_NutritionLoggerSheet> createState() => _NutritionLoggerSheetState();
+}
+
+class _NutritionLoggerSheetState extends State<_NutritionLoggerSheet> {
+  final TextEditingController _calCtrl = TextEditingController();
+  final TextEditingController _carbCtrl = TextEditingController();
+  final TextEditingController _proCtrl = TextEditingController();
+  final TextEditingController _fatCtrl = TextEditingController();
+  bool _isSaving = false;
+
+  @override
+  void dispose() {
+    _calCtrl.dispose();
+    _carbCtrl.dispose();
+    _proCtrl.dispose();
+    _fatCtrl.dispose();
+    super.dispose();
   }
 
-  return List<Map<String, dynamic>>.generate(
-    dayNames.length,
-    (index) => <String, dynamic>{
-      'dayNumber': 'Day ${index + 1}',
-      'name': dayNames[index],
-      'exercises': 0,
-    },
-  );
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Color(0xFF111111),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 44,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2A2A2A),
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  widget.ui.logNutritionTitle,
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${widget.ui.todaysTotalPrefix} ${widget.caloriesEaten} ${widget.ui.calorieUnit}',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: const Color(0xFF909090),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _buildField(_calCtrl, 'Calories (kcal)', TextInputType.number),
+                const SizedBox(height: 10),
+                _buildField(_carbCtrl, 'Carbs (g)', TextInputType.number),
+                const SizedBox(height: 10),
+                _buildField(_proCtrl, 'Protein (g)', TextInputType.number),
+                const SizedBox(height: 10),
+                _buildField(_fatCtrl, 'Fats (g)', TextInputType.number),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: Opacity(
+                    opacity: _isSaving ? 0.55 : 1.0,
+                    child: ElevatedButton(
+                      onPressed: _isSaving ? null : _handleLog,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFFF3D00),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text(
+                        'Log Nutrition',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildField(
+    TextEditingController ctrl,
+    String label,
+    TextInputType type,
+  ) {
+    return TextField(
+      controller: ctrl,
+      keyboardType: type,
+      style: const TextStyle(color: Colors.white),
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: const TextStyle(color: Color(0xFF8A8A8A)),
+        enabledBorder: const OutlineInputBorder(
+          borderSide: BorderSide(color: Color(0xFF2A2A2A)),
+          borderRadius: BorderRadius.all(Radius.circular(12)),
+        ),
+        focusedBorder: const OutlineInputBorder(
+          borderSide: BorderSide(color: Color(0xFFFF3D00)),
+          borderRadius: BorderRadius.all(Radius.circular(12)),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _handleLog() async {
+    final calories = int.tryParse(_calCtrl.text.trim()) ?? 0;
+    final carbs = int.tryParse(_carbCtrl.text.trim()) ?? 0;
+    final protein = int.tryParse(_proCtrl.text.trim()) ?? 0;
+    final fats = int.tryParse(_fatCtrl.text.trim()) ?? 0;
+
+    if (calories < 0 || carbs < 0 || protein < 0 || fats < 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter valid positive values.')),
+      );
+      return;
+    }
+
+    setState(() => _isSaving = true);
+    await NutritionService.instance.addCalories(calories, carbs, protein, fats);
+    if (mounted) {
+      setState(() => _isSaving = false);
+      Navigator.of(context).pop();
+    }
+  }
 }

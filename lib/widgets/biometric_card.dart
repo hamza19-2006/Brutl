@@ -4,21 +4,19 @@ import 'package:percent_indicator/circular_percent_indicator.dart';
 
 import '../Screens/steps_history_screen.dart';
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// STEPS CARD — Rounded rectangle with linear progress bar
-// ═══════════════════════════════════════════════════════════════════════════════
-
 class StepsCard extends StatelessWidget {
   const StepsCard({
     super.key,
     required this.currentSteps,
     required this.goalSteps,
+    required this.progress,
     required this.stepsLabel,
     required this.stepsUnitLabel,
   });
 
   final int currentSteps;
   final int goalSteps;
+  final double progress;
   final String stepsLabel;
   final String stepsUnitLabel;
 
@@ -26,8 +24,6 @@ class StepsCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final formattedCurrent = NumberFormat.decimalPattern().format(currentSteps);
     final formattedGoal = NumberFormat.decimalPattern().format(goalSteps);
-    final safeGoal = goalSteps <= 0 ? 1 : goalSteps;
-    final progress = (currentSteps / safeGoal).clamp(0.0, 1.0);
 
     return InkWell(
       borderRadius: BorderRadius.circular(20),
@@ -47,7 +43,6 @@ class StepsCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Label
             Row(
               children: [
                 const Icon(
@@ -66,7 +61,6 @@ class StepsCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 10),
-
             Text(
               '$formattedCurrent / $formattedGoal',
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(
@@ -84,8 +78,6 @@ class StepsCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 14),
-
-            // Linear progress bar
             ClipRRect(
               borderRadius: BorderRadius.circular(4),
               child: SizedBox(
@@ -98,7 +90,7 @@ class StepsCard extends StatelessWidget {
                     ),
                     FractionallySizedBox(
                       alignment: Alignment.centerLeft,
-                      widthFactor: progress,
+                      widthFactor: progress.clamp(0.0, 1.0),
                       child: const DecoratedBox(
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
@@ -111,10 +103,7 @@ class StepsCard extends StatelessWidget {
                 ),
               ),
             ),
-
             const SizedBox(height: 10),
-
-            // Tap hint
             Row(
               children: [
                 Text(
@@ -140,15 +129,12 @@ class StepsCard extends StatelessWidget {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// CALORIES CARD — Circular progress widget
-// ═══════════════════════════════════════════════════════════════════════════════
-
 class CaloriesCard extends StatelessWidget {
   const CaloriesCard({
     super.key,
     required this.caloriesBurned,
     required this.calorieGoal,
+    required this.progress,
     required this.caloriesLabel,
     required this.caloriesUnitLabel,
     required this.onTap,
@@ -156,15 +142,13 @@ class CaloriesCard extends StatelessWidget {
 
   final double caloriesBurned;
   final int calorieGoal;
+  final double progress;
   final String caloriesLabel;
   final String caloriesUnitLabel;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final safeGoal = calorieGoal <= 0 ? 1.0 : calorieGoal.toDouble();
-    final progress = (caloriesBurned / safeGoal).clamp(0.0, 1.0);
-
     return InkWell(
       borderRadius: BorderRadius.circular(20),
       onTap: onTap,
@@ -181,7 +165,7 @@ class CaloriesCard extends StatelessWidget {
             CircularPercentIndicator(
               radius: 50,
               lineWidth: 8,
-              percent: progress,
+              percent: progress.clamp(0.0, 1.0),
               backgroundColor: const Color(0xFF2A2A2A),
               circularStrokeCap: CircularStrokeCap.round,
               linearGradient: const LinearGradient(
@@ -190,7 +174,6 @@ class CaloriesCard extends StatelessWidget {
               center: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Flame icon
                   const Icon(
                     Icons.local_fire_department_rounded,
                     color: Color(0xFFFF3D00),

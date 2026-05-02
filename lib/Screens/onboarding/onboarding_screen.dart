@@ -249,7 +249,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               .toList()
         : <String>[];
 
-    // Save profile data WITHOUT isProfileComplete first
     final brutlUser = BrutlUser(
       uid: user.uid,
       displayName: _displayNameCtrl.text.trim(),
@@ -276,18 +275,18 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           .collection('users')
           .doc(user.uid);
 
-      // Write all profile data first
       await docRef.set(brutlUser.toJson(), SetOptions(merge: true));
-
-      // Only mark profile complete AFTER successful write
       await docRef.update({'isProfileComplete': true});
 
-      // --- CRITICAL: Async Gap Fix ---
-      if (!mounted) {
-        return;
-      }
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('step_goal', brutlUser.dailySteps);
+      await prefs.setInt('calorie_goal', _targetCalories);
+      await prefs.setInt('carbs_goal', _targetCarbs);
+      await prefs.setInt('protein_goal', _targetProtein);
+      await prefs.setInt('fats_goal', _targetFats);
 
-      // --- Navigation Fix: Clear stack and route to HomeScreen ---
+      if (!mounted) return;
+
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute<void>(builder: (_) => const HomeScreen()),

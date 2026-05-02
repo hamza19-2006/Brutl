@@ -32,7 +32,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    
+
     // Initialize StepService safely AFTER HomeScreen begins loading
     StepService.instance.initializeStepService(); // Start step tracking.
 

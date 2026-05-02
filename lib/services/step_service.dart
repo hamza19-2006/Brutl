@@ -20,7 +20,7 @@ class StepService extends ChangeNotifier {
   String _lastResetDate = ''; // Tracks last reset date.
   bool _hasStoredBaseline = false;
   bool _isInitialized = false;
-  int _lastEmittedSteps = -1; // Keeps last stream emission. 
+  int _lastEmittedSteps = -1; // Tracks last stream emission. 
   StreamController<int> _stepsController =
       StreamController<int>.broadcast(); // Stream for today steps.
 

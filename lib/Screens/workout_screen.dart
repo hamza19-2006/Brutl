@@ -205,7 +205,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> { // Stateful workout scr
     );
   }
 
-  /// Schedules a post-frame sync to avoid updates during build and coalesce totals. // Explain scheduling.
+  /// Schedules a post-frame sync to avoid updates during build and coalesce totals.
   void _scheduleCaloriesSync(int currentMealCalories) { // Schedule local calories sync.
     _pendingCaloriesTotal = currentMealCalories; // Track pending total.
     if (_isSyncScheduled) { // Skip if already scheduled.

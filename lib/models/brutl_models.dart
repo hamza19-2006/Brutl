@@ -156,7 +156,8 @@ class ExerciseModel {
     final setsSource = json['sets'];
     final weightSource = json['weight'];
     final weightUnitSource = json['weightUnit'];
-    final weightDisplaySource = json['weightDisplay'];
+    final weightDisplaySource =
+        json['weightDisplay']; // Use display field to recover unit.
     final repsSource = json['reps'];
     final normalizedReps = switch (repsSource) {
       String value => value.trim(),

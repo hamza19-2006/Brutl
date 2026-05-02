@@ -167,12 +167,12 @@ class _HomeLocalData { // Holds locally stored dashboard data.
     required this.stepGoal, // Daily step goal from prefs.
     required this.calorieGoal, // Daily calorie goal from prefs.
     required this.todayCalories, // Today's calories from prefs.
-  }); // End constructor.
+  });
 
   final int stepGoal; // Step goal value.
   final int calorieGoal; // Calorie goal value.
   final int todayCalories; // Today's calories value.
-} // End local data model.
+}
 
 class _HomeTab extends StatelessWidget {
   const _HomeTab({required this.onCaloriesTap, required this.onExerciseTap});

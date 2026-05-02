@@ -20,9 +20,10 @@ class WorkoutScreen extends StatefulWidget { // Workout screen widget.
 }
 
 class _WorkoutScreenState extends State<WorkoutScreen> { // Stateful workout screen.
-  int _lastLoggedCalories = 0; // Tracks last logged meal calories.
+  int _lastSeenMealCalories = 0; // Tracks last seen meal calories.
   bool _hasInitializedCalories = false; // Tracks initial sync.
   int? _pendingCaloriesTotal; // Guards duplicate sync scheduling.
+  bool _isSyncScheduled = false; // Prevents duplicate frame scheduling.
 
   @override
   Widget build(BuildContext context) {
@@ -205,27 +206,34 @@ class _WorkoutScreenState extends State<WorkoutScreen> { // Stateful workout scr
   }
 
   void _scheduleCaloriesSync(int currentMealCalories) { // Schedule local calories sync.
-    if (_pendingCaloriesTotal == currentMealCalories) { // Skip duplicates.
+    _pendingCaloriesTotal = currentMealCalories; // Track pending total.
+    if (_isSyncScheduled) { // Skip if already scheduled.
       return; // Exit early.
     }
-    _pendingCaloriesTotal = currentMealCalories; // Track pending total.
+    _isSyncScheduled = true; // Mark as scheduled.
     WidgetsBinding.instance.addPostFrameCallback((_) { // Defer to after frame.
+      _isSyncScheduled = false; // Clear scheduled flag.
+      final pendingTotal = _pendingCaloriesTotal; // Capture latest total.
+      _pendingCaloriesTotal = null; // Clear pending total.
       if (!mounted) { // Guard unmounted state.
         return; // Exit early.
       }
-      _syncTodayCalories(currentMealCalories); // Persist calories.
+      if (pendingTotal == null) { // Guard missing total.
+        return; // Exit early.
+      }
+      _syncTodayCalories(pendingTotal); // Persist calories.
     });
   }
 
   Future<void> _syncTodayCalories(int currentMealCalories) async { // Persist today calories.
     if (!_hasInitializedCalories) { // Skip initial sync.
       _hasInitializedCalories = true; // Mark initialized.
-      _lastLoggedCalories = currentMealCalories; // Seed last calories.
+      _lastSeenMealCalories = currentMealCalories; // Seed last calories.
       return; // Exit early.
     }
 
-    final delta = currentMealCalories - _lastLoggedCalories; // Calculate delta.
-    _lastLoggedCalories = currentMealCalories; // Update last total.
+    final delta = currentMealCalories - _lastSeenMealCalories; // Calculate delta.
+    _lastSeenMealCalories = currentMealCalories; // Update last total.
     if (delta <= 0) { // Ignore non-positive deltas.
       return; // Exit early.
     }

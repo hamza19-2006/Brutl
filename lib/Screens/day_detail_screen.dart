@@ -47,7 +47,9 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
         final snapshot = await transaction.get(_dayDocRef);
         final data = snapshot.data();
         final exercisesData = data?['exercises'];
-        final rawExercises = exercisesData is List ? exercisesData : <dynamic>[];
+        final rawExercises = exercisesData is List
+            ? exercisesData
+            : <dynamic>[];
 
         final updatedExercises = <dynamic>[];
         var replaced = false;
@@ -176,9 +178,11 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
         final dayName = (rawName is String && rawName.trim().isNotEmpty)
             ? rawName.trim()
             : widget.workoutName;
-            
+
         final exercisesData = data?['exercises'];
-        final List<dynamic> rawExercises = exercisesData is List ? exercisesData : <dynamic>[];
+        final List<dynamic> rawExercises = exercisesData is List
+            ? exercisesData
+            : <dynamic>[];
 
         final firestoreExercises = rawExercises
             .whereType<Map<dynamic, dynamic>>()

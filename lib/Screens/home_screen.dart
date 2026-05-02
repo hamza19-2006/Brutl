@@ -174,133 +174,151 @@ class _HomeLocalData { // Holds locally stored dashboard data.
   final int todayCalories; // Today's calories value.
 }
 
-class _HomeTab extends StatelessWidget {
+class _HomeTab extends StatefulWidget {
   const _HomeTab({required this.onCaloriesTap, required this.onExerciseTap});
 
   final VoidCallback onCaloriesTap;
   final ValueChanged<String> onExerciseTap;
 
   @override
+  State<_HomeTab> createState() => _HomeTabState();
+}
+
+class _HomeTabState extends State<_HomeTab> {
+  late Future<_HomeLocalData> _localDataFuture;
+  int _lastCalorieToken = -1;
+
+  @override
+  void initState() {
+    super.initState();
+    _localDataFuture = _loadLocalData();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Consumer2<WorkoutProvider, WorkoutNutritionProvider>(
-      builder: (context, workoutProvider, nutritionProvider, _) {
-        if (workoutProvider.isLoading || nutritionProvider.isLoading) {
-          return const Center(
-            child: CircularProgressIndicator(color: Color(0xFFFF3D00)),
-          );
-        }
+    final workoutProvider = context.watch<WorkoutProvider>();
+    final nutritionProvider = context.watch<WorkoutNutritionProvider>();
+    if (workoutProvider.isLoading || nutritionProvider.isLoading) {
+      return const Center(
+        child: CircularProgressIndicator(color: Color(0xFFFF3D00)),
+      );
+    }
 
-        return FutureBuilder<_HomeLocalData>(
-          future: _loadLocalData(), // Load shared preferences values.
-          builder: (context, snapshot) {
-            final localData = snapshot.data ?? // Use snapshot data or fallback.
-                const _HomeLocalData( // Default fallback values.
-                  stepGoal: 0, // Default step goal.
-                  calorieGoal: 0, // Default calorie goal.
-                  todayCalories: 0, // Default calorie total.
-                ); // End fallback instance.
+    final calorieToken = nutritionProvider.nutrition.totalCal;
+    if (_lastCalorieToken != calorieToken) {
+      _lastCalorieToken = calorieToken;
+      _localDataFuture = _loadLocalData();
+    }
 
-            return SafeArea(
-              child: SingleChildScrollView(
-                physics: const BouncingScrollPhysics(),
-                padding: const EdgeInsets.only(top: 50, bottom: 20),
-                child: Column(
-                  children: [
-                    HeaderWidget(
-                      user: workoutProvider.user,
-                      workoutName: workoutProvider.todayWorkoutName,
-                      daySuffix: workoutProvider.homeUi.daySuffix,
-                      now: DateTime.now(),
-                      brandName: workoutProvider.homeUi.brandName,
+    return FutureBuilder<_HomeLocalData>(
+      future: _localDataFuture,
+      builder: (context, snapshot) {
+        final localData = snapshot.data ??
+            const _HomeLocalData(
+              stepGoal: 0,
+              calorieGoal: 0,
+              todayCalories: 0,
+            );
+
+        return SafeArea(
+          child: SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
+            padding: const EdgeInsets.only(top: 50, bottom: 20),
+            child: Column(
+              children: [
+                HeaderWidget(
+                  user: workoutProvider.user,
+                  workoutName: workoutProvider.todayWorkoutName,
+                  daySuffix: workoutProvider.homeUi.daySuffix,
+                  now: DateTime.now(),
+                  brandName: workoutProvider.homeUi.brandName,
+                ),
+                const SizedBox(height: 20),
+
+                // ── Split Dashboard: Steps (left) + Calories (right) ──
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: IntrinsicHeight(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Expanded(
+                          flex: 6,
+                          child: _buildStepsCard(
+                            context,
+                            workoutProvider,
+                            localData.stepGoal,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          flex: 4,
+                          child: _buildCaloriesCard(
+                            context,
+                            workoutProvider,
+                            localData.calorieGoal,
+                            localData.todayCalories,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 20),
+                  ),
+                ),
 
-                    // ── Split Dashboard: Steps (left) + Calories (right) ──
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: IntrinsicHeight(
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Expanded(
-                              flex: 6,
-                              child: _buildStepsCard(
-                                context,
-                                workoutProvider,
-                                localData.stepGoal,
-                              ),
+                const SizedBox(height: 20),
+
+                // ── Last Workout Section ──
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        workoutProvider.lastWorkoutTitle,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
                             ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              flex: 4,
-                              child: _buildCaloriesCard(
-                                context,
-                                workoutProvider,
-                                localData.calorieGoal,
-                                localData.todayCalories,
-                              ),
-                            ),
-                          ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        workoutProvider.lastWorkoutSubtitle,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFF888888),
+                          fontSize: 12,
                         ),
                       ),
-                    ),
-
-                    const SizedBox(height: 20),
-
-                    // ── Last Workout Section ──
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            workoutProvider.lastWorkoutTitle,
-                            style: Theme.of(context).textTheme.titleMedium
-                                ?.copyWith(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            workoutProvider.lastWorkoutSubtitle,
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: const Color(0xFF888888),
-                              fontSize: 12,
+                      const SizedBox(height: 12),
+                      if (workoutProvider.topVolumeExercises.isEmpty)
+                        Text(
+                          workoutProvider.noWorkoutMessage,
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(color: const Color(0xFF666666)),
+                        )
+                      else
+                        ...workoutProvider.topVolumeExercises.map(
+                          (exercise) => Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: ExerciseHighlightCard(
+                              exercise: exercise,
+                              setsLabel: workoutProvider.homeUi.setsLabel,
+                              repsLabel: workoutProvider.homeUi.repsLabel,
+                              weightLabel: workoutProvider.homeUi.weightLabel,
+                              weightUnit: workoutProvider.homeUi.weightUnit,
+                              isHighlighted:
+                                  exercise.name ==
+                                  workoutProvider.highlightedExerciseName,
+                              onTap: () => widget.onExerciseTap(exercise.name),
                             ),
                           ),
-                          const SizedBox(height: 12),
-                          if (workoutProvider.topVolumeExercises.isEmpty)
-                            Text(
-                              workoutProvider.noWorkoutMessage,
-                              style: Theme.of(context).textTheme.bodyMedium
-                                  ?.copyWith(color: const Color(0xFF666666)),
-                            )
-                          else
-                            ...workoutProvider.topVolumeExercises.map(
-                              (exercise) => Padding(
-                                padding: const EdgeInsets.only(bottom: 8),
-                                child: ExerciseHighlightCard(
-                                  exercise: exercise,
-                                  setsLabel: workoutProvider.homeUi.setsLabel,
-                                  repsLabel: workoutProvider.homeUi.repsLabel,
-                                  weightLabel: workoutProvider.homeUi.weightLabel,
-                                  weightUnit: workoutProvider.homeUi.weightUnit,
-                                  isHighlighted:
-                                      exercise.name ==
-                                      workoutProvider.highlightedExerciseName,
-                                  onTap: () => onExerciseTap(exercise.name),
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ],
+                        ),
+                    ],
+                  ),
                 ),
-              ),
-            );
-          },
+              ],
+            ),
+          ),
         );
       },
     );
@@ -340,7 +358,7 @@ class _HomeTab extends StatelessWidget {
       calorieGoal: calorieGoal,
       caloriesLabel: workoutProvider.homeUi.caloriesLabel,
       caloriesUnitLabel: workoutProvider.homeUi.caloriesUnitLabel,
-      onTap: onCaloriesTap,
+      onTap: widget.onCaloriesTap,
     );
   }
 

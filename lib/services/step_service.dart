@@ -21,7 +21,8 @@ class StepService extends ChangeNotifier {
   bool _hasStoredBaseline = false;
   bool _isInitialized = false;
   int _lastEmittedSteps = -1; // Keeps last stream emission. 
-  final StreamController<int> _stepsController = StreamController<int>.broadcast(); // Stream for today steps. 
+  StreamController<int> _stepsController =
+      StreamController<int>.broadcast(); // Stream for today steps.
 
   bool get isInitialized => _isInitialized;
   Stream<int> get todayStepsStream => _stepsController.stream; // Expose today steps stream.
@@ -34,6 +35,9 @@ class StepService extends ChangeNotifier {
     final preferences = _preferences;
     if (preferences == null) {
       return;
+    }
+    if (_stepsController.isClosed) { // Recreate stream if disposed.
+      _stepsController = StreamController<int>.broadcast(); // Rebuild stream.
     }
     _baselineSteps = preferences.getInt(_baselineStepsKey) ?? 0;
     _todaySteps = preferences.getInt(_todayStepsKey) ?? 0;
@@ -135,6 +139,7 @@ class StepService extends ChangeNotifier {
   @override
   void dispose() {
     _stepSubscription?.cancel();
+    _stepsController.close(); // Close stream controller.
     super.dispose();
   }
 

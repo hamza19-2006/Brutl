@@ -20,7 +20,7 @@ class WorkoutScreen extends StatefulWidget { // Workout screen widget.
 }
 
 class _WorkoutScreenState extends State<WorkoutScreen> { // Stateful workout screen.
-  int _lastSeenMealCalories = 0; // Tracks last seen meal calories.
+  int _lastSeenTotalCalories = 0; // Tracks last seen total calories.
   bool _hasInitializedCalories = false; // Tracks initial sync.
   int? _pendingCaloriesTotal; // Guards duplicate sync scheduling.
   bool _isSyncScheduled = false; // Prevents duplicate frame scheduling.
@@ -206,13 +206,12 @@ class _WorkoutScreenState extends State<WorkoutScreen> { // Stateful workout scr
   }
 
   /// Schedules a post-frame sync to avoid updates during build and coalesce totals.
-  void _scheduleCaloriesSync(int currentMealCalories) {
+  void _scheduleCaloriesSync(int currentTotalCalories) {
     if (_hasInitializedCalories &&
-        currentMealCalories == _lastSeenMealCalories &&
-        !_isSyncScheduled) {
+        currentTotalCalories == _lastSeenTotalCalories) {
       return;
     }
-    _pendingCaloriesTotal = currentMealCalories; // Track pending total.
+    _pendingCaloriesTotal = currentTotalCalories; // Track pending total.
     if (_isSyncScheduled) { // Skip if already scheduled.
       return; // Exit early.
     }
@@ -234,12 +233,12 @@ class _WorkoutScreenState extends State<WorkoutScreen> { // Stateful workout scr
   Future<void> _syncTodayCalories(int currentMealCalories) async { // Persist today calories.
     if (!_hasInitializedCalories) { // Skip initial sync.
       _hasInitializedCalories = true; // Mark initialized.
-      _lastSeenMealCalories = currentMealCalories; // Seed last calories.
+      _lastSeenTotalCalories = currentMealCalories; // Seed last calories.
       return; // Exit early.
     }
 
-    final delta = currentMealCalories - _lastSeenMealCalories; // Calculate delta.
-    _lastSeenMealCalories = currentMealCalories; // Update last total.
+    final delta = currentMealCalories - _lastSeenTotalCalories; // Calculate delta.
+    _lastSeenTotalCalories = currentMealCalories; // Update last total.
     if (delta <= 0) { // Ignore non-positive deltas.
       return; // Exit early.
     }

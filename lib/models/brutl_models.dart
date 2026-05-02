@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import '../utils/formatters.dart';
+
 enum WorkoutSplitType { chestTriceps, backBiceps, legsShoulders }
 
 extension WorkoutSplitTypeX on WorkoutSplitType {
@@ -97,7 +99,7 @@ class ExerciseModel {
   final String weightUnit;
   final bool isSynced;
   final String splitName;
-  String get weightDisplay => _formatWeightDisplay(weight, weightUnit);
+  String get weightDisplay => formatWeight(weight, weightUnit);
 
   double get averageReps {
     final parsedReps = repValues;
@@ -229,12 +231,6 @@ _ParsedWeight _parseWeight(
   }
 
   return _ParsedWeight(value: value, unit: unit);
-}
-
-String _formatWeightDisplay(double weight, String unit) {
-  final formatted =
-      weight % 1 == 0 ? weight.toStringAsFixed(0) : weight.toString();
-  return '$formatted $unit';
 }
 
 @immutable

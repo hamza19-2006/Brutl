@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/brutl_models.dart';
+import '../utils/formatters.dart';
 import '../providers/workout_nutrition_provider.dart';
 import '../services/database_service.dart';
 
@@ -40,11 +41,11 @@ class _ExerciseEditorSheetState extends State<ExerciseEditorSheet> {
     );
     _repsController = TextEditingController(text: exercise?.reps ?? '10');
     final weightValue = exercise?.weight ?? 20;
-    final formattedWeight = weightValue % 1 == 0
-        ? weightValue.toStringAsFixed(0)
-        : weightValue.toString();
-    _weightController = TextEditingController(text: formattedWeight);
-    _selectedWeightUnit = exercise?.weightUnit ?? 'Kg';
+    final weightUnit = exercise?.weightUnit ?? 'Kg';
+    final formattedWeight = formatWeight(weightValue, weightUnit);
+    final formattedWeightValue = formattedWeight.split(' ').first;
+    _weightController = TextEditingController(text: formattedWeightValue);
+    _selectedWeightUnit = weightUnit;
   }
 
   @override

@@ -166,12 +166,10 @@ class _HomeLocalData {
   const _HomeLocalData({
     required this.stepGoal,
     required this.calorieGoal,
-    required this.todayCalories,
   });
 
   final int stepGoal;
   final int calorieGoal;
-  final int todayCalories;
 }
 
 class _HomeTab extends StatefulWidget {
@@ -187,6 +185,7 @@ class _HomeTab extends StatefulWidget {
 class _HomeTabState extends State<_HomeTab> {
   late Future<_HomeLocalData> _localDataFuture;
   int _lastCalorieToken = -1;
+  final ValueNotifier<int> _todayCaloriesNotifier = ValueNotifier<int>(0);
 
   @override
   void initState() {
@@ -195,19 +194,21 @@ class _HomeTabState extends State<_HomeTab> {
   }
 
   @override
+  void dispose() {
+    _todayCaloriesNotifier.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final workoutProvider = context.watch<WorkoutProvider>();
-    final nutritionProvider = context.watch<WorkoutNutritionProvider>();
-    if (workoutProvider.isLoading || nutritionProvider.isLoading) {
+    final isNutritionLoading = context.select<WorkoutNutritionProvider, bool>(
+      (provider) => provider.isLoading,
+    );
+    if (workoutProvider.isLoading || isNutritionLoading) {
       return const Center(
         child: CircularProgressIndicator(color: Color(0xFFFF3D00)),
       );
-    }
-
-    final calorieToken = nutritionProvider.nutrition.totalCal;
-    if (_lastCalorieToken != calorieToken) {
-      _lastCalorieToken = calorieToken;
-      _localDataFuture = _loadLocalData();
     }
 
     return FutureBuilder<_HomeLocalData>(
@@ -217,7 +218,6 @@ class _HomeTabState extends State<_HomeTab> {
             const _HomeLocalData(
               stepGoal: 0,
               calorieGoal: 0,
-              todayCalories: 0,
             );
 
         return SafeArea(
@@ -257,7 +257,6 @@ class _HomeTabState extends State<_HomeTab> {
                             context,
                             workoutProvider,
                             localData.calorieGoal,
-                            localData.todayCalories,
                           ),
                         ),
                       ],
@@ -349,16 +348,25 @@ class _HomeTabState extends State<_HomeTab> {
     BuildContext context,
     WorkoutProvider workoutProvider,
     int calorieGoal,
-    int todayCalories,
   ) {
-    final clampedCalories = _clampCalories(todayCalories); // Clamp daily calories.
-
-    return CaloriesCard(
-      caloriesBurned: clampedCalories.toDouble(),
-      calorieGoal: calorieGoal,
-      caloriesLabel: workoutProvider.homeUi.caloriesLabel,
-      caloriesUnitLabel: workoutProvider.homeUi.caloriesUnitLabel,
-      onTap: widget.onCaloriesTap,
+    return Selector<WorkoutNutritionProvider, int>(
+      selector: (context, provider) => provider.nutrition.totalCal,
+      builder: (context, calorieToken, _) {
+        _refreshTodayCalories(calorieToken);
+        return ValueListenableBuilder<int>(
+          valueListenable: _todayCaloriesNotifier,
+          builder: (context, todayCalories, __) {
+            final clampedCalories = _clampCalories(todayCalories);
+            return CaloriesCard(
+              caloriesBurned: clampedCalories.toDouble(),
+              calorieGoal: calorieGoal,
+              caloriesLabel: workoutProvider.homeUi.caloriesLabel,
+              caloriesUnitLabel: workoutProvider.homeUi.caloriesUnitLabel,
+              onTap: widget.onCaloriesTap,
+            );
+          },
+        );
+      },
     );
   }
 
@@ -367,11 +375,28 @@ class _HomeTabState extends State<_HomeTab> {
     final stepGoal = prefs.getInt('step_goal') ?? 0; // Read step goal.
     final calorieGoal = prefs.getInt('calorie_goal') ?? 0; // Read calorie goal.
     final todayCalories = prefs.getInt('today_calories') ?? 0; // Read today calories.
+    if (mounted) {
+      _todayCaloriesNotifier.value = todayCalories;
+    }
     return _HomeLocalData(
       stepGoal: stepGoal,
       calorieGoal: calorieGoal,
-      todayCalories: todayCalories,
     );
+  }
+
+  Future<void> _refreshTodayCalories(int calorieToken) async {
+    if (_lastCalorieToken == calorieToken) {
+      return;
+    }
+    _lastCalorieToken = calorieToken;
+    final prefs = await SharedPreferences.getInstance();
+    final todayCalories = prefs.getInt('today_calories') ?? 0;
+    if (!mounted) {
+      return;
+    }
+    if (_todayCaloriesNotifier.value != todayCalories) {
+      _todayCaloriesNotifier.value = todayCalories;
+    }
   }
 
   int _clampCalories(int calories) { // Clamp calories to 0..5000.

@@ -1,9 +1,9 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // Local preferences access.
 
+import '../providers/workout_nutrition_provider.dart';
 import '../providers/workout_provider.dart';
 import '../services/database_service.dart';
 import '../services/step_service.dart';
@@ -34,21 +34,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
 
     // Initialize StepService safely AFTER HomeScreen begins loading
-    StepService.instance.initializeStepService();
-    StepService.instance.addListener(_onStepUpdate);
+    StepService.instance.initializeStepService(); // Start step tracking.
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       requestStepPermission();
     });
   }
 
-  void _onStepUpdate() {
-    if (mounted) setState(() {});
-  }
-
   @override
   void dispose() {
-    StepService.instance.removeListener(_onStepUpdate);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -168,21 +162,77 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 // HOME TAB — Steps + Calories Dashboard with graceful fallbacks
 // ═══════════════════════════════════════════════════════════════════════════════
 
-class _HomeTab extends StatelessWidget {
+class _HomeLocalData {
+  const _HomeLocalData({required this.stepGoal, required this.calorieGoal});
+
+  final int stepGoal;
+  final int calorieGoal;
+}
+
+class _HomeTab extends StatefulWidget {
   const _HomeTab({required this.onCaloriesTap, required this.onExerciseTap});
 
   final VoidCallback onCaloriesTap;
   final ValueChanged<String> onExerciseTap;
 
   @override
+  State<_HomeTab> createState() => _HomeTabState();
+}
+
+class _HomeTabState extends State<_HomeTab> {
+  late Future<_HomeLocalData> _localDataFuture;
+  int _lastTotalCalories = -1;
+  final ValueNotifier<int> _todayCaloriesNotifier = ValueNotifier<int>(0);
+  late final WorkoutNutritionProvider _nutritionProvider;
+  late final VoidCallback _nutritionListener;
+  bool _hasNutritionListener = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _localDataFuture = _loadLocalData();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_hasNutritionListener) {
+      return;
+    }
+    _nutritionProvider = context.read<WorkoutNutritionProvider>();
+    _nutritionListener = () {
+      _refreshCaloriesDisplay(_nutritionProvider.nutrition.totalCal);
+    };
+    _nutritionProvider.addListener(_nutritionListener);
+    _hasNutritionListener = true;
+  }
+
+  @override
+  void dispose() {
+    if (_hasNutritionListener) {
+      _nutritionProvider.removeListener(_nutritionListener);
+    }
+    _todayCaloriesNotifier.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Consumer<WorkoutProvider>(
-      builder: (context, workoutProvider, _) {
-        if (workoutProvider.isLoading) {
-          return const Center(
-            child: CircularProgressIndicator(color: Color(0xFFFF3D00)),
-          );
-        }
+    final workoutProvider = context.watch<WorkoutProvider>();
+    final isNutritionLoading = context.select<WorkoutNutritionProvider, bool>(
+      (provider) => provider.isLoading,
+    );
+    if (workoutProvider.isLoading || isNutritionLoading) {
+      return const Center(
+        child: CircularProgressIndicator(color: Color(0xFFFF3D00)),
+      );
+    }
+
+    return FutureBuilder<_HomeLocalData>(
+      future: _localDataFuture,
+      builder: (context, snapshot) {
+        final localData =
+            snapshot.data ?? const _HomeLocalData(stepGoal: 0, calorieGoal: 0);
 
         return SafeArea(
           child: SingleChildScrollView(
@@ -211,14 +261,17 @@ class _HomeTab extends StatelessWidget {
                           child: _buildStepsCard(
                             context,
                             workoutProvider,
-                            workoutProvider.currentDailySteps,
-                            workoutProvider.user.dailyStepGoal,
+                            localData.stepGoal,
                           ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
                           flex: 4,
-                          child: _buildCaloriesCard(context, workoutProvider),
+                          child: _buildCaloriesCard(
+                            context,
+                            workoutProvider,
+                            localData.calorieGoal,
+                          ),
                         ),
                       ],
                     ),
@@ -269,7 +322,7 @@ class _HomeTab extends StatelessWidget {
                               isHighlighted:
                                   exercise.name ==
                                   workoutProvider.highlightedExerciseName,
-                              onTap: () => onExerciseTap(exercise.name),
+                              onTap: () => widget.onExerciseTap(exercise.name),
                             ),
                           ),
                         ),
@@ -287,75 +340,83 @@ class _HomeTab extends StatelessWidget {
   Widget _buildStepsCard(
     BuildContext context,
     WorkoutProvider workoutProvider,
-    int currentSteps,
     int stepGoal,
   ) {
-    // Rely strictly on local StepService for real-time pedometer reading
-    final actualSteps = StepService.instance.getTodaySteps();
+    return StreamBuilder<int>(
+      stream: StepService.instance.todayStepsStream, // Listen to today steps.
+      initialData: StepService.instance.getTodaySteps(), // Seed with cache.
+      builder: (context, snapshot) {
+        final todaySteps = snapshot.data ?? 0; // Default when stream is empty.
 
-    return StepsCard(
-      currentSteps: actualSteps,
-      goalSteps: stepGoal,
-      stepsLabel: workoutProvider.homeUi.stepsLabel,
-      stepsUnitLabel: workoutProvider.homeUi.stepsUnitLabel,
+        return StepsCard(
+          currentSteps: todaySteps,
+          goalSteps: stepGoal,
+          stepsLabel: workoutProvider.homeUi.stepsLabel,
+          stepsUnitLabel: workoutProvider.homeUi.stepsUnitLabel,
+        );
+      },
     );
   }
 
   Widget _buildCaloriesCard(
     BuildContext context,
     WorkoutProvider workoutProvider,
+    int calorieGoal,
   ) {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) {
-      return CaloriesCard(
-        caloriesBurned: StepService.instance
-            .calculateCalories(StepService.instance.getTodaySteps())
-            .clamp(0.0, 5000.0),
-        calorieGoal: workoutProvider.user.dailyCalorieGoal,
-        caloriesLabel: workoutProvider.homeUi.caloriesLabel,
-        caloriesUnitLabel: workoutProvider.homeUi.caloriesUnitLabel,
-        onTap: onCaloriesTap,
-      );
-    }
-
-    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          // Show CircularProgressIndicator while stream loads
-          return Container(
-            decoration: BoxDecoration(
-              color: const Color(0xFF1A1A1A),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFF2A2A2A)),
-            ),
-            child: const Center(
-              child: CircularProgressIndicator(color: Color(0xFFFF3D00)),
-            ),
-          );
-        }
-
-        final data = snapshot.data?.data();
-        final firestoreCalories =
-            (data?['calories'] as num?)?.toDouble() ??
-            (data?['dailyCaloriesBurned'] as num?)?.toDouble();
-        final calories =
-            (firestoreCalories ?? workoutProvider.currentDailyCaloriesBurned)
-                .clamp(0.0, 5000.0)
-                .toDouble();
-
+    return ValueListenableBuilder<int>(
+      valueListenable: _todayCaloriesNotifier,
+      builder: (context, todayCalories, __) {
+        final clampedCalories = _clampCalories(todayCalories);
         return CaloriesCard(
-          caloriesBurned: calories,
-          calorieGoal: workoutProvider.user.dailyCalorieGoal,
+          caloriesBurned: clampedCalories.toDouble(),
+          calorieGoal: calorieGoal,
           caloriesLabel: workoutProvider.homeUi.caloriesLabel,
           caloriesUnitLabel: workoutProvider.homeUi.caloriesUnitLabel,
-          onTap: onCaloriesTap,
+          onTap: widget.onCaloriesTap,
         );
       },
     );
+  }
+
+  Future<_HomeLocalData> _loadLocalData() async {
+    // Load prefs data for cards.
+    final prefs = await SharedPreferences.getInstance(); // Read preferences.
+    final stepGoal = prefs.getInt('step_goal') ?? 0; // Read step goal.
+    final calorieGoal = prefs.getInt('calorie_goal') ?? 0; // Read calorie goal.
+    final todayCalories =
+        prefs.getInt('today_calories') ?? 0; // Read today calories.
+    if (mounted) {
+      _todayCaloriesNotifier.value = todayCalories;
+    }
+    return _HomeLocalData(stepGoal: stepGoal, calorieGoal: calorieGoal);
+  }
+
+  Future<void> _refreshCaloriesDisplay(int totalCalories) async {
+    if (_lastTotalCalories == totalCalories) {
+      return;
+    }
+    _lastTotalCalories = totalCalories;
+    final prefs = await SharedPreferences.getInstance();
+    final todayCalories = prefs.getInt('today_calories') ?? 0;
+    if (!mounted) {
+      return;
+    }
+    if (_todayCaloriesNotifier.value != todayCalories) {
+      _todayCaloriesNotifier.value = todayCalories;
+    }
+  }
+
+  int _clampCalories(int calories) {
+    // Clamp calories to 0..5000.
+    if (calories < 0) {
+      // Guard negative calories.
+      return 0; // Clamp to zero.
+    }
+    if (calories > 5000) {
+      // Guard upper bound.
+      return 5000; // Clamp to max.
+    }
+    return calories; // Return normalized calories.
   }
 }
 

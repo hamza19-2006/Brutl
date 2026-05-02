@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -11,7 +9,7 @@ import '../widgets/exercise_editor_sheet.dart';
 ///
 /// Reads exercises from `users/{uid}/weeks/{weekId}/days/{dayId}` in real-time
 /// via a StreamBuilder so updates are reflected immediately.
-class DayDetailScreen extends StatefulWidget {
+class DayDetailScreen extends StatelessWidget {
   const DayDetailScreen({
     super.key,
     required this.uid,
@@ -25,80 +23,46 @@ class DayDetailScreen extends StatefulWidget {
   final String dayId;
   final String workoutName;
 
-  @override
-  State<DayDetailScreen> createState() => _DayDetailScreenState();
-}
-
-class _DayDetailScreenState extends State<DayDetailScreen> {
-  final List<ExerciseModel> _optimisticExercises = <ExerciseModel>[];
-
   DocumentReference<Map<String, dynamic>> get _dayDocRef => FirebaseFirestore
       .instance
       .collection('users')
-      .doc(widget.uid)
+      .doc(uid)
       .collection('weeks')
-      .doc(widget.weekId)
+      .doc(weekId)
       .collection('days')
-      .doc(widget.dayId);
+      .doc(dayId);
 
   Future<void> _saveExerciseToDay(ExerciseModel exercise) async {
-    try {
-      await FirebaseFirestore.instance.runTransaction((transaction) async {
-        final snapshot = await transaction.get(_dayDocRef);
-        final data = snapshot.data();
-        final exercisesData = data?['exercises'];
-        final rawExercises = exercisesData is List
-            ? exercisesData
-            : <dynamic>[];
+    await FirebaseFirestore.instance.runTransaction((transaction) async {
+      final snapshot = await transaction.get(_dayDocRef);
+      final data = snapshot.data();
+      final rawExercises =
+          (data?['exercises'] as List<dynamic>?) ?? const <dynamic>[];
 
-        final updatedExercises = <dynamic>[];
-        var replaced = false;
+      final updatedExercises = <Map<String, dynamic>>[];
+      var replaced = false;
 
-        for (final rawExercise in rawExercises) {
-          if (rawExercise is Map) {
-            final exerciseMap = Map<String, dynamic>.from(rawExercise);
-            if (exerciseMap['id']?.toString() == exercise.id) {
-              updatedExercises.add(exercise.toJson());
-              replaced = true;
-            } else {
-              updatedExercises.add(exerciseMap);
-            }
+      for (final rawExercise in rawExercises) {
+        if (rawExercise is Map) {
+          final exerciseMap = Map<String, dynamic>.from(rawExercise);
+          if (exerciseMap['id']?.toString() == exercise.id) {
+            updatedExercises.add(exercise.toJson());
+            replaced = true;
           } else {
-            updatedExercises.add(rawExercise);
+            updatedExercises.add(exerciseMap);
           }
         }
-
-        if (!replaced) {
-          updatedExercises.add(exercise.toJson());
-        }
-
-        transaction.set(_dayDocRef, <String, dynamic>{
-          'exercises': updatedExercises,
-          'updatedAt': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
-      });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _optimisticExercises.removeWhere((item) => item.id == exercise.id);
-        });
       }
-    }
-  }
 
-  Future<void> _saveExerciseLocally(ExerciseModel exercise) async {
-    setState(() {
-      final existingIndex = _optimisticExercises.indexWhere(
-        (item) => item.id == exercise.id,
-      );
-      if (existingIndex >= 0) {
-        _optimisticExercises[existingIndex] = exercise;
-      } else {
-        _optimisticExercises.add(exercise);
+      if (!replaced) {
+        updatedExercises.add(exercise.toJson());
       }
+
+      transaction.set(_dayDocRef, <String, dynamic>{
+        'exercises': updatedExercises,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
     });
-
-    unawaited(_saveExerciseToDay(exercise));
   }
 
   Future<void> _showEditDayNameDialog(
@@ -152,18 +116,6 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: _dayDocRef.snapshots(),
       builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return Scaffold(
-            backgroundColor: const Color(0xFF0A0A0A),
-            body: Center(
-              child: Text(
-                'Something went wrong',
-                style: GoogleFonts.poppins(color: const Color(0xFFFF3D00)),
-              ),
-            ),
-          );
-        }
-
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
             backgroundColor: Color(0xFF0A0A0A),
@@ -174,26 +126,16 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
         }
 
         final data = snapshot.data?.data();
-        final rawName = data?['name'];
-        final dayName = (rawName is String && rawName.trim().isNotEmpty)
-            ? rawName.trim()
-            : widget.workoutName;
+        final dayName = (data?['name'] as String?)?.trim().isNotEmpty == true
+            ? (data?['name'] as String).trim()
+            : workoutName;
+        final List<dynamic> rawExercises =
+            (data?['exercises'] as List<dynamic>?) ?? <dynamic>[];
 
-        final exercisesData = data?['exercises'];
-        final List<dynamic> rawExercises = exercisesData is List
-            ? exercisesData
-            : <dynamic>[];
-
-        final firestoreExercises = rawExercises
+        final exercises = rawExercises
             .whereType<Map<dynamic, dynamic>>()
             .map((e) => ExerciseModel.fromJson(Map<String, dynamic>.from(e)))
             .toList(growable: false);
-
-        final exercisesById = <String, ExerciseModel>{
-          for (final exercise in firestoreExercises) exercise.id: exercise,
-          for (final exercise in _optimisticExercises) exercise.id: exercise,
-        };
-        final exercises = exercisesById.values.toList(growable: false);
 
         return Scaffold(
           backgroundColor: const Color(0xFF0A0A0A),
@@ -277,7 +219,7 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
                                   builder: (_) => ExerciseEditorSheet(
                                     exercise: exercise,
                                     splitName: dayName,
-                                    onSave: _saveExerciseLocally,
+                                    onSave: _saveExerciseToDay,
                                   ),
                                 );
                               },
@@ -325,6 +267,13 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
                                             fontWeight: FontWeight.w500,
                                           ),
                                         ),
+                                        Text(
+                                          exercise.weightDisplay,
+                                          style: const TextStyle(
+                                            color: Color(0xFF777777),
+                                            fontSize: 12,
+                                          ),
+                                        ),
                                       ],
                                     ),
                                   ],
@@ -346,7 +295,7 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
                         backgroundColor: Colors.transparent,
                         builder: (_) => ExerciseEditorSheet(
                           splitName: dayName,
-                          onSave: _saveExerciseLocally,
+                          onSave: _saveExerciseToDay,
                         ),
                       );
                     },

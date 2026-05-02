@@ -86,6 +86,7 @@ class ExerciseModel {
     required this.sets,
     required this.reps,
     required this.weight,
+    this.weightUnit = 'Kg',
     this.isSynced = false,
     this.splitName = '',
   });
@@ -95,8 +96,10 @@ class ExerciseModel {
   final int sets;
   final String reps;
   final double weight;
+  final String weightUnit;
   final bool isSynced;
   final String splitName;
+  String get weightDisplay => formatWeight(weight, weightUnit);
 
   double get averageReps {
     final parsedReps = repValues;
@@ -115,14 +118,13 @@ class ExerciseModel {
         .toList(growable: false);
   }
 
-  String formattedWeight(String unit) => formatWeight(weight, unit);
-
   ExerciseModel copyWith({
     String? id,
     String? name,
     int? sets,
     String? reps,
     double? weight,
+    String? weightUnit,
     bool? isSynced,
     String? splitName,
   }) {
@@ -132,6 +134,7 @@ class ExerciseModel {
       sets: sets ?? this.sets,
       reps: reps ?? this.reps,
       weight: weight ?? this.weight,
+      weightUnit: weightUnit ?? this.weightUnit,
       isSynced: isSynced ?? this.isSynced,
       splitName: splitName ?? this.splitName,
     );
@@ -144,6 +147,8 @@ class ExerciseModel {
       'sets': sets,
       'reps': reps,
       'weight': weight,
+      'weightUnit': weightUnit,
+      'weightDisplay': weightDisplay,
       'isSynced': isSynced,
       'splitName': splitName,
     };
@@ -152,6 +157,8 @@ class ExerciseModel {
   factory ExerciseModel.fromJson(Map<String, dynamic> json) {
     final setsSource = json['sets'];
     final weightSource = json['weight'];
+    final weightUnitSource = json['weightUnit'];
+    final weightDisplaySource = json['weightDisplay'];
     final repsSource = json['reps'];
     final normalizedReps = switch (repsSource) {
       String value => value.trim(),
@@ -164,6 +171,12 @@ class ExerciseModel {
       _ => '',
     };
 
+    final parsedWeight = _parseWeight(
+      weightSource,
+      weightUnitSource,
+      weightDisplaySource,
+    );
+
     return ExerciseModel(
       id: json['id']?.toString() ?? '',
       name: json['name']?.toString() ?? '',
@@ -171,13 +184,67 @@ class ExerciseModel {
           ? setsSource.toInt()
           : int.tryParse(setsSource?.toString() ?? '') ?? 1,
       reps: normalizedReps.isEmpty ? '10' : normalizedReps,
-      weight: weightSource is num
-          ? weightSource.toDouble()
-          : double.tryParse(weightSource?.toString() ?? '') ?? 0,
+      weight: parsedWeight.value,
+      weightUnit: parsedWeight.unit,
       isSynced: json['isSynced'] as bool? ?? false,
       splitName: json['splitName']?.toString() ?? '',
     );
   }
+}
+
+class _ParsedWeight {
+  const _ParsedWeight({required this.value, required this.unit});
+
+  final double value;
+  final String unit;
+}
+
+_ParsedWeight _parseWeight(
+  dynamic weightSource,
+  dynamic unitSource,
+  dynamic displaySource,
+) {
+  const defaultUnit = 'Kg';
+  String unit = unitSource?.toString() ?? defaultUnit;
+  double value = 0;
+
+  if (weightSource is num) {
+    // Preferred path: numeric weight value.
+    value = weightSource.toDouble(); // Convert numeric weight.
+    return _ParsedWeight(value: value, unit: unit); // Return parsed weight.
+  }
+
+  final rawValue =
+      weightSource?.toString() ?? ''; // Fallback: string weight value.
+  final rawValueParts = rawValue.trim().split(
+    RegExp(r'\s+'),
+  ); // Split weight/unit.
+  if (rawValueParts.isNotEmpty && rawValueParts.first.isNotEmpty) {
+    // Parse numeric portion.
+    value = double.tryParse(rawValueParts.first) ?? 0; // Parse weight value.
+  }
+  if (rawValueParts.length > 1 && unitSource == null) {
+    // Extract unit from weight string.
+    unit = rawValueParts
+        .sublist(1)
+        .join(' ')
+        .trim(); // Use unit from weight string.
+  }
+
+  final rawDisplay =
+      displaySource?.toString() ?? ''; // Fallback: display field.
+  final displayParts = rawDisplay.trim().split(
+    RegExp(r'\s+'),
+  ); // Split display value.
+  if (displayParts.length > 1 && unitSource == null) {
+    // Extract unit from display.
+    unit = displayParts.sublist(1).join(' ').trim(); // Use unit from display.
+  }
+  if (unit.isEmpty) {
+    unit = defaultUnit;
+  }
+
+  return _ParsedWeight(value: value, unit: unit);
 }
 
 @immutable

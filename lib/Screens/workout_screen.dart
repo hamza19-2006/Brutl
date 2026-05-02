@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // SharedPreferences access.
 
 import '../providers/workout_nutrition_provider.dart';
 import '../providers/workout_provider.dart';
@@ -9,10 +10,22 @@ import '../widgets/macro_dashboard_card.dart';
 import '../widgets/meal_logger_sheet.dart';
 import '../widgets/workout_card_widget.dart';
 
-class WorkoutScreen extends StatelessWidget {
+class WorkoutScreen extends StatefulWidget {
+  // Workout screen widget.
   const WorkoutScreen({super.key, this.showBottomNavigationBar = true});
 
   final bool showBottomNavigationBar;
+
+  @override
+  State<WorkoutScreen> createState() => _WorkoutScreenState(); // Create state.
+}
+
+class _WorkoutScreenState extends State<WorkoutScreen> {
+  // Stateful workout screen.
+  int _lastSeenTotalCalories = 0; // Tracks last seen total calories.
+  bool _hasInitializedCalories = false; // Tracks initial sync.
+  int? _pendingCaloriesTotal; // Guards duplicate sync scheduling.
+  bool _isSyncScheduled = false; // Prevents duplicate frame scheduling.
 
   @override
   Widget build(BuildContext context) {
@@ -38,19 +51,23 @@ class WorkoutScreen extends StatelessWidget {
           );
         }
 
-        final splitName = workoutProvider.selectedWorkoutSplit;
-        final sharedCalories = workoutProvider.currentDailyCaloriesBurned
-            .round();
-        final syncedNutrition = nutritionProvider.nutrition.copyWith(
-          totalCal: sharedCalories,
-          goalCal: workoutProvider.user.dailyCalorieGoal,
+        final splitName =
+            workoutProvider.selectedWorkoutSplit; // Selected split name.
+        final nutrition =
+            nutritionProvider.nutrition; // Current nutrition model.
+        _scheduleCaloriesSync(
+          nutrition.totalCal,
+        ); // Sync today_calories locally.
+        final syncedNutrition = nutrition.copyWith(
+          // Clamp displayed calories.
+          totalCal: _clampCalories(nutrition.totalCal), // Clamp total calories.
         );
         final daysForSplit = getDaysForSplit(splitName);
         final weekId = 'week_${workoutProvider.selectedWeek}';
 
         return Scaffold(
           backgroundColor: const Color(0xFF0A0A0A),
-          bottomNavigationBar: showBottomNavigationBar
+          bottomNavigationBar: widget.showBottomNavigationBar
               ? BottomNavigationBar(
                   currentIndex: nutritionProvider.bottomNavIndex,
                   type: BottomNavigationBarType.fixed,
@@ -85,34 +102,10 @@ class WorkoutScreen extends StatelessWidget {
                 ),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-                    stream: FirebaseFirestore.instance
-                        .collection('users')
-                        .doc(currentUser.uid)
-                        .snapshots(),
-                    builder: (context, snapshot) {
-                      final data = snapshot.data?.data();
-                      final firestoreCalories =
-                          (data?['calories'] as num?)?.toDouble() ??
-                          (data?['dailyCaloriesBurned'] as num?)?.toDouble();
-                      final calories =
-                          (firestoreCalories ??
-                                  workoutProvider.currentDailyCaloriesBurned)
-                              .clamp(0.0, 5000.0)
-                              .round();
-
-                      final streamSyncedNutrition = nutritionProvider.nutrition
-                          .copyWith(
-                            totalCal: calories,
-                            goalCal: workoutProvider.user.dailyCalorieGoal,
-                          );
-
-                      return MacroDashboardCard(
-                        nutrition: streamSyncedNutrition,
-                        ui: nutritionProvider.ui,
-                        onTap: () => _openMealLoggerSheet(context),
-                      );
-                    },
+                  child: MacroDashboardCard(
+                    nutrition: syncedNutrition,
+                    ui: nutritionProvider.ui,
+                    onTap: () => _openMealLoggerSheet(context),
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -220,6 +213,76 @@ class WorkoutScreen extends StatelessWidget {
       backgroundColor: Colors.transparent,
       builder: (_) => const MealLoggerSheet(),
     );
+  }
+
+  /// Schedules a post-frame sync to avoid updates during build and coalesce totals.
+  void _scheduleCaloriesSync(int currentTotalCalories) {
+    if (_hasInitializedCalories &&
+        currentTotalCalories == _lastSeenTotalCalories) {
+      return;
+    }
+    _pendingCaloriesTotal = currentTotalCalories; // Track pending total.
+    if (_isSyncScheduled) {
+      // Skip if already scheduled.
+      return; // Exit early.
+    }
+    _isSyncScheduled = true; // Mark as scheduled.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Defer to after frame.
+      _isSyncScheduled = false; // Clear scheduled flag.
+      final pendingTotal = _pendingCaloriesTotal; // Capture latest total.
+      _pendingCaloriesTotal = null; // Clear pending total.
+      if (!mounted) {
+        // Guard unmounted state.
+        return; // Exit early.
+      }
+      if (pendingTotal == null) {
+        // Guard missing total.
+        return; // Exit early.
+      }
+      _syncTodayCalories(pendingTotal); // Persist calories.
+    });
+  }
+
+  Future<void> _syncTodayCalories(int currentMealCalories) async {
+    // Persist today calories.
+    if (!_hasInitializedCalories) {
+      // Skip initial sync.
+      _hasInitializedCalories = true; // Mark initialized.
+      _lastSeenTotalCalories = currentMealCalories; // Seed last calories.
+      return; // Exit early.
+    }
+
+    final delta =
+        currentMealCalories - _lastSeenTotalCalories; // Calculate delta.
+    _lastSeenTotalCalories = currentMealCalories; // Update last total.
+    if (delta <= 0) {
+      // Ignore non-positive deltas.
+      return; // Exit early.
+    }
+
+    final prefs = await SharedPreferences.getInstance(); // Load preferences.
+    final existing = prefs.getInt('today_calories') ?? 0; // Read current total.
+    final updated = existing + delta; // Add delta calories.
+    final clamped = _clampCalories(updated); // Clamp to 0..5000.
+    await prefs.setInt('today_calories', clamped); // Persist updated total.
+    if (mounted) {
+      // Guard mounted state.
+      setState(() {}); // Refresh UI.
+    }
+  }
+
+  int _clampCalories(int calories) {
+    // Clamp calories to 0..5000.
+    if (calories < 0) {
+      // Guard negative calories.
+      return 0; // Clamp to zero.
+    }
+    if (calories > 5000) {
+      // Guard upper bound.
+      return 5000; // Clamp to max.
+    }
+    return calories; // Return normalized calories.
   }
 
   IconData _iconForIndex(int index) {

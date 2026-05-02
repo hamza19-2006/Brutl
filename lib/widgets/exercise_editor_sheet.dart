@@ -26,7 +26,7 @@ class _ExerciseEditorSheetState extends State<ExerciseEditorSheet> {
   late final TextEditingController _setsController;
   late final TextEditingController _repsController;
   late final TextEditingController _weightController;
-  late String _selectedWeightUnit;
+  String _selectedWeightUnit = 'Kg';
 
   bool get _isEditMode => widget.exercise != null;
 

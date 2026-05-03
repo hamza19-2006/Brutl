@@ -168,8 +168,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     if (trimmed.isEmpty) {
       return null;
     }
-    if (trimmed.length < 5 || trimmed.length > 12) {
-      return 'Username must be 5-12 characters.';
+    if (trimmed.length < 6 || trimmed.length > 12) {
+      return 'Username must be 6-12 characters.';
     }
     if (!RegExp(r'^[A-Za-z0-9_]+$').hasMatch(trimmed)) {
       return 'Only letters, numbers, and underscores are allowed.';

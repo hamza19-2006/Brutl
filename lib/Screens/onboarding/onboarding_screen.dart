@@ -76,7 +76,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final _customProCtrl = TextEditingController();
   final _customCarbCtrl = TextEditingController();
   final _customFatCtrl = TextEditingController();
-  static const double _activityMultiplier = 1.375;
   static const int _weightLossDeficit = 500;
   static const int _weightGainSurplus = 400;
 
@@ -187,7 +186,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     final requestId = ++_usernameCheckRequestId;
     final validationError = _validateUsername(value);
     setState(() {
-      _isCheckingUsername = true;
+      _usernameValidationError = validationError;
+      _isCheckingUsername =
+          validationError == null && normalizedUsername.isNotEmpty;
       _isUsernameAvailable = null;
       _usernameCheckError = null;
     });
@@ -272,6 +273,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     return age > 0 ? age : 25;
   }
 
+  int _getStepGoal() {
+    final parsedSteps = int.tryParse(_stepsCtrl.text.trim());
+    return (parsedSteps == null || parsedSteps <= 0)
+        ? _defaultStepGoal
+        : parsedSteps;
+  }
+
   double _calculateBmr({
     required double weightKg,
     required double heightCm,
@@ -291,17 +299,23 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
   }
 
-  int _calculateSuggestedCalories(String goal) {
+  double _calculateMaintenanceCalories() {
     final weightKg = _getWeightKg();
     final heightCm = _getHeightCm();
     final ageYears = _getAgeYears();
+    final stepGoal = _getStepGoal();
     final bmr = _calculateBmr(
       weightKg: weightKg,
       heightCm: heightCm,
       ageYears: ageYears,
       gender: _gender,
     );
-    final maintenance = bmr * _activityMultiplier;
+    final activityMultiplier = _activityMultiplierForSteps(stepGoal);
+    return bmr * activityMultiplier;
+  }
+
+  int _calculateSuggestedCalories(String goal) {
+    final maintenance = _calculateMaintenanceCalories();
     double adjusted = maintenance;
     if (goal == 'Weight Loss') {
       adjusted -= _weightLossDeficit;
@@ -329,25 +343,18 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       return;
     }
 
-    double weightKg = _weightUnit == 'kg'
-        ? (double.tryParse(_weightCtrl.text) ?? 70.0)
-        : (double.tryParse(_weightCtrl.text) ?? 154.0) * 0.453592;
-
-    double heightCm = _heightUnit == 'cm'
-        ? (double.tryParse(_heightCmCtrl.text) ?? 170.0)
-        : (_heightFt * 30.48) + (_heightIn * 2.54);
-
-    if (weightKg <= 0) weightKg = 70.0;
-    if (heightCm <= 0) heightCm = 170.0;
-
-    // Simplified Mifflin-St Jeor (assuming male for base generic, a robust app might ask gender)
-    final parsedSteps = int.tryParse(_stepsCtrl.text.trim());
-    final stepGoal = (parsedSteps == null || parsedSteps <= 0)
-        ? _defaultStepGoal
-        : parsedSteps;
+    final weightKg = _getWeightKg();
+    final heightCm = _getHeightCm();
+    final ageYears = _getAgeYears();
+    final stepGoal = _getStepGoal();
     final activityMultiplier = _activityMultiplierForSteps(stepGoal);
-    double bmr = (10 * weightKg) + (6.25 * heightCm) - (5 * 25) + 5;
-    double tdee = bmr * activityMultiplier;
+    final bmr = _calculateBmr(
+      weightKg: weightKg,
+      heightCm: heightCm,
+      ageYears: ageYears,
+      gender: _gender,
+    );
+    final tdee = bmr * activityMultiplier;
 
     double proMultiplier = 2.0;
     double fatMultiplier = 0.7;
@@ -367,6 +374,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     if (user == null) return;
 
     _calculateMacros();
+    final maintenanceCalories = _calculateMaintenanceCalories().round();
+    final stepGoal = _getStepGoal();
 
     final customDays = _customDayCtrls.isNotEmpty
         ? _customDayCtrls
@@ -379,16 +388,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       uid: user.uid,
       displayName: _displayNameCtrl.text.trim(),
       username: _usernameCtrl.text.trim().toLowerCase(),
-      height: _heightUnit == 'cm'
-          ? (double.tryParse(_heightCmCtrl.text) ?? 0.0)
-          : (_heightFt * 12 + _heightIn).toDouble(),
-      heightUnit: _heightUnit,
+      gender: _gender,
+      age: _getAgeYears(),
+      height: _getHeightCm(),
+      heightUnit: 'cm',
       weight: double.tryParse(_weightCtrl.text) ?? 0.0,
       weightUnit: _weightUnit,
-      dailySteps: int.tryParse(_stepsCtrl.text) ?? _defaultStepGoal,
+      dailySteps: stepGoal,
       bodyGoal: _bodyGoal,
       workoutSplitTemplate: _splitTemplate,
       customSplitDays: customDays,
+      maintenanceCalories: maintenanceCalories,
       targetCalories: _targetCalories,
       targetProtein: _targetProtein,
       targetCarbs: _targetCarbs,
@@ -626,21 +636,55 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             style: TextStyle(color: Color(0xFF9A9A9A), fontSize: 16),
           ),
           const SizedBox(height: 40),
-          _buildGlassField(
-            controller: _displayNameCtrl,
-            label: 'Display Name',
-            hint: 'e.g., M.Hamza',
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _buildGlassField(
+                  controller: _displayNameCtrl,
+                  label: 'Display Name',
+                  hint: 'e.g., M.Hamza',
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: _buildTextDropdown(
+                  value: _gender,
+                  items: _genderLabels,
+                  label: 'Gender',
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setState(() => _gender = value);
+                  },
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 24),
           _buildGlassField(
             controller: _usernameCtrl,
             label: 'Unique Username',
-            hint: 'e.g., M_Hamza_Noor',
+            hint: 'eg. M_Hamza_Noor',
             prefix: '@',
             onChanged: _onUsernameChanged,
             suffix: _buildUsernameSuffix(),
           ),
           const SizedBox(height: 12),
+          if (_usernameValidationError != null && _usernameCtrl.text.isNotEmpty)
+            Row(
+              children: [
+                const Icon(
+                  Icons.error_outline,
+                  color: Colors.redAccent,
+                  size: 16,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  _usernameValidationError ?? '',
+                  style: const TextStyle(color: Colors.redAccent, fontSize: 12),
+                ),
+              ],
+            ),
           if (_isUsernameAvailable == false && _usernameCtrl.text.isNotEmpty)
             const Row(
               children: [
@@ -772,6 +816,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               _weightUnit,
               style: const TextStyle(color: Colors.white54),
             ),
+            keyboardType: TextInputType.number,
+          ),
+          const SizedBox(height: 20),
+          _buildGlassField(
+            controller: _ageCtrl,
+            label: 'Age',
+            hint: '25',
             keyboardType: TextInputType.number,
           ),
         ],
@@ -940,6 +991,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           Row(
             children: List.generate(3, (i) {
               final isSelected = _bodyGoal == goals[i];
+              final goalCalories = _calculateSuggestedCalories(goals[i]);
               return Expanded(
                 child: GestureDetector(
                   onTap: () => setState(() {
@@ -986,7 +1038,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          '${_targetCalories} kcal',
+                          '$goalCalories kcal',
                           style: TextStyle(
                             color: isSelected
                                 ? const Color(0xFFFF3D00)
@@ -1366,6 +1418,53 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           );
         }).toList(),
       ),
+    );
+  }
+
+  Widget _buildTextDropdown({
+    required String value,
+    required Map<String, String> items,
+    required ValueChanged<String?> onChanged,
+    required String label,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: Color(0xFFD0D0D0),
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1A1A1A),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFF2A2A2A)),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: value,
+              isExpanded: true,
+              dropdownColor: const Color(0xFF1A1A1A),
+              style: const TextStyle(color: Colors.white, fontSize: 16),
+              items: items.entries
+                  .map(
+                    (entry) => DropdownMenuItem<String>(
+                      value: entry.key,
+                      child: Text(entry.value),
+                    ),
+                  )
+                  .toList(),
+              onChanged: onChanged,
+            ),
+          ),
+        ),
+      ],
     );
   }
 

@@ -17,6 +17,7 @@ class BrutlUser {
     this.workoutSplitTemplate = 'Push, Pull, Legs, Repeat',
     this.customSplitDays = const [],
     this.targetCalories = 2000,
+    this.maintenanceCalories = 2000,
     this.targetProtein = 150,
     this.targetCarbs = 200,
     this.targetFats = 60,
@@ -37,6 +38,7 @@ class BrutlUser {
   final String workoutSplitTemplate;
   final List<String> customSplitDays;
   final int targetCalories;
+  final int maintenanceCalories;
   final int targetProtein;
   final int targetCarbs;
   final int targetFats;
@@ -57,6 +59,7 @@ class BrutlUser {
     String? workoutSplitTemplate,
     List<String>? customSplitDays,
     int? targetCalories,
+    int? maintenanceCalories,
     int? targetProtein,
     int? targetCarbs,
     int? targetFats,
@@ -77,6 +80,7 @@ class BrutlUser {
       workoutSplitTemplate: workoutSplitTemplate ?? this.workoutSplitTemplate,
       customSplitDays: customSplitDays ?? this.customSplitDays,
       targetCalories: targetCalories ?? this.targetCalories,
+      maintenanceCalories: maintenanceCalories ?? this.maintenanceCalories,
       targetProtein: targetProtein ?? this.targetProtein,
       targetCarbs: targetCarbs ?? this.targetCarbs,
       targetFats: targetFats ?? this.targetFats,
@@ -96,10 +100,12 @@ class BrutlUser {
       'weight': weight,
       'weightUnit': weightUnit,
       'dailySteps': dailySteps,
+      'step_goal': dailySteps,
       'bodyGoal': bodyGoal,
       'workoutSplitTemplate': workoutSplitTemplate,
       'customSplitDays': customSplitDays,
       'targetCalories': targetCalories,
+      'maintenance_calories': maintenanceCalories,
       'targetProtein': targetProtein,
       'targetCarbs': targetCarbs,
       'targetFats': targetFats,
@@ -118,7 +124,11 @@ class BrutlUser {
       heightUnit: json['heightUnit'] as String? ?? 'cm',
       weight: (json['weight'] as num?)?.toDouble() ?? 0.0,
       weightUnit: json['weightUnit'] as String? ?? 'kg',
-      dailySteps: (json['dailySteps'] as num?)?.toInt() ?? 10000,
+      dailySteps:
+          (json['dailySteps'] as num?)?.toInt() ??
+          (json['step_goal'] as num?)?.toInt() ??
+          (json['dailyStepGoal'] as num?)?.toInt() ??
+          10000,
       bodyGoal: json['bodyGoal'] as String? ?? 'Maintenance',
       workoutSplitTemplate:
           json['workoutSplitTemplate'] as String? ?? 'Push, Pull, Legs, Repeat',
@@ -128,6 +138,11 @@ class BrutlUser {
               .toList() ??
           const [],
       targetCalories: (json['targetCalories'] as num?)?.toInt() ?? 2000,
+      maintenanceCalories:
+          (json['maintenance_calories'] as num?)?.toInt() ??
+          (json['maintenanceCalories'] as num?)?.toInt() ??
+          (json['targetCalories'] as num?)?.toInt() ??
+          2000,
       targetProtein: (json['targetProtein'] as num?)?.toInt() ?? 150,
       targetCarbs: (json['targetCarbs'] as num?)?.toInt() ?? 200,
       targetFats: (json['targetFats'] as num?)?.toInt() ?? 60,

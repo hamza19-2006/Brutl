@@ -32,6 +32,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   bool _isCheckingUsername = false;
   bool? _isUsernameAvailable;
   String? _usernameCheckError;
+  String? _usernameValidationError;
+  String _gender = 'Male';
+  static const Map<String, String> _genderLabels = {
+    'Male': 'Male ♂️',
+    'Female': 'Female ♀️',
+    'Other': 'Other',
+  };
 
   // --- Page 2: Biometrics ---
   String _heightUnit = 'cm';
@@ -41,6 +48,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   String _weightUnit = 'kg';
   final _weightCtrl = TextEditingController();
+  final _ageCtrl = TextEditingController();
 
   // --- Page 3: Workout Split ---
   String _splitTemplate = 'Push, Pull, Legs, Repeat';
@@ -68,6 +76,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final _customProCtrl = TextEditingController();
   final _customCarbCtrl = TextEditingController();
   final _customFatCtrl = TextEditingController();
+  static const double _activityMultiplier = 1.375;
+  static const int _weightLossDeficit = 500;
+  static const int _weightGainSurplus = 400;
 
   @override
   void initState() {
@@ -84,6 +95,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     _debounce?.cancel();
     _heightCmCtrl.dispose();
     _weightCtrl.dispose();
+    _ageCtrl.dispose();
     for (var ctrl in _customDayCtrls) {
       ctrl.dispose();
     }
@@ -152,14 +164,39 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     _splitTemplate = option;
   }
 
+  String? _validateUsername(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    if (trimmed.length < 5 || trimmed.length > 12) {
+      return 'Username must be 5-12 characters.';
+    }
+    if (!RegExp(r'^[A-Za-z0-9_]+$').hasMatch(trimmed)) {
+      return 'Only letters, numbers, and underscores are allowed.';
+    }
+    if (RegExp(r'\d$').hasMatch(trimmed)) {
+      return 'Username cannot end with a digit.';
+    }
+    return null;
+  }
+
   void _onUsernameChanged(String value) {
     if (_debounce?.isActive ?? false) _debounce!.cancel();
     final normalizedUsername = value.trim().toLowerCase();
     final requestId = ++_usernameCheckRequestId;
+    final validationError = _validateUsername(value);
     setState(() {
       _isCheckingUsername = true;
       _isUsernameAvailable = null;
       _usernameCheckError = null;
+    });
+    if (validationError != null || normalizedUsername.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      _isCheckingUsername = true;
     });
 
     _debounce = Timer(const Duration(milliseconds: 500), () async {
@@ -211,6 +248,68 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         }
       }
     });
+  }
+
+  double _getWeightKg() {
+    final rawWeight = double.tryParse(_weightCtrl.text) ?? 0.0;
+    if (rawWeight <= 0) {
+      return 70.0;
+    }
+    return _weightUnit == 'kg' ? rawWeight : rawWeight * 0.453592;
+  }
+
+  double _getHeightCm() {
+    if (_heightUnit == 'cm') {
+      final rawHeight = double.tryParse(_heightCmCtrl.text) ?? 0.0;
+      return rawHeight > 0 ? rawHeight : 170.0;
+    }
+    final heightCm = (_heightFt * 30.48) + (_heightIn * 2.54);
+    return heightCm > 0 ? heightCm : 170.0;
+  }
+
+  int _getAgeYears() {
+    final age = int.tryParse(_ageCtrl.text.trim()) ?? 0;
+    return age > 0 ? age : 25;
+  }
+
+  double _calculateBmr({
+    required double weightKg,
+    required double heightCm,
+    required int ageYears,
+    required String gender,
+  }) {
+    final base = (10 * weightKg) + (6.25 * heightCm) - (5 * ageYears);
+    switch (gender) {
+      case 'Male':
+        return base + 5;
+      case 'Female':
+        return base - 161;
+      default:
+        final male = base + 5;
+        final female = base - 161;
+        return (male + female) / 2;
+    }
+  }
+
+  int _calculateSuggestedCalories(String goal) {
+    final weightKg = _getWeightKg();
+    final heightCm = _getHeightCm();
+    final ageYears = _getAgeYears();
+    final bmr = _calculateBmr(
+      weightKg: weightKg,
+      heightCm: heightCm,
+      ageYears: ageYears,
+      gender: _gender,
+    );
+    final maintenance = bmr * _activityMultiplier;
+    double adjusted = maintenance;
+    if (goal == 'Weight Loss') {
+      adjusted -= _weightLossDeficit;
+    } else if (goal == 'Weight Gain') {
+      adjusted += _weightGainSurplus;
+    }
+    final rounded = adjusted.round();
+    return rounded < 0 ? 0 : rounded;
   }
 
   double _activityMultiplierForSteps(int steps) {
@@ -530,13 +629,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           _buildGlassField(
             controller: _displayNameCtrl,
             label: 'Display Name',
-            hint: 'e.g., John Doe',
+            hint: 'e.g., M.Hamza',
           ),
           const SizedBox(height: 24),
           _buildGlassField(
             controller: _usernameCtrl,
             label: 'Unique Username',
-            hint: 'e.g., john_doe123',
+            hint: 'e.g., M_Hamza_Noor',
             prefix: '@',
             onChanged: _onUsernameChanged,
             suffix: _buildUsernameSuffix(),

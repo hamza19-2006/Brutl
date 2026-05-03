@@ -17,6 +17,8 @@ class OnboardingScreen extends StatefulWidget {
 }
 
 class _OnboardingScreenState extends State<OnboardingScreen> {
+  static const int _defaultStepGoal = 10000;
+
   final PageController _pageController = PageController();
   int _currentPage = 0;
   bool _isSaving = false;
@@ -53,7 +55,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   late List<TextEditingController> _customDayCtrls;
 
   // --- Page 4: Goals & Activity ---
-  final _stepsCtrl = TextEditingController(text: '10000');
+  final _stepsCtrl = TextEditingController(text: _defaultStepGoal.toString());
   String _bodyGoal = 'Weight Loss';
 
   // --- Page 5: Macros ---
@@ -107,7 +109,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       case 'Bro Split (1 muscle per day)':
         return <String>['Chest ', 'Back ', 'Legs', 'Shoulders', 'Arms'];
       case 'Upper, Lower, Rest, Repeat':
-        return <String>['Upper Body', 'Lower Body', 'Upper Body', 'Lower Body'];
+        return <String>[
+          'Upper Body A',
+          'Lower Body A',
+          'Upper Body B ',
+          'Lower Body B',
+        ];
       case 'Push, Pull, Legs, Upper, Lower':
         return <String>[
           'Chest & Triceps',
@@ -206,6 +213,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     });
   }
 
+  double _activityMultiplierForSteps(int steps) {
+    if (steps < 5000) return 1.2;
+    if (steps < 7500) return 1.375;
+    if (steps < 10000) return 1.55;
+    if (steps < 12500) return 1.725;
+    return 1.9;
+  }
+
   void _calculateMacros() {
     if (_isCustomMacro) {
       _targetCalories = int.tryParse(_customCalCtrl.text) ?? 2000;
@@ -227,8 +242,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     if (heightCm <= 0) heightCm = 170.0;
 
     // Simplified Mifflin-St Jeor (assuming male for base generic, a robust app might ask gender)
+    final parsedSteps = int.tryParse(_stepsCtrl.text.trim());
+    final stepGoal = (parsedSteps == null || parsedSteps <= 0)
+        ? _defaultStepGoal
+        : parsedSteps;
+    final activityMultiplier = _activityMultiplierForSteps(stepGoal);
     double bmr = (10 * weightKg) + (6.25 * heightCm) - (5 * 25) + 5;
-    double tdee = bmr * 1.375; // Lightly active
+    double tdee = bmr * activityMultiplier;
 
     double proMultiplier = 2.0;
     double fatMultiplier = 0.7;
@@ -266,7 +286,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       heightUnit: _heightUnit,
       weight: double.tryParse(_weightCtrl.text) ?? 0.0,
       weightUnit: _weightUnit,
-      dailySteps: int.tryParse(_stepsCtrl.text) ?? 10000,
+      dailySteps: int.tryParse(_stepsCtrl.text) ?? _defaultStepGoal,
       bodyGoal: _bodyGoal,
       workoutSplitTemplate: _splitTemplate,
       customSplitDays: customDays,
@@ -808,8 +828,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           _buildGlassField(
             controller: _stepsCtrl,
             label: 'Daily Step Goal',
-            hint: '10000',
+            hint: _defaultStepGoal.toString(),
             keyboardType: TextInputType.number,
+            onChanged: (_) => setState(() => _calculateMacros()),
           ),
           const SizedBox(height: 40),
           const Text(
@@ -861,6 +882,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                             fontWeight: isSelected
                                 ? FontWeight.bold
                                 : FontWeight.normal,
+                            fontSize: 12,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          '${_targetCalories} kcal',
+                          style: TextStyle(
+                            color: isSelected
+                                ? const Color(0xFFFF3D00)
+                                : const Color(0xFF777777),
+                            fontWeight: FontWeight.w600,
                             fontSize: 12,
                           ),
                         ),
@@ -1238,10 +1270,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     );
   }
 
-  Widget _buildDropdown<T>({
-    required T value,
-    required List<T> items,
-    required ValueChanged<T?> onChanged,
+  Widget _buildDropdown({
+    required int value,
+    required List<int> items,
+    required ValueChanged<int?> onChanged,
     required String label,
   }) {
     return Column(
@@ -1264,15 +1296,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             border: Border.all(color: const Color(0xFF2A2A2A)),
           ),
           child: DropdownButtonHideUnderline(
-            child: DropdownButton<T>(
+            child: DropdownButton<int>(
               value: value,
               isExpanded: true,
               dropdownColor: const Color(0xFF1A1A1A),
               style: const TextStyle(color: Colors.white, fontSize: 16),
               items: items
                   .map(
-                    (e) =>
-                        DropdownMenuItem(value: e, child: Text(e.toString())),
+                    (e) => DropdownMenuItem<int>(value: e, child: Text('$e')),
                   )
                   .toList(),
               onChanged: onChanged,

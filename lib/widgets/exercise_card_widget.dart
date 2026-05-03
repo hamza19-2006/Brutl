@@ -15,8 +15,7 @@ class ExerciseCardWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final repValues = exercise.repValues;
-    final repsDisplay = repValues.isEmpty ? '--' : repValues.join(', ');
+    final repsDisplay = exercise.reps.trim().isEmpty ? '--' : exercise.reps;
 
     final weightDisplay = (exercise.weight <= 0)
         ? '--'
@@ -55,7 +54,7 @@ class ExerciseCardWidget extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.poppins(
                         color: Colors.white,
-                        fontSize: 18,
+                        fontSize: 20,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -63,37 +62,36 @@ class ExerciseCardWidget extends StatelessWidget {
                     Text(
                       'Sets: ${exercise.sets}',
                       style: const TextStyle(
-                        color: Color(0xFFB5B5B5),
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
+                        color: Color(0xFF888888),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w400,
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       'Reps: $repsDisplay',
                       style: const TextStyle(
-                        color: Color(0xFFB5B5B5),
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
+                        color: Color(0xFF888888),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w400,
                       ),
                     ),
                   ],
                 ),
               ),
             ),
-            Expanded(
-              flex: 35,
-              child: Align(
-                alignment: Alignment.centerRight,
+            // Weight box — tight padding, same font size
+            Align(
+              alignment: Alignment.centerRight,
+              child: IntrinsicWidth(
                 child: Container(
-                  constraints: const BoxConstraints(minWidth: 70),
                   padding: const EdgeInsets.symmetric(
                     horizontal: 8,
-                    vertical: 10,
+                    vertical: 5,
                   ),
                   decoration: BoxDecoration(
                     color: const Color(0xFF242424),
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(8),
                     border: Border.all(
                       color: const Color(0xFF333333),
                       width: 1,
@@ -107,18 +105,17 @@ class ExerciseCardWidget extends StatelessWidget {
                         textAlign: TextAlign.center,
                         style: GoogleFonts.poppins(
                           color: Colors.white,
-                          fontSize: 22,
+                          fontSize: 20,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
-                      const SizedBox(height: 2),
                       Text(
                         unit,
                         textAlign: TextAlign.center,
                         style: const TextStyle(
-                          color: Color(0xFFB0B0B0),
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
+                          color: Color(0xFF888888),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w400,
                         ),
                       ),
                     ],

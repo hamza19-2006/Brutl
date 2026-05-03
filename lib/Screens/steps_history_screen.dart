@@ -1,6 +1,7 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/local_storage_service.dart';
 
@@ -15,16 +16,15 @@ class _StepsHistoryScreenState extends State<StepsHistoryScreen>
     with SingleTickerProviderStateMixin {
   final LocalStorageService _storage = LocalStorageService();
 
-  /// 0 = current week, -1 = last week, … , -3 = 4 weeks ago
+  /// 0 = current week, -1 = last week, -2, -3
   int _weekOffset = 0;
 
   List<int> _weekData = List.filled(7, 0);
   bool _isReady = false;
+  int _stepGoal = 10000;
 
   late final AnimationController _chartAnim;
   late final Animation<double> _chartCurve;
-
-  // ───────────── lifecycle ─────────────
 
   @override
   void initState() {
@@ -42,8 +42,10 @@ class _StepsHistoryScreenState extends State<StepsHistoryScreen>
 
   Future<void> _init() async {
     await _storage.initialize();
+    final prefs = await SharedPreferences.getInstance();
+    _stepGoal = prefs.getInt('step_goal') ?? 10000;
     _loadWeek();
-    setState(() => _isReady = true);
+    if (mounted) setState(() => _isReady = true);
     _chartAnim.forward();
   }
 
@@ -53,28 +55,30 @@ class _StepsHistoryScreenState extends State<StepsHistoryScreen>
     super.dispose();
   }
 
-  // ───────────── week helpers ─────────────
-
+  // Week starts on Monday to match Image 2 (Mon-Sun layout)
   DateTime get _weekStart {
     final now = DateTime.now();
-    // Go to the most recent Sunday
-    final currentSunday = now.subtract(Duration(days: now.weekday % 7));
-    return DateTime(
-      currentSunday.year,
-      currentSunday.month,
-      currentSunday.day,
-    ).add(Duration(days: _weekOffset * 7));
+    final daysFromMonday = (now.weekday - 1) % 7; // Mon=0 … Sun=6
+    final thisMonday = DateTime(
+      now.year,
+      now.month,
+      now.day,
+    ).subtract(Duration(days: daysFromMonday));
+    return thisMonday.add(Duration(days: _weekOffset * 7));
   }
 
   DateTime get _weekEnd => _weekStart.add(const Duration(days: 6));
 
   String get _weekLabel {
     final fmt = DateFormat('MMM d');
-    return '${fmt.format(_weekStart)} – ${fmt.format(_weekEnd)}';
+    return '${fmt.format(_weekStart)} \u2013 ${fmt.format(_weekEnd)}';
   }
 
   void _loadWeek() {
-    _weekData = _storage.getWeekData(_weekStart);
+    _weekData = List.generate(7, (i) {
+      final date = _weekStart.add(Duration(days: i));
+      return _storage.getStepsForKey(LocalStorageService.dateKeyFor(date));
+    });
   }
 
   void _changeWeek(int delta) {
@@ -87,8 +91,6 @@ class _StepsHistoryScreenState extends State<StepsHistoryScreen>
     _chartAnim.forward(from: 0);
   }
 
-  // ───────────── build ─────────────
-
   @override
   Widget build(BuildContext context) {
     final avgSteps = _storage.dailyAverage;
@@ -100,15 +102,10 @@ class _StepsHistoryScreenState extends State<StepsHistoryScreen>
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
           child: Column(
             children: [
-              // ── Header
               _buildHeader(avgSteps),
               const SizedBox(height: 28),
-
-              // ── Week nav
               _buildWeekNav(),
               const SizedBox(height: 28),
-
-              // ── Chart
               Expanded(child: _isReady ? _buildChart() : const SizedBox()),
             ],
           ),
@@ -117,14 +114,10 @@ class _StepsHistoryScreenState extends State<StepsHistoryScreen>
     );
   }
 
-  // ───────────── header ─────────────
-
   Widget _buildHeader(int avgSteps) {
     final formattedAvg = NumberFormat.decimalPattern().format(avgSteps);
-
     return Row(
       children: [
-        // Back button
         GestureDetector(
           onTap: () => Navigator.pop(context),
           child: Container(
@@ -146,10 +139,10 @@ class _StepsHistoryScreenState extends State<StepsHistoryScreen>
         Text(
           'Steps',
           style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                color: Colors.white,
-                fontWeight: FontWeight.w800,
-                fontSize: 24,
-              ),
+            color: Colors.white,
+            fontWeight: FontWeight.w800,
+            fontSize: 24,
+          ),
         ),
         const Spacer(),
         Column(
@@ -158,26 +151,24 @@ class _StepsHistoryScreenState extends State<StepsHistoryScreen>
             Text(
               'Daily Avg',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: const Color(0xFF888888),
-                    fontSize: 11,
-                  ),
+                color: const Color(0xFF888888),
+                fontSize: 11,
+              ),
             ),
             const SizedBox(height: 2),
             Text(
               '$formattedAvg steps',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 14,
-                  ),
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+                fontSize: 14,
+              ),
             ),
           ],
         ),
       ],
     );
   }
-
-  // ───────────── week nav ─────────────
 
   Widget _buildWeekNav() {
     return Container(
@@ -190,25 +181,30 @@ class _StepsHistoryScreenState extends State<StepsHistoryScreen>
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          _navArrow(Icons.chevron_left_rounded, () => _changeWeek(-1),
-              enabled: _weekOffset > -3),
+          _navArrow(
+            Icons.chevron_left_rounded,
+            () => _changeWeek(-1),
+            enabled: _weekOffset > -3,
+          ),
           Text(
             _weekLabel,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 14,
-                ),
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+              fontSize: 14,
+            ),
           ),
-          _navArrow(Icons.chevron_right_rounded, () => _changeWeek(1),
-              enabled: _weekOffset < 0),
+          _navArrow(
+            Icons.chevron_right_rounded,
+            () => _changeWeek(1),
+            enabled: _weekOffset < 0,
+          ),
         ],
       ),
     );
   }
 
-  Widget _navArrow(IconData icon, VoidCallback onTap,
-      {required bool enabled}) {
+  Widget _navArrow(IconData icon, VoidCallback onTap, {required bool enabled}) {
     return GestureDetector(
       onTap: enabled ? onTap : null,
       child: Container(
@@ -227,140 +223,174 @@ class _StepsHistoryScreenState extends State<StepsHistoryScreen>
     );
   }
 
-  // ───────────── bar chart ─────────────
-
   Widget _buildChart() {
-    const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const maxY = 18000.0;
-    const interval = 3600.0;
+    const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+    final maxRaw = _weekData
+        .fold(0, (prev, v) => v > prev ? v : prev)
+        .toDouble();
+    final goalY = _stepGoal.toDouble();
+    // maxY is at least 20% above the highest value or goal, whichever is bigger
+    final rawMax = maxRaw > goalY ? maxRaw : goalY;
+    final maxY = rawMax <= 0 ? 20000.0 : rawMax * 1.25;
+    final interval = maxY / 5;
 
     return AnimatedBuilder(
       animation: _chartCurve,
       builder: (context, _) {
-        return AspectRatio(
-          aspectRatio: 1.0,
-          child: Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: BarChart(
-              BarChartData(
-                maxY: maxY,
-                minY: 0,
-                alignment: BarChartAlignment.spaceAround,
-                barTouchData: BarTouchData(
-                  enabled: true,
-                  touchTooltipData: BarTouchTooltipData(
-                    tooltipRoundedRadius: 8,
-                    getTooltipColor: (_) => const Color(0xFF1A1A1A),
-                    getTooltipItem: (group, groupIndex, rod, rodIndex) {
-                      final steps = _weekData[group.x];
-                      if (steps == 0) return null;
-                      return BarTooltipItem(
-                        NumberFormat.decimalPattern().format(steps),
-                        Theme.of(context).textTheme.bodySmall!.copyWith(
-                              color: const Color(0xFFFF3D00),
-                              fontWeight: FontWeight.w700,
-                              fontSize: 12,
-                            ),
-                      );
-                    },
-                  ),
+        return BarChart(
+          BarChartData(
+            maxY: maxY,
+            minY: 0,
+            alignment: BarChartAlignment.spaceAround,
+            barTouchData: BarTouchData(
+              enabled: true,
+              touchTooltipData: BarTouchTooltipData(
+                tooltipRoundedRadius: 8,
+                tooltipPadding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
                 ),
-                titlesData: FlTitlesData(
-                  topTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false),
-                  ),
-                  rightTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false),
-                  ),
-                  leftTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 44,
-                      interval: interval,
-                      getTitlesWidget: (value, meta) {
-                        if (value == maxY) {
-                          return const SizedBox.shrink();
-                        }
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 6),
-                          child: Text(
-                            '${(value / 1000).toStringAsFixed(1)}k',
-                            style: const TextStyle(
-                              color: Color(0xFF555555),
-                              fontSize: 10,
-                            ),
-                          ),
-                        );
-                      },
+                getTooltipColor: (_) => const Color(0xFF1E1E1E),
+                getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                  final steps = _weekData[group.x];
+                  if (steps == 0) return null;
+                  final date = _weekStart.add(Duration(days: group.x));
+                  final dateStr = DateFormat('MMM d, yyyy').format(date);
+                  return BarTooltipItem(
+                    '${NumberFormat.decimalPattern().format(steps)} steps\n',
+                    const TextStyle(
+                      color: Color(0xFFFF3D00),
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
                     ),
-                  ),
-                  bottomTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 30,
-                      getTitlesWidget: (value, meta) {
-                        final idx = value.toInt();
-                        if (idx < 0 || idx >= dayLabels.length) {
-                          return const SizedBox.shrink();
-                        }
-                        return Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Text(
-                            dayLabels[idx],
-                            style: const TextStyle(
-                              color: Color(0xFF777777),
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ),
-                gridData: FlGridData(
-                  show: true,
-                  drawVerticalLine: false,
-                  horizontalInterval: interval,
-                  getDrawingHorizontalLine: (value) {
-                    return const FlLine(
-                      color: Color(0xFF333333),
-                      strokeWidth: 0.6,
-                    );
-                  },
-                ),
-                borderData: FlBorderData(show: false),
-                barGroups: List.generate(7, (i) {
-                  final raw = _weekData[i].toDouble();
-                  final animated = raw * _chartCurve.value;
-                  return BarChartGroupData(
-                    x: i,
-                    barRods: [
-                      BarChartRodData(
-                        toY: animated.clamp(0, maxY),
-                        width: 22,
-                        borderRadius: const BorderRadius.vertical(
-                          top: Radius.circular(6),
+                    children: [
+                      TextSpan(
+                        text: dateStr,
+                        style: const TextStyle(
+                          color: Color(0xFFAAAAAA),
+                          fontWeight: FontWeight.w400,
+                          fontSize: 11,
                         ),
-                        gradient: animated > 0
-                            ? const LinearGradient(
-                                begin: Alignment.bottomCenter,
-                                end: Alignment.topCenter,
-                                colors: [
-                                  Color(0xFFFF3D00),
-                                  Color(0xFFFF6B00),
-                                ],
-                              )
-                            : null,
-                        color: animated > 0 ? null : const Color(0xFF1A1A1A),
                       ),
                     ],
                   );
-                }),
+                },
               ),
-              duration: Duration.zero, // we handle animation ourselves
             ),
+            // Dashed goal line
+            extraLinesData: ExtraLinesData(
+              horizontalLines: [
+                HorizontalLine(
+                  y: goalY,
+                  color: const Color(0xFFFF3D00).withValues(alpha: 0.55),
+                  strokeWidth: 1.5,
+                  dashArray: [6, 4],
+                  label: HorizontalLineLabel(
+                    show: true,
+                    alignment: Alignment.topRight,
+                    padding: const EdgeInsets.only(right: 6, bottom: 2),
+                    style: const TextStyle(
+                      color: Color(0xFFFF3D00),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    labelResolver: (_) {
+                      final k = goalY / 1000;
+                      final label = k % 1 == 0
+                          ? '${k.toInt()}k'
+                          : '${k.toStringAsFixed(1)}k';
+                      return '$label goal';
+                    },
+                  ),
+                ),
+              ],
+            ),
+            titlesData: FlTitlesData(
+              topTitles: const AxisTitles(
+                sideTitles: SideTitles(showTitles: false),
+              ),
+              rightTitles: const AxisTitles(
+                sideTitles: SideTitles(showTitles: false),
+              ),
+              leftTitles: AxisTitles(
+                sideTitles: SideTitles(
+                  showTitles: true,
+                  reservedSize: 44,
+                  interval: interval,
+                  getTitlesWidget: (value, meta) {
+                    if (value >= meta.max) return const SizedBox.shrink();
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: Text(
+                        '${(value / 1000).toStringAsFixed(1)}k',
+                        style: const TextStyle(
+                          color: Color(0xFF555555),
+                          fontSize: 10,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              bottomTitles: AxisTitles(
+                sideTitles: SideTitles(
+                  showTitles: true,
+                  reservedSize: 30,
+                  getTitlesWidget: (value, meta) {
+                    final idx = value.toInt();
+                    if (idx < 0 || idx >= dayLabels.length) {
+                      return const SizedBox.shrink();
+                    }
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        dayLabels[idx],
+                        style: const TextStyle(
+                          color: Color(0xFF777777),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+            gridData: FlGridData(
+              show: true,
+              drawVerticalLine: false,
+              horizontalInterval: interval,
+              getDrawingHorizontalLine: (_) =>
+                  const FlLine(color: Color(0xFF1E1E1E), strokeWidth: 0.6),
+            ),
+            borderData: FlBorderData(show: false),
+            barGroups: List.generate(7, (i) {
+              final raw = _weekData[i].toDouble();
+              final animated = raw * _chartCurve.value;
+              return BarChartGroupData(
+                x: i,
+                barRods: [
+                  BarChartRodData(
+                    toY: animated.clamp(0, maxY),
+                    width: 26,
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(6),
+                    ),
+                    gradient: animated > 0
+                        ? const LinearGradient(
+                            begin: Alignment.bottomCenter,
+                            end: Alignment.topCenter,
+                            colors: [Color(0xFFFF3D00), Color(0xFFFF6B00)],
+                          )
+                        : null,
+                    color: animated > 0 ? null : const Color(0xFF1A1A1A),
+                  ),
+                ],
+              );
+            }),
           ),
+          duration: Duration.zero,
         );
       },
     );

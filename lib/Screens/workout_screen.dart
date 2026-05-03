@@ -6,8 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/workout_nutrition_provider.dart';
-import '../providers/nutrition_service.dart';
 import '../providers/workout_provider.dart';
+import '../providers/nutrition_service.dart';
 import '../widgets/macro_dashboard_card.dart';
 import '../widgets/workout_card_widget.dart';
 import '../models/brutl_models.dart';
@@ -30,6 +30,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   int _proteinGoal = 150;
   int _fats = 0;
   int _fatsGoal = 60;
+  List<MealData> _meals = [];
 
   StreamSubscription<NutritionData>? _nutritionSub;
 
@@ -42,6 +43,14 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   Future<void> _loadNutrition() async {
     final data = await NutritionService.instance.loadTodayNutrition();
     if (!mounted) return;
+    _applyData(data);
+
+    _nutritionSub = NutritionService.instance.stream.listen((data) {
+      if (mounted) _applyData(data);
+    });
+  }
+
+  void _applyData(NutritionData data) {
     setState(() {
       _caloriesEaten = data.caloriesEaten;
       _calorieGoal = data.calorieGoal;
@@ -51,20 +60,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
       _proteinGoal = data.proteinGoal;
       _fats = data.fats;
       _fatsGoal = data.fatsGoal;
-    });
-
-    _nutritionSub = NutritionService.instance.stream.listen((data) {
-      if (!mounted) return;
-      setState(() {
-        _caloriesEaten = data.caloriesEaten;
-        _calorieGoal = data.calorieGoal;
-        _carbs = data.carbs;
-        _carbsGoal = data.carbsGoal;
-        _protein = data.protein;
-        _proteinGoal = data.proteinGoal;
-        _fats = data.fats;
-        _fatsGoal = data.fatsGoal;
-      });
+      _meals = data.meals;
     });
   }
 
@@ -149,8 +145,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
                   child: MacroDashboardCard(
                     nutrition: _builtNutrition,
                     ui: nutritionProvider.ui,
-                    onTap: () =>
-                        _openMealLoggerSheet(context, nutritionProvider),
+                    onTap: () => _openMealSelectionSheet(context),
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -183,7 +178,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
                             'Week $weekNumber',
                             style: TextStyle(
                               color: isSelected
-                                  ? const Color(0xFFFFFFFF)
+                                  ? Colors.white
                                   : const Color(0xFF888888),
                               fontWeight: isSelected
                                   ? FontWeight.bold
@@ -250,16 +245,14 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     );
   }
 
-  Future<void> _openMealLoggerSheet(
-    BuildContext context,
-    WorkoutNutritionProvider provider,
-  ) async {
+  // Opens the meal selection bottom sheet (Breakfast / Lunch / Snack / Dinner)
+  Future<void> _openMealSelectionSheet(BuildContext context) async {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _NutritionLoggerSheet(
-        ui: provider.ui,
+      builder: (_) => _MealSelectionSheet(
+        meals: _meals,
         caloriesEaten: _caloriesEaten,
         calorieGoal: _calorieGoal,
       ),
@@ -280,27 +273,183 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   }
 }
 
-class _NutritionLoggerSheet extends StatefulWidget {
-  const _NutritionLoggerSheet({
-    required this.ui,
+// ─── Meal Selection Sheet ─────────────────────────────────────────────────────
+
+class _MealSelectionSheet extends StatefulWidget {
+  const _MealSelectionSheet({
+    required this.meals,
     required this.caloriesEaten,
     required this.calorieGoal,
   });
 
-  final WorkoutNutritionUiModel ui;
+  final List<MealData> meals;
   final int caloriesEaten;
   final int calorieGoal;
 
   @override
-  State<_NutritionLoggerSheet> createState() => _NutritionLoggerSheetState();
+  State<_MealSelectionSheet> createState() => _MealSelectionSheetState();
 }
 
-class _NutritionLoggerSheetState extends State<_NutritionLoggerSheet> {
+class _MealSelectionSheetState extends State<_MealSelectionSheet> {
+  late List<MealData> _meals;
+
+  @override
+  void initState() {
+    super.initState();
+    _meals = List.from(widget.meals);
+
+    // Keep meals in sync with live stream while sheet is open
+    NutritionService.instance.stream.listen((data) {
+      if (mounted) setState(() => _meals = data.meals);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final total = _meals.fold(0, (sum, m) => sum + m.calories);
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: Color(0xFF111111),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+            left: 16,
+            right: 16,
+            top: 12,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 44,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2A2A2A),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Log Nutrition',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                "Today's Total: $total kcal",
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: const Color(0xFF909090)),
+              ),
+              const SizedBox(height: 16),
+              ..._meals.map(
+                (meal) => _MealRow(
+                  meal: meal,
+                  onTap: () => _openLogSheet(context, meal),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openLogSheet(BuildContext ctx, MealData meal) async {
+    await showModalBottomSheet<void>(
+      context: ctx,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _NutritionLogSheet(meal: meal),
+    );
+  }
+}
+
+// ─── Single Meal Row ──────────────────────────────────────────────────────────
+
+class _MealRow extends StatelessWidget {
+  const _MealRow({required this.meal, required this.onTap});
+
+  final MealData meal;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A1A),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFF2A2A2A)),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(14),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    meal.name,
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                Text(
+                  '${meal.calories} kcal',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: const Color(0xFF9A9A9A),
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                const Icon(
+                  Icons.add_circle_outline_rounded,
+                  color: Color(0xFFFF3D00),
+                  size: 22,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Nutrition Log Sheet (per meal) ──────────────────────────────────────────
+
+class _NutritionLogSheet extends StatefulWidget {
+  const _NutritionLogSheet({required this.meal});
+
+  final MealData meal;
+
+  @override
+  State<_NutritionLogSheet> createState() => _NutritionLogSheetState();
+}
+
+class _NutritionLogSheetState extends State<_NutritionLogSheet> {
   final TextEditingController _calCtrl = TextEditingController();
   final TextEditingController _carbCtrl = TextEditingController();
   final TextEditingController _proCtrl = TextEditingController();
   final TextEditingController _fatCtrl = TextEditingController();
   bool _isSaving = false;
+  String? _calorieError;
 
   @override
   void dispose() {
@@ -342,7 +491,7 @@ class _NutritionLoggerSheetState extends State<_NutritionLoggerSheet> {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  widget.ui.logNutritionTitle,
+                  widget.meal.name,
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
                     color: Colors.white,
                     fontWeight: FontWeight.w700,
@@ -350,13 +499,18 @@ class _NutritionLoggerSheetState extends State<_NutritionLoggerSheet> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '${widget.ui.todaysTotalPrefix} ${widget.caloriesEaten} ${widget.ui.calorieUnit}',
+                  'Already logged: ${widget.meal.calories} kcal',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: const Color(0xFF909090),
                   ),
                 ),
                 const SizedBox(height: 16),
-                _buildField(_calCtrl, 'Calories (kcal)', TextInputType.number),
+                _buildField(
+                  _calCtrl,
+                  'Calories (kcal)',
+                  TextInputType.number,
+                  errorText: _calorieError,
+                ),
                 const SizedBox(height: 10),
                 _buildField(_carbCtrl, 'Carbs (g)', TextInputType.number),
                 const SizedBox(height: 10),
@@ -399,14 +553,16 @@ class _NutritionLoggerSheetState extends State<_NutritionLoggerSheet> {
   Widget _buildField(
     TextEditingController ctrl,
     String label,
-    TextInputType type,
-  ) {
+    TextInputType type, {
+    String? errorText,
+  }) {
     return TextField(
       controller: ctrl,
       keyboardType: type,
       style: const TextStyle(color: Colors.white),
       decoration: InputDecoration(
         labelText: label,
+        errorText: errorText,
         labelStyle: const TextStyle(color: Color(0xFF8A8A8A)),
         enabledBorder: const OutlineInputBorder(
           borderSide: BorderSide(color: Color(0xFF2A2A2A)),
@@ -416,25 +572,54 @@ class _NutritionLoggerSheetState extends State<_NutritionLoggerSheet> {
           borderSide: BorderSide(color: Color(0xFFFF3D00)),
           borderRadius: BorderRadius.all(Radius.circular(12)),
         ),
+        errorBorder: const OutlineInputBorder(
+          borderSide: BorderSide(color: Colors.red),
+          borderRadius: BorderRadius.all(Radius.circular(12)),
+        ),
+        focusedErrorBorder: const OutlineInputBorder(
+          borderSide: BorderSide(color: Colors.red),
+          borderRadius: BorderRadius.all(Radius.circular(12)),
+        ),
       ),
     );
   }
 
   Future<void> _handleLog() async {
-    final calories = int.tryParse(_calCtrl.text.trim()) ?? 0;
+    final calorieText = _calCtrl.text.trim();
+    if (calorieText.isEmpty) {
+      setState(() => _calorieError = 'Calories are required');
+      return;
+    }
+
+    final calories = int.tryParse(calorieText);
+    if (calories == null || calories < 0) {
+      setState(() => _calorieError = 'Please enter a valid positive number');
+      return;
+    }
+
+    setState(() => _calorieError = null);
+
     final carbs = int.tryParse(_carbCtrl.text.trim()) ?? 0;
     final protein = int.tryParse(_proCtrl.text.trim()) ?? 0;
     final fats = int.tryParse(_fatCtrl.text.trim()) ?? 0;
 
-    if (calories < 0 || carbs < 0 || protein < 0 || fats < 0) {
+    if (carbs < 0 || protein < 0 || fats < 0) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter valid positive values.')),
+        const SnackBar(
+          content: Text('Please enter valid positive values for macros.'),
+        ),
       );
       return;
     }
 
     setState(() => _isSaving = true);
-    await NutritionService.instance.addCalories(calories, carbs, protein, fats);
+    await NutritionService.instance.addMealCalories(
+      mealName: widget.meal.name,
+      calories: calories,
+      carbs: carbs,
+      protein: protein,
+      fats: fats,
+    );
     if (mounted) {
       setState(() => _isSaving = false);
       Navigator.of(context).pop();

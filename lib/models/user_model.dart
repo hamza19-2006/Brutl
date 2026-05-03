@@ -6,6 +6,8 @@ class BrutlUser {
     required this.uid,
     this.displayName = '',
     this.username = '',
+    this.gender = 'Other',
+    this.age = 0,
     this.height = 0.0,
     this.heightUnit = 'cm',
     this.weight = 0.0,
@@ -24,6 +26,8 @@ class BrutlUser {
   final String uid;
   final String displayName;
   final String username;
+  final String gender;
+  final int age;
   final double height;
   final String heightUnit;
   final double weight;
@@ -42,6 +46,8 @@ class BrutlUser {
     String? uid,
     String? displayName,
     String? username,
+    String? gender,
+    int? age,
     double? height,
     String? heightUnit,
     double? weight,
@@ -60,6 +66,8 @@ class BrutlUser {
       uid: uid ?? this.uid,
       displayName: displayName ?? this.displayName,
       username: username ?? this.username,
+      gender: gender ?? this.gender,
+      age: age ?? this.age,
       height: height ?? this.height,
       heightUnit: heightUnit ?? this.heightUnit,
       weight: weight ?? this.weight,
@@ -81,6 +89,8 @@ class BrutlUser {
       'uid': uid,
       'displayName': displayName,
       'username': username,
+      'gender': gender,
+      'age': age,
       'height': height,
       'heightUnit': heightUnit,
       'weight': weight,
@@ -102,6 +112,8 @@ class BrutlUser {
       uid: json['uid'] as String? ?? '',
       displayName: json['displayName'] as String? ?? '',
       username: json['username'] as String? ?? '',
+      gender: json['gender'] as String? ?? 'Other',
+      age: (json['age'] as num?)?.toInt() ?? 0,
       height: (json['height'] as num?)?.toDouble() ?? 0.0,
       heightUnit: json['heightUnit'] as String? ?? 'cm',
       weight: (json['weight'] as num?)?.toDouble() ?? 0.0,

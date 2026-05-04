@@ -9,24 +9,28 @@ class UserModel {
     required this.name,
     this.dailyStepGoal = 12000,
     required this.dailyCalorieGoal,
+    this.weightKg = 70.0,
   });
 
   final String id;
   final String name;
   final int dailyStepGoal;
   final int dailyCalorieGoal;
+  final double weightKg;
 
   UserModel copyWith({
     String? id,
     String? name,
     int? dailyStepGoal,
     int? dailyCalorieGoal,
+    double? weightKg,
   }) {
     return UserModel(
       id: id ?? this.id,
       name: name ?? this.name,
       dailyStepGoal: dailyStepGoal ?? this.dailyStepGoal,
       dailyCalorieGoal: dailyCalorieGoal ?? this.dailyCalorieGoal,
+      weightKg: weightKg ?? this.weightKg,
     );
   }
 
@@ -36,6 +40,7 @@ class UserModel {
       'name': name,
       'dailyStepGoal': dailyStepGoal,
       'dailyCalorieGoal': dailyCalorieGoal,
+      'weightKg': weightKg,
     };
   }
 
@@ -45,6 +50,7 @@ class UserModel {
       name: json['name'] as String,
       dailyStepGoal: (json['dailyStepGoal'] as num?)?.toInt() ?? 12000,
       dailyCalorieGoal: (json['dailyCalorieGoal'] as num).toInt(),
+      weightKg: (json['weightKg'] as num?)?.toDouble() ?? 70.0,
     );
   }
 

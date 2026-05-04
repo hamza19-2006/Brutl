@@ -30,8 +30,8 @@ class WorkoutProvider extends ChangeNotifier {
           'Legs',
         ],
         'Bro Split': <String>[
-          'Chest & Triceps',
-          'Back & Biceps',
+          'Chest',
+          'Back',
           'Legs',
           'Shoulders',
           'Arms',
@@ -42,6 +42,7 @@ class WorkoutProvider extends ChangeNotifier {
     id: 'local-athlete',
     name: 'Brutl',
     dailyCalorieGoal: 500,
+    weightKg: 70.0,
   );
 
   // Program-Style state
@@ -100,6 +101,13 @@ class WorkoutProvider extends ChangeNotifier {
   int get selectedWeek => _selectedWeek;
   int get totalProgramWeeks => _totalProgramWeeks;
   String get selectedWorkoutSplit => _selectedWorkoutSplit;
+  List<String> get customSplitDays => List<String>.unmodifiable(_customSplitDays);
+  List<String> get activeSplitDays {
+    if (_customSplitDays.isNotEmpty) {
+      return List<String>.unmodifiable(_customSplitDays);
+    }
+    return List<String>.unmodifiable(_masterTemplate);
+  }
 
   List<brutl.ProgramDayModel> get currentWeekWorkouts {
     final baseList = _programDays
@@ -135,31 +143,28 @@ class WorkoutProvider extends ChangeNotifier {
   String workoutNameForWeekday(int weekday) =>
       _workoutPlan.workoutForWeekday(weekday);
 
-  String get todayWorkoutName {
-    final now = DateTime.now();
-    final weekday = now.weekday;
+  double _toKg(double weight, String unit) {
+    return unit.toLowerCase() == 'lbs' ? weight * 0.45359237 : weight;
+  }
 
-    // If user has custom split days configured, map weekday (1-7) to split index (0-6).
+  String get todayWorkoutName {
+    final todayIndex = DateTime.now().weekday - 1;
+
+    if (todayIndex >= 0 && todayIndex < _customSplitDays.length) {
+      return _customSplitDays[todayIndex];
+    }
     if (_customSplitDays.isNotEmpty) {
-      if (weekday - 1 < _customSplitDays.length) {
-        return _customSplitDays[weekday - 1];
-      } else {
-        // Day exceeds configured training days, so render explicit rest-day subtitle text.
-        const dayNames = <String>[
-          'Monday',
-          'Tuesday',
-          'Wednesday',
-          'Thursday',
-          'Friday',
-          'Saturday',
-          'Sunday',
-        ];
-        return '${dayNames[weekday - 1]} Rest';
-      }
+      return 'Rest';
     }
 
-    // Fallback to the plan-based workout name
-    return workoutNameForWeekday(weekday);
+    if (todayIndex >= 0 && todayIndex < _masterTemplate.length) {
+      return _masterTemplate[todayIndex];
+    }
+    if (_masterTemplate.isNotEmpty) {
+      return 'Rest';
+    }
+
+    return workoutNameForWeekday(todayIndex + 1);
   }
 
   Future<void> initialize() async {
@@ -211,44 +216,71 @@ class WorkoutProvider extends ChangeNotifier {
               if (snapshot.exists && snapshot.data() != null) {
                 final data = snapshot.data()!;
                 final displayName =
-                    (data['displayName'] as String?) ?? _user.name;
+                    (data['display_name'] as String?) ??
+                    (data['displayName'] as String?) ??
+                    _user.name;
                 final stepGoal =
+                    (data['step_goal'] as num?)?.toInt() ??
                     (data['dailyStepGoal'] as num?)?.toInt() ??
                     (data['stepGoal'] as num?)?.toInt() ??
+                    (data['daily_steps'] as num?)?.toInt() ??
                     _user.dailyStepGoal;
                 final calorieGoal =
+                    (data['target_calories'] as num?)?.toInt() ??
                     (data['targetCalories'] as num?)?.toInt() ??
                     _user.dailyCalorieGoal;
+                final rawWeight =
+                    (data['weight'] as num?)?.toDouble() ?? _user.weightKg;
+                final weightUnit =
+                    (data['weight_unit'] as String?) ??
+                    (data['weightUnit'] as String?) ??
+                    'kg';
+                final weightKg = _toKg(rawWeight, weightUnit);
                 final remoteCurrentSteps =
                     (data['currentSteps'] as num?)?.toInt() ??
                     // Backward compatibility: if a separate step-goal field exists,
                     // treat legacy `dailySteps` as current live steps.
-                    ((data.containsKey('dailyStepGoal') ||
+                    ((data.containsKey('step_goal') ||
+                            data.containsKey('daily_steps') ||
+                            data.containsKey('dailyStepGoal') ||
                             data.containsKey('stepGoal'))
-                        ? (data['dailySteps'] as num?)?.toInt()
+                        ? (data['daily_steps'] as num?)?.toInt() ??
+                              (data['dailySteps'] as num?)?.toInt()
                         : null) ??
                     _currentDailySteps;
                 final remoteCalories =
                     (data['dailyCaloriesBurned'] as num?)?.toDouble() ??
                     StepService.instance.calculateCalories(remoteCurrentSteps);
                 final remoteSplit =
+                    (data['workout_split_template'] as String?) ??
+                    (data['workoutSplitTemplate'] as String?) ??
                     (data['workoutSplit'] as String?) ??
                     (data['split'] as String?) ??
                     _selectedWorkoutSplit;
-                
+
                 // Extract custom split days from Firestore
                 final customSplitDays = <String>[];
-                final rawCustomSplitDays = data['custom_split_days'] as List<dynamic>?;
+                final rawCustomSplitDays =
+                    (data['custom_split_days'] as List<dynamic>?) ??
+                    (data['customSplitDays'] as List<dynamic>?);
                 if (rawCustomSplitDays != null) {
                   customSplitDays.addAll(
-                    rawCustomSplitDays.map((e) => e.toString())
+                    rawCustomSplitDays.map((e) => e.toString()),
                   );
                 }
+                final remoteMasterTemplate =
+                    ((data['workout_master_template'] as List<dynamic>?) ??
+                            (data['workoutMasterTemplate'] as List<dynamic>?))
+                        ?.map((item) => item.toString().trim())
+                        .where((item) => item.isNotEmpty)
+                        .toList(growable: false) ??
+                    const <String>[];
 
                 _user = _user.copyWith(
                   name: displayName.isNotEmpty ? displayName : _user.name,
                   dailyStepGoal: stepGoal,
                   dailyCalorieGoal: calorieGoal,
+                  weightKg: weightKg,
                 );
                 _currentDailySteps = remoteCurrentSteps < 0
                     ? 0
@@ -256,8 +288,24 @@ class WorkoutProvider extends ChangeNotifier {
                 _currentDailyCaloriesBurned = remoteCalories
                     .clamp(0, 5000)
                     .toDouble();
-                _customSplitDays = customSplitDays;
-                _setWorkoutSplit(remoteSplit, persist: true);
+                if (remoteMasterTemplate.isNotEmpty) {
+                  _masterTemplate = remoteMasterTemplate;
+                }
+                if (customSplitDays.isNotEmpty) {
+                  _customSplitDays = customSplitDays;
+                  if (remoteMasterTemplate.isEmpty) {
+                    _masterTemplate = customSplitDays;
+                  }
+                } else if (remoteMasterTemplate.isNotEmpty) {
+                  _customSplitDays = remoteMasterTemplate;
+                }
+
+                if (_masterTemplate.isNotEmpty) {
+                  _selectedWorkoutSplit = remoteSplit;
+                  _programDays = _buildProgramDaysFromTemplate(_masterTemplate);
+                } else {
+                  _setWorkoutSplit(remoteSplit, persist: false);
+                }
                 unawaited(prefs.setString(_userPrefsKey, _user.toRawJson()));
                 notifyListeners();
               }
@@ -290,7 +338,14 @@ class WorkoutProvider extends ChangeNotifier {
                     : 'Brutl'),
           dailyStepGoal: remoteUser.dailySteps,
           dailyCalorieGoal: remoteUser.targetCalories,
+          weightKg: _toKg(remoteUser.weight, remoteUser.weightUnit),
         );
+        if (remoteUser.customSplitDays.isNotEmpty) {
+          _customSplitDays = List<String>.from(
+            remoteUser.customSplitDays,
+            growable: false,
+          );
+        }
         await prefs.setString(_userPrefsKey, _user.toRawJson());
         return;
       }
@@ -306,6 +361,7 @@ class WorkoutProvider extends ChangeNotifier {
       id: 'local-athlete',
       name: 'Brutl',
       dailyCalorieGoal: 500,
+      weightKg: 70.0,
     );
     await prefs.setString(_userPrefsKey, _user.toRawJson());
   }
@@ -337,22 +393,50 @@ class WorkoutProvider extends ChangeNotifier {
         if (snapshot.exists && snapshot.data() != null) {
           final data = snapshot.data()!;
           final remoteTemplate =
-              (data['workoutMasterTemplate'] as List<dynamic>?)
+              ((data['workout_master_template'] as List<dynamic>?) ??
+                      (data['workoutMasterTemplate'] as List<dynamic>?))
+                  ?.map((item) => item.toString())
+                  .where((item) => item.trim().isNotEmpty)
+                  .toList(growable: false);
+          final remoteCustomSplitDays =
+              ((data['custom_split_days'] as List<dynamic>?) ??
+                      (data['customSplitDays'] as List<dynamic>?))
                   ?.map((item) => item.toString())
                   .where((item) => item.trim().isNotEmpty)
                   .toList(growable: false);
           if (remoteTemplate != null && remoteTemplate.isNotEmpty) {
             _masterTemplate = remoteTemplate;
-            _selectedWorkoutSplit = _defaultWorkoutSplit;
+            _customSplitDays =
+                (remoteCustomSplitDays != null &&
+                    remoteCustomSplitDays.isNotEmpty)
+                ? remoteCustomSplitDays
+                : remoteTemplate;
+            _selectedWorkoutSplit =
+                (data['workout_split_template'] as String?) ??
+                (data['workoutSplitTemplate'] as String?) ??
+                _defaultWorkoutSplit;
+            _programDays = _buildProgramDaysFromTemplate(_masterTemplate);
+            await prefs.setString('brutl_workout_split', _selectedWorkoutSplit);
+            return;
+          }
+          if (remoteCustomSplitDays != null && remoteCustomSplitDays.isNotEmpty) {
+            _customSplitDays = remoteCustomSplitDays;
+            _masterTemplate = remoteCustomSplitDays;
+            _selectedWorkoutSplit =
+                (data['workout_split_template'] as String?) ??
+                (data['workoutSplitTemplate'] as String?) ??
+                _selectedWorkoutSplit;
             _programDays = _buildProgramDaysFromTemplate(_masterTemplate);
             await prefs.setString('brutl_workout_split', _selectedWorkoutSplit);
             return;
           }
           final remoteSplit =
+              (data['workout_split_template'] as String?) ??
+              (data['workoutSplitTemplate'] as String?) ??
               (data['workoutSplit'] as String?) ??
               (data['split'] as String?) ??
               _defaultWorkoutSplit;
-          _setWorkoutSplit(remoteSplit, persist: true);
+          _setWorkoutSplit(remoteSplit, persist: false);
           await prefs.setString('brutl_workout_split', _selectedWorkoutSplit);
           return;
         }
@@ -381,17 +465,21 @@ class WorkoutProvider extends ChangeNotifier {
   }
 
   void _setWorkoutSplit(String split, {required bool persist}) {
-    final normalizedSplit = _splitTemplates.containsKey(split)
-        ? split
-        : _defaultWorkoutSplit;
+    final normalizedSplit = split.trim().isEmpty ? _defaultWorkoutSplit : split;
     if (_selectedWorkoutSplit == normalizedSplit && _programDays.isNotEmpty) {
       return;
     }
     _selectedWorkoutSplit = normalizedSplit;
+    final mappedTemplate = _splitTemplates[_selectedWorkoutSplit];
     _masterTemplate =
-        (_splitTemplates[_selectedWorkoutSplit] ??
-                _splitTemplates[_defaultWorkoutSplit]!)
+        (mappedTemplate ??
+                (_customSplitDays.isNotEmpty
+                    ? _customSplitDays
+                    : _splitTemplates[_defaultWorkoutSplit]!))
             .toList(growable: false);
+    if (mappedTemplate != null || _customSplitDays.isEmpty) {
+      _customSplitDays = _masterTemplate;
+    }
     _programDays = _buildProgramDaysFromTemplate(_masterTemplate);
     if (persist) {
       unawaited(_persistSelectedSplit(_selectedWorkoutSplit));
@@ -426,7 +514,14 @@ class WorkoutProvider extends ChangeNotifier {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     await FirebaseFirestore.instance.collection('users').doc(uid).set({
-      'workoutMasterTemplate': template,
+      'workout_split_template': _selectedWorkoutSplit,
+      'workout_master_template': template,
+      'custom_split_days': template,
+      'workoutMasterTemplate': FieldValue.delete(),
+      'customSplitDays': FieldValue.delete(),
+      'workoutSplitTemplate': FieldValue.delete(),
+      'workoutSplit': FieldValue.delete(),
+      'split': FieldValue.delete(),
     }, SetOptions(merge: true));
   }
 

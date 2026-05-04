@@ -86,6 +86,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   // --- Page 6: Macros ---
   int _targetCalories = 2000;
+  int _goalTargetCalories = 2000;
   int _targetProtein = 150;
   int _targetCarbs = 200;
   int _targetFats = 60;
@@ -127,35 +128,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   List<String> _splitDefaultsForOption(String option) {
     switch (option) {
       case 'Push, Pull, Legs, Repeat':
-        return <String>[
-          'Chest & Triceps',
-          'Back & Biceps',
-          'Leg & Shoulders',
-          'Chest & Triceps',
-          'Back & Biceps',
-          'Leg & Shoulders',
-        ];
+        return <String>['Push', 'Pull', 'Legs', 'Push', 'Pull', 'Legs'];
       case 'Bro Split (1 muscle per day)':
-        return <String>['Chest ', 'Back ', 'Legs', 'Shoulders', 'Arms'];
+        return <String>['Chest', 'Back', 'Legs', 'Shoulders', 'Arms'];
       case 'Upper, Lower, Rest, Repeat':
-        return <String>[
-          'Upper Body A',
-          'Lower Body A',
-          'Upper Body B ',
-          'Lower Body B',
-        ];
+        return <String>['Upper A', 'Lower A', 'Upper B', 'Lower B'];
       case 'Push, Pull, Legs, Upper, Lower':
-        return <String>[
-          'Chest & Triceps',
-          'Back & Biceps',
-          'Leg & Shoulders',
-          'Upper Body',
-          'Lower Body',
-        ];
+        return <String>['Push', 'Pull', 'Legs', 'Upper', 'Lower'];
       case 'Customize Split':
-        return <String>['Chest & Triceps', 'Back & Biceps', 'Leg & Shoulders'];
+        return <String>['Chest', 'Back', 'Legs'];
       default:
-        return <String>['Chest & Triceps', 'Back & Biceps', 'Leg & Shoulders'];
+        return <String>['Push', 'Pull', 'Legs', 'Push', 'Pull', 'Legs'];
     }
   }
 
@@ -346,8 +329,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
 
     final imagePath = _gender == 'Female'
-        ? 'assets/Images/Female_BodyFat.jpg'
-        : 'assets/Images/Male_BodyFat.jpg';
+        ? 'assets/Images/Female_BodyFat.png'
+        : 'assets/Images/Male_BodyFat.png';
 
     showDialog<void>(
       context: context,
@@ -449,6 +432,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     return rounded < 0 ? 0 : rounded;
   }
 
+  void _captureGoalSelection() {
+    _goalTargetCalories = _calculateSuggestedCalories(_bodyGoal);
+    if (!_isCustomMacro) {
+      _targetCalories = _goalTargetCalories;
+    }
+  }
+
   double _activityMultiplierForSteps(int steps) {
     if (steps < 5000) return 1.2;
     if (steps < 7500) return 1.375;
@@ -480,11 +470,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       bodyFatAverage: bodyFatAverage,
     );
     final tdee = bmr * activityMultiplier;
+    _goalTargetCalories = _calculateSuggestedCalories(_bodyGoal);
+    _targetCalories = _goalTargetCalories > 0
+        ? _goalTargetCalories
+        : tdee.round();
 
-    double proMultiplier = 2.0;
-    double fatMultiplier = 0.7;
+    const double proMultiplier = 2.0;
+    const double fatMultiplier = 0.7;
 
-    _targetCalories = tdee.round();
     _targetProtein = (weightKg * proMultiplier).round();
     _targetFats = (weightKg * fatMultiplier).round();
     _targetCarbs =
@@ -514,6 +507,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               .where((e) => e.isNotEmpty)
               .toList()
         : <String>[];
+    final finalSplitDays = customDays.isEmpty
+        ? _splitDefaultsForOption(_splitTemplate)
+        : customDays;
 
     // Normalize split template name for consistency across templates, master template, and custom split days
     final normalizedSplitTemplate = _normalizeSplitTemplateName(_splitTemplate);
@@ -533,7 +529,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       dailySteps: stepGoal,
       bodyGoal: _bodyGoal,
       workoutSplitTemplate: normalizedSplitTemplate,
-      customSplitDays: customDays,
+      customSplitDays: finalSplitDays,
       compoundRepMin: compoundRepMin,
       compoundRepMax: compoundRepMax,
       isolationRepMin: isolationRepMin,
@@ -551,15 +547,30 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           .collection('users')
           .doc(user.uid);
 
-      final workoutMasterTemplate = customDays.isEmpty
-          ? _splitDefaultsForOption(_splitTemplate)
-          : customDays;
+      final workoutMasterTemplate = finalSplitDays;
 
       await docRef.set(<String, dynamic>{
         ...brutlUser.toJson(),
         'workout_master_template': workoutMasterTemplate,
         'is_profile_complete': true,
-        // Remove legacy camelCase split/profile keys so only canonical snake_case remains.
+        // Remove legacy camelCase keys so only canonical snake_case remains.
+        'displayName': FieldValue.delete(),
+        'heightUnit': FieldValue.delete(),
+        'weightUnit': FieldValue.delete(),
+        'bodyFatString': FieldValue.delete(),
+        'bodyFatAverage': FieldValue.delete(),
+        'dailySteps': FieldValue.delete(),
+        'dailyStepGoal': FieldValue.delete(),
+        'bodyGoal': FieldValue.delete(),
+        'targetCalories': FieldValue.delete(),
+        'maintenanceCalories': FieldValue.delete(),
+        'targetProtein': FieldValue.delete(),
+        'targetCarbs': FieldValue.delete(),
+        'targetFats': FieldValue.delete(),
+        'compoundRepMin': FieldValue.delete(),
+        'compoundRepMax': FieldValue.delete(),
+        'isolationRepMin': FieldValue.delete(),
+        'isolationRepMax': FieldValue.delete(),
         'workoutSplitTemplate': FieldValue.delete(),
         'workoutMasterTemplate': FieldValue.delete(),
         'customSplitDays': FieldValue.delete(),
@@ -667,6 +678,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
     // Pre-calculate macros BEFORE entering the macros page so TDEE is visible.
     if (_currentPage == _goalsPageIndex) {
+      _captureGoalSelection();
       _calculateMacros();
     }
 
@@ -1315,6 +1327,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 child: GestureDetector(
                   onTap: () => setState(() {
                     _bodyGoal = goals[i];
+                    _captureGoalSelection();
                     _calculateMacros();
                   }),
                   child: AnimatedContainer(
@@ -1395,7 +1408,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Calculated with Katch-McArdle (Mifflin fallback).',
+            'Calculated with Katch-McArdle Method .',
             style: TextStyle(color: Color(0xFF9A9A9A), fontSize: 16),
           ),
           const SizedBox(height: 32),

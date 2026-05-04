@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 
 import '../core/theme/app_colors.dart';
 import '../models/user_data_models.dart';
+import '../services/step_service.dart';
 
 class HeaderWidget extends StatelessWidget {
   const HeaderWidget({
@@ -21,6 +22,14 @@ class HeaderWidget extends StatelessWidget {
   final String daySuffix;
   final DateTime now;
   final String brandName;
+
+  double _calculateCaloriesFromSteps({
+    required int steps,
+    required double weightKg,
+  }) {
+    // Walking estimate based on body mass and step count.
+    return steps * (weightKg * 0.0005);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -45,7 +54,9 @@ class HeaderWidget extends StatelessWidget {
                       final data =
                           snapshot.data!.data() as Map<String, dynamic>;
                       final remoteDisplayName =
-                          (data['displayName'] as String?)?.trim() ?? '';
+                          (data['display_name'] as String?)?.trim() ??
+                          (data['displayName'] as String?)?.trim() ??
+                          '';
                       final remoteUsername =
                           (data['username'] as String?)?.trim() ?? '';
                       displayName = remoteDisplayName.isNotEmpty
@@ -114,6 +125,27 @@ class HeaderWidget extends StatelessWidget {
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(height: 4),
+              StreamBuilder<int>(
+                stream: StepService.instance.todayStepsStream,
+                initialData: StepService.instance.getTodaySteps(),
+                builder: (context, stepSnapshot) {
+                  final liveSteps = stepSnapshot.data ?? 0;
+                  final burnedCalories = _calculateCaloriesFromSteps(
+                    steps: liveSteps,
+                    weightKg: user.weightKg,
+                  ).toStringAsFixed(0);
+
+                  return Text(
+                    'kcal $burnedCalories 🔥',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: const Color(0xFFD0D0D0),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  );
+                },
               ),
               const SizedBox(height: 4),
               Container(

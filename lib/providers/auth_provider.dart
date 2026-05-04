@@ -90,7 +90,8 @@ class BrutlAuthProvider extends ChangeNotifier {
             .set(<String, dynamic>{
               'email': user.email,
               'uid': user.uid,
-              'createdAt': FieldValue.serverTimestamp(),
+              'created_at': FieldValue.serverTimestamp(),
+              'createdAt': FieldValue.delete(),
             }, SetOptions(merge: true));
       }
       return true;
@@ -145,10 +146,14 @@ class BrutlAuthProvider extends ChangeNotifier {
             .set(<String, dynamic>{
               'email': user.email,
               'uid': user.uid,
-              'displayName': user.displayName,
-              'photoUrl': user.photoURL,
-              'lastSignInAt': FieldValue.serverTimestamp(),
-              if (!existedBefore) 'createdAt': FieldValue.serverTimestamp(),
+              'display_name': user.displayName,
+              'photo_url': user.photoURL,
+              'last_sign_in_at': FieldValue.serverTimestamp(),
+              if (!existedBefore) 'created_at': FieldValue.serverTimestamp(),
+              'displayName': FieldValue.delete(),
+              'photoUrl': FieldValue.delete(),
+              'lastSignInAt': FieldValue.delete(),
+              'createdAt': FieldValue.delete(),
             }, SetOptions(merge: true));
 
         final isNewUser =

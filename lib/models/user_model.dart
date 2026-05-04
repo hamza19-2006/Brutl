@@ -125,7 +125,6 @@ class BrutlUser {
       'weight_unit': weightUnit,
       'body_fat_string': bodyFatString,
       'body_fat_average': bodyFatAverage,
-      'daily_steps': dailySteps,
       'step_goal': dailySteps,
       'body_goal': bodyGoal,
       'workout_split_template': workoutSplitTemplate,
@@ -146,59 +145,40 @@ class BrutlUser {
   factory BrutlUser.fromJson(Map<String, dynamic> json) {
     return BrutlUser(
       uid: json['uid'] as String? ?? '',
-      displayName: json['display_name'] as String? ?? json['displayName'] as String? ?? '',
+      displayName: json['display_name'] as String? ?? '',
       username: json['username'] as String? ?? '',
       gender: json['gender'] as String? ?? 'Other',
       age: (json['age'] as num?)?.toInt() ?? 0,
       height: (json['height'] as num?)?.toDouble() ?? 0.0,
-      heightUnit: json['height_unit'] as String? ?? json['heightUnit'] as String? ?? 'cm',
+      heightUnit: json['height_unit'] as String? ?? 'cm',
       weight: (json['weight'] as num?)?.toDouble() ?? 0.0,
-      weightUnit: json['weight_unit'] as String? ?? json['weightUnit'] as String? ?? 'kg',
-      bodyFatString: json['body_fat_string'] as String? ?? json['bodyFatString'] as String? ?? '',
-      bodyFatAverage: (json['body_fat_average'] as num?)?.toDouble() ?? (json['bodyFatAverage'] as num?)?.toDouble() ?? 0.0,
+      weightUnit: json['weight_unit'] as String? ?? 'kg',
+      bodyFatString: json['body_fat_string'] as String? ?? '',
+      bodyFatAverage: (json['body_fat_average'] as num?)?.toDouble() ?? 0.0,
       dailySteps:
-          (json['daily_steps'] as num?)?.toInt() ??
           (json['step_goal'] as num?)?.toInt() ??
-          (json['dailySteps'] as num?)?.toInt() ??
-          (json['dailyStepGoal'] as num?)?.toInt() ??
+          (json['daily_steps'] as num?)?.toInt() ??
           10000,
-      bodyGoal: json['body_goal'] as String? ?? json['bodyGoal'] as String? ?? 'Maintenance',
+      bodyGoal: json['body_goal'] as String? ?? 'Maintenance',
       workoutSplitTemplate:
-          json['workout_split_template'] as String? ?? json['workoutSplitTemplate'] as String? ?? 'Push, Pull, Legs, Repeat',
+          json['workout_split_template'] as String? ??
+          'Push, Pull, Legs, Repeat',
       customSplitDays:
           (json['custom_split_days'] as List<dynamic>?)
               ?.map((e) => e as String)
               .toList() ??
-          (json['customSplitDays'] as List<dynamic>?)
-              ?.map((e) => e as String)
-              .toList() ??
           const [],
-      compoundRepMin:
-          (json['compound_rep_min'] as num?)?.toInt() ??
-          (json['compoundRepMin'] as num?)?.toInt() ??
-          4,
-      compoundRepMax:
-          (json['compound_rep_max'] as num?)?.toInt() ??
-          (json['compoundRepMax'] as num?)?.toInt() ??
-          8,
-      isolationRepMin:
-          (json['isolation_rep_min'] as num?)?.toInt() ??
-          (json['isolationRepMin'] as num?)?.toInt() ??
-          8,
-      isolationRepMax:
-          (json['isolation_rep_max'] as num?)?.toInt() ??
-          (json['isolationRepMax'] as num?)?.toInt() ??
-          12,
-      targetCalories: (json['target_calories'] as num?)?.toInt() ?? (json['targetCalories'] as num?)?.toInt() ?? 2000,
+      compoundRepMin: (json['compound_rep_min'] as num?)?.toInt() ?? 4,
+      compoundRepMax: (json['compound_rep_max'] as num?)?.toInt() ?? 8,
+      isolationRepMin: (json['isolation_rep_min'] as num?)?.toInt() ?? 8,
+      isolationRepMax: (json['isolation_rep_max'] as num?)?.toInt() ?? 12,
+      targetCalories: (json['target_calories'] as num?)?.toInt() ?? 2000,
       maintenanceCalories:
-          (json['maintenance_calories'] as num?)?.toInt() ??
-          (json['maintenanceCalories'] as num?)?.toInt() ??
-          (json['targetCalories'] as num?)?.toInt() ??
-          2000,
-      targetProtein: (json['target_protein'] as num?)?.toInt() ?? (json['targetProtein'] as num?)?.toInt() ?? 150,
-      targetCarbs: (json['target_carbs'] as num?)?.toInt() ?? (json['targetCarbs'] as num?)?.toInt() ?? 200,
-      targetFats: (json['target_fats'] as num?)?.toInt() ?? (json['targetFats'] as num?)?.toInt() ?? 60,
-      isProfileComplete: json['is_profile_complete'] as bool? ?? json['isProfileComplete'] as bool? ?? false,
+          (json['maintenance_calories'] as num?)?.toInt() ?? 2000,
+      targetProtein: (json['target_protein'] as num?)?.toInt() ?? 150,
+      targetCarbs: (json['target_carbs'] as num?)?.toInt() ?? 200,
+      targetFats: (json['target_fats'] as num?)?.toInt() ?? 60,
+      isProfileComplete: json['is_profile_complete'] as bool? ?? false,
     );
   }
 }

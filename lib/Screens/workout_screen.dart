@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -104,6 +103,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
 
         final workoutProvider = context.watch<WorkoutProvider>();
         final weekId = 'week_${workoutProvider.selectedWeek}';
+        final splitDays = workoutProvider.activeSplitDays;
 
         return Scaffold(
           backgroundColor: const Color(0xFF0A0A0A),
@@ -193,49 +193,31 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
                 ),
                 const SizedBox(height: 16),
                 Expanded(
-                  child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-                    stream: FirebaseFirestore.instance
-                        .collection('users')
-                        .doc(currentUser.uid)
-                        .snapshots(),
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting) {
-                        return const Center(
-                          child: CircularProgressIndicator(
-                            color: Color(0xFFFF3D00),
+                  child: splitDays.isEmpty
+                      ? Center(
+                          child: Text(
+                            'No split configured yet.',
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(color: const Color(0xFF888888)),
                           ),
-                        );
-                      }
-
-                      final data = snapshot.data?.data();
-                      List<dynamic> customSplitDays = [];
-                      if (data != null && data.containsKey('customSplitDays')) {
-                        customSplitDays =
-                            data['customSplitDays'] as List<dynamic>;
-                      }
-                      if (customSplitDays.isEmpty) {
-                        customSplitDays = ['Full Body'];
-                      }
-
-                      return ListView.builder(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                        itemCount: customSplitDays.length,
-                        itemBuilder: (context, index) {
-                          final dayName = customSplitDays[index].toString();
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: WorkoutCardWidget(
-                              weekId: weekId,
-                              dayId: 'day_${index + 1}',
-                              dayNumber: 'Day ${index + 1}',
-                              workoutName: dayName,
-                              uid: currentUser.uid,
-                            ),
-                          );
-                        },
-                      );
-                    },
-                  ),
+                        )
+                      : ListView.builder(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                          itemCount: splitDays.length,
+                          itemBuilder: (context, index) {
+                            final dayName = splitDays[index];
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: WorkoutCardWidget(
+                                weekId: weekId,
+                                dayId: 'day_${index + 1}',
+                                dayNumber: 'Day ${index + 1}',
+                                workoutName: dayName,
+                                uid: currentUser.uid,
+                              ),
+                            );
+                          },
+                        ),
                 ),
               ],
             ),

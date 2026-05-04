@@ -128,17 +128,34 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   List<String> _splitDefaultsForOption(String option) {
     switch (option) {
       case 'Push, Pull, Legs, Repeat':
-        return <String>['Push', 'Pull', 'Legs', 'Push', 'Pull', 'Legs'];
+        return <String>[
+          'Chest & Triceps',
+          'Back & Biceps',
+          'Legs & Shoulders',
+          'Chest & Triceps',
+          'Back & Biceps',
+          'Legs & Shoulders',
+        ];
       case 'Bro Split (1 muscle per day)':
         return <String>['Chest', 'Back', 'Legs', 'Shoulders', 'Arms'];
       case 'Upper, Lower, Rest, Repeat':
         return <String>['Upper A', 'Lower A', 'Upper B', 'Lower B'];
       case 'Push, Pull, Legs, Upper, Lower':
-        return <String>['Push', 'Pull', 'Legs', 'Upper', 'Lower'];
+        return <String>[
+          'Chest & Triceps',
+          'Back & Biceps',
+          'Legs & Shoulders'
+              'Upper',
+          'Lower',
+        ];
       case 'Customize Split':
-        return <String>['Chest', 'Back', 'Legs'];
+        return <String>[
+          'Chest & Triceps ',
+          'Back & Biecps ',
+          'Leg & shoulders ',
+        ];
       default:
-        return <String>['Push', 'Pull', 'Legs', 'Push', 'Pull', 'Legs'];
+        return <String>['Chest & Triceps', 'Back & Biceps', 'Legs & Shoulders'];
     }
   }
 

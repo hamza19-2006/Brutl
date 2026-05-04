@@ -141,25 +141,11 @@ class HeaderWidget extends StatelessWidget {
                     'kcal $burnedCalories 🔥',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: const Color(0xFFD0D0D0),
-                      fontSize: 12,
+                      fontSize: 16,
                       fontWeight: FontWeight.w600,
                     ),
                   );
                 },
-              ),
-              const SizedBox(height: 4),
-              Container(
-                width: 22,
-                height: 3,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(2),
-                  gradient: const LinearGradient(
-                    colors: [
-                      AppColors.accentPrimary,
-                      AppColors.accentSecondary,
-                    ],
-                  ),
-                ),
               ),
             ],
           ),

@@ -103,7 +103,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
 
         final workoutProvider = context.watch<WorkoutProvider>();
         final weekId = 'week_${workoutProvider.selectedWeek}';
-        final splitDays = workoutProvider.activeSplitDays;
+        final customSplitDays = workoutProvider.customSplitDays;
 
         return Scaffold(
           backgroundColor: const Color(0xFF0A0A0A),
@@ -193,7 +193,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
                 ),
                 const SizedBox(height: 16),
                 Expanded(
-                  child: splitDays.isEmpty
+                  child: customSplitDays.isEmpty
                       ? Center(
                           child: Text(
                             'No split configured yet.',
@@ -203,9 +203,9 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
                         )
                       : ListView.builder(
                           padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                          itemCount: splitDays.length,
+                          itemCount: customSplitDays.length,
                           itemBuilder: (context, index) {
-                            final dayName = splitDays[index];
+                            final dayName = customSplitDays[index];
                             return Padding(
                               padding: const EdgeInsets.only(bottom: 12),
                               child: WorkoutCardWidget(

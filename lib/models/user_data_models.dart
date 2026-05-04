@@ -35,22 +35,37 @@ class UserModel {
   }
 
   Map<String, dynamic> toJson() {
+    // Canonical snake_case keys to prevent Firestore duplication.
     return <String, dynamic>{
       'id': id,
       'name': name,
-      'dailyStepGoal': dailyStepGoal,
-      'dailyCalorieGoal': dailyCalorieGoal,
-      'weightKg': weightKg,
+      'daily_step_goal': dailyStepGoal,
+      'daily_calorie_goal': dailyCalorieGoal,
+      'weight_kg': weightKg,
     };
   }
 
   factory UserModel.fromJson(Map<String, dynamic> json) {
+    // Backward compatible reads (older local caches may still be camelCase).
+    final dailyStepGoal =
+        (json['daily_step_goal'] as num?)?.toInt() ??
+        (json['dailyStepGoal'] as num?)?.toInt() ??
+        12000;
+    final dailyCalorieGoal =
+        (json['daily_calorie_goal'] as num?)?.toInt() ??
+        (json['dailyCalorieGoal'] as num?)?.toInt() ??
+        2000;
+    final weightKg =
+        (json['weight_kg'] as num?)?.toDouble() ??
+        (json['weightKg'] as num?)?.toDouble() ??
+        70.0;
+
     return UserModel(
-      id: json['id'] as String,
-      name: json['name'] as String,
-      dailyStepGoal: (json['dailyStepGoal'] as num?)?.toInt() ?? 12000,
-      dailyCalorieGoal: (json['dailyCalorieGoal'] as num).toInt(),
-      weightKg: (json['weightKg'] as num?)?.toDouble() ?? 70.0,
+      id: json['id'] as String? ?? '',
+      name: json['name'] as String? ?? '',
+      dailyStepGoal: dailyStepGoal,
+      dailyCalorieGoal: dailyCalorieGoal,
+      weightKg: weightKg,
     );
   }
 

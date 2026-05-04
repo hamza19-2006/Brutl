@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
-import '../../core/theme/app_spacing.dart';
+
 import '../../core/theme/app_gradients.dart';
 import 'login_screen.dart';
 
@@ -185,7 +185,9 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                 child: Text(
                   'Check your email for a password reset link. '
                   'The link will expire in 24 hours.',
-                  style: AppTextStyles.labelSmall(color: AppColors.textSecondary),
+                  style: AppTextStyles.labelSmall(
+                    color: AppColors.textSecondary,
+                  ),
                 ),
               ),
             ],
@@ -333,15 +335,24 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
               fillColor: AppColors.backgroundSecondary,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: AppColors.borderDefault, width: 1),
+                borderSide: const BorderSide(
+                  color: AppColors.borderDefault,
+                  width: 1,
+                ),
               ),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: AppColors.borderDefault, width: 1),
+                borderSide: const BorderSide(
+                  color: AppColors.borderDefault,
+                  width: 1,
+                ),
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: AppColors.accentPrimary, width: 1.5),
+                borderSide: const BorderSide(
+                  color: AppColors.accentPrimary,
+                  width: 1.5,
+                ),
               ),
             ),
           ),
@@ -403,10 +414,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
 }
 
 class _BrutlGradientButton extends StatelessWidget {
-  const _BrutlGradientButton({
-    required this.label,
-    required this.onPressed,
-  });
+  const _BrutlGradientButton({required this.label, required this.onPressed});
 
   final String label;
   final VoidCallback? onPressed;
@@ -436,9 +444,7 @@ class _BrutlGradientButton extends StatelessWidget {
             child: Center(
               child: Text(
                 label,
-                style: AppTextStyles.headingSmall(
-                  color: AppColors.textPrimary,
-                ),
+                style: AppTextStyles.headingSmall(color: AppColors.textPrimary),
               ),
             ),
           ),

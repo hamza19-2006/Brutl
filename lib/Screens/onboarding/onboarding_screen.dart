@@ -556,17 +556,82 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
   }
 
-  void _nextPage() {
+  void _showValidationSnackBar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: Colors.redAccent,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+  }
+
+
+  String? _validationErrorForCurrentPage() {
     if (_currentPage == 0) {
-      if (_displayNameCtrl.text.trim().isEmpty ||
-          _usernameCtrl.text.trim().isEmpty ||
-          _isCheckingUsername ||
-          _isUsernameAvailable != true) {
-        return; // Validation failed
+      if (_displayNameCtrl.text.trim().isEmpty) {
+        return 'Please enter your display name.';
       }
-    } else if (_currentPage == 1) {
-      if (_weightCtrl.text.trim().isEmpty) return;
-      if (_heightUnit == 'cm' && _heightCmCtrl.text.trim().isEmpty) return;
+      if (_gender.trim().isEmpty) {
+        return 'Please select your gender.';
+      }
+      if (_usernameCtrl.text.trim().isEmpty) {
+        return 'Please enter a username.';
+      }
+      if (_usernameValidationError != null) {
+        return _usernameValidationError;
+      }
+      if (_isCheckingUsername) {
+        return 'Checking username availability...';
+      }
+      if (_isUsernameAvailable != true) {
+        return 'Please choose an available username.';
+      }
+    }
+
+    if (_currentPage == 1) {
+      if (_weightCtrl.text.trim().isEmpty) {
+        return 'Please enter your weight.';
+      }
+      final weight = double.tryParse(_weightCtrl.text.trim());
+      if (weight == null || weight <= 0) {
+        return 'Please enter a valid weight.';
+      }
+
+      if (_heightUnit == 'cm') {
+        if (_heightCmCtrl.text.trim().isEmpty) {
+          return 'Please enter your height.';
+        }
+        final heightCm = double.tryParse(_heightCmCtrl.text.trim());
+        if (heightCm == null || heightCm <= 0) {
+          return 'Please enter a valid height.';
+        }
+      }
+
+      if (_ageCtrl.text.trim().isEmpty) {
+        return 'Please enter your age.';
+      }
+      final age = int.tryParse(_ageCtrl.text.trim());
+      if (age == null || age <= 0) {
+        return 'Please enter a valid age.';
+      }
+
+      if ((_bodyFatString ?? '').trim().isEmpty) {
+        return 'Please select your estimated body fat %.';
+      }
+    }
+
+    return null;
+  }
+
+  void _nextPage() {
+    final error = _validationErrorForCurrentPage();
+    if (error != null) {
+      _showValidationSnackBar(error);
+      return;
     }
 
     // Pre-calculate macros BEFORE entering the macros page so TDEE is visible.
@@ -692,14 +757,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   Widget _buildBottomBar() {
     final isLastPage = _currentPage == _lastPageIndex;
-    final isIdentityPage = _currentPage == 0;
-    final isNextButtonEnabled =
-        !_isSaving &&
-        (!isIdentityPage ||
-            (_displayNameCtrl.text.trim().isNotEmpty &&
-                _usernameCtrl.text.trim().isNotEmpty &&
-                !_isCheckingUsername &&
-                _isUsernameAvailable == true));
+    final isNextButtonEnabled = !_isSaving;
+
     return Padding(
       padding: const EdgeInsets.all(20),
       child: SizedBox(
@@ -765,6 +824,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   controller: _displayNameCtrl,
                   label: 'Display Name',
                   hint: 'e.g., M.Hamza',
+                  onChanged: (_) => setState(() {}),
                 ),
               ),
               const SizedBox(width: 16),
@@ -899,6 +959,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               hint: '175',
               suffix: const Text('cm', style: TextStyle(color: Colors.white54)),
               keyboardType: TextInputType.number,
+              onChanged: (_) => setState(() {}),
             )
           else
             Row(
@@ -938,6 +999,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               style: const TextStyle(color: Colors.white54),
             ),
             keyboardType: TextInputType.number,
+            onChanged: (_) => setState(() {}),
           ),
           const SizedBox(height: 20),
           _buildGlassField(
@@ -945,13 +1007,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             label: 'Age',
             hint: '25',
             keyboardType: TextInputType.number,
+            onChanged: (_) => setState(() {}),
           ),
           const SizedBox(height: 20),
           _buildOptionalTextDropdown(
             value: _bodyFatString,
             items: _bodyFatOptions,
             label: 'Estimated Body Fat %',
-            hint: 'Select a range (optional)',
+            hint: 'Select a range',
             onChanged: (value) {
               setState(() {
                 _bodyFatString = value;

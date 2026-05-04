@@ -283,15 +283,11 @@ class WorkoutProvider extends ChangeNotifier {
                 _currentDailyCaloriesBurned = remoteCalories
                     .clamp(0, 5000)
                     .toDouble();
-                if (remoteMasterTemplate.isNotEmpty) {
-                  _masterTemplate = remoteMasterTemplate;
-                }
                 if (customSplitDays.isNotEmpty) {
                   _customSplitDays = customSplitDays;
-                  if (remoteMasterTemplate.isEmpty) {
-                    _masterTemplate = customSplitDays;
-                  }
+                  _masterTemplate = customSplitDays;
                 } else if (remoteMasterTemplate.isNotEmpty) {
+                  _masterTemplate = remoteMasterTemplate;
                   _customSplitDays = remoteMasterTemplate;
                 }
 
@@ -340,6 +336,11 @@ class WorkoutProvider extends ChangeNotifier {
             remoteUser.customSplitDays,
             growable: false,
           );
+          _masterTemplate = _customSplitDays;
+          if (remoteUser.workoutSplitTemplate.trim().isNotEmpty) {
+            _selectedWorkoutSplit = remoteUser.workoutSplitTemplate;
+          }
+          _programDays = _buildProgramDaysFromTemplate(_masterTemplate);
         }
         await prefs.setString(_userPrefsKey, _user.toRawJson());
         return;
@@ -399,21 +400,6 @@ class WorkoutProvider extends ChangeNotifier {
                   ?.map((item) => item.toString())
                   .where((item) => item.trim().isNotEmpty)
                   .toList(growable: false);
-          if (remoteTemplate != null && remoteTemplate.isNotEmpty) {
-            _masterTemplate = remoteTemplate;
-            _customSplitDays =
-                (remoteCustomSplitDays != null &&
-                    remoteCustomSplitDays.isNotEmpty)
-                ? remoteCustomSplitDays
-                : remoteTemplate;
-            _selectedWorkoutSplit =
-                (data['workout_split_template'] as String?) ??
-                (data['workoutSplitTemplate'] as String?) ??
-                _defaultWorkoutSplit;
-            _programDays = _buildProgramDaysFromTemplate(_masterTemplate);
-            await prefs.setString('brutl_workout_split', _selectedWorkoutSplit);
-            return;
-          }
           if (remoteCustomSplitDays != null &&
               remoteCustomSplitDays.isNotEmpty) {
             _customSplitDays = remoteCustomSplitDays;
@@ -422,6 +408,17 @@ class WorkoutProvider extends ChangeNotifier {
                 (data['workout_split_template'] as String?) ??
                 (data['workoutSplitTemplate'] as String?) ??
                 _selectedWorkoutSplit;
+            _programDays = _buildProgramDaysFromTemplate(_masterTemplate);
+            await prefs.setString('brutl_workout_split', _selectedWorkoutSplit);
+            return;
+          }
+          if (remoteTemplate != null && remoteTemplate.isNotEmpty) {
+            _masterTemplate = remoteTemplate;
+            _customSplitDays = remoteTemplate;
+            _selectedWorkoutSplit =
+                (data['workout_split_template'] as String?) ??
+                (data['workoutSplitTemplate'] as String?) ??
+                _defaultWorkoutSplit;
             _programDays = _buildProgramDaysFromTemplate(_masterTemplate);
             await prefs.setString('brutl_workout_split', _selectedWorkoutSplit);
             return;
@@ -586,25 +583,30 @@ class WorkoutProvider extends ChangeNotifier {
 
     final key = 'session_${date.toIso8601String()}';
     await box.put(key, sessionPayload);
-    await _persistDailyLogIfAvailable(date);
+    await _persistDailyLogIfAvailable(date, exercises);
     await refreshLastWorkoutInsights();
   }
 
-  Future<void> _persistDailyLogIfAvailable(DateTime date) async {
+  Future<void> _persistDailyLogIfAvailable(
+    DateTime date,
+    List<ExerciseModel> exercises,
+  ) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
-    final selectedDay = currentWeekWorkouts.where((day) {
-      return day.dayNumber == date.weekday;
-    }).toList();
+    final selectedDay = currentWeekWorkouts.where(
+      (day) => day.dayNumber == date.weekday,
+    );
     if (selectedDay.isEmpty) return;
     final day = selectedDay.first;
+    final payload = day.toJson()
+      ..['exercises'] = exercises.map((exercise) => exercise.toJson()).toList();
 
     await FirebaseFirestore.instance
         .collection('users')
         .doc(uid)
         .collection('workout_day_logs')
         .doc(day.id)
-        .set(day.toJson(), SetOptions(merge: true));
+        .set(payload, SetOptions(merge: true));
   }
 
   Future<void> updateUser({

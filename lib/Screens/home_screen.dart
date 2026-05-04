@@ -225,7 +225,9 @@ class _HomeTabState extends State<_HomeTab> {
       );
     }
 
-    final safeStepGoal = _stepGoal <= 0 ? 10000 : _stepGoal;
+    final providerStepGoal = workoutProvider.user.dailyStepGoal;
+    final cachedStepGoal = _stepGoal > 0 ? _stepGoal : 10000;
+    final safeStepGoal = providerStepGoal > 0 ? providerStepGoal : cachedStepGoal;
     final stepProgress = (_currentSteps / safeStepGoal).clamp(0.0, 1.0);
 
     final safeCalGoal = _calorieGoal <= 0 ? 2000 : _calorieGoal;

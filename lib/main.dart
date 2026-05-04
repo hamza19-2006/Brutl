@@ -118,7 +118,8 @@ class AuthWrapper extends StatelessWidget {
         if (authSnapshot.connectionState == ConnectionState.waiting) {
           return const _BrutlLoadingScreen();
         }
-        final currentUser = authSnapshot.data;
+        final currentUser =
+            FirebaseAuth.instance.currentUser ?? authSnapshot.data;
         if (currentUser == null) {
           return const LoginScreen();
         }
@@ -136,7 +137,9 @@ class AuthWrapper extends StatelessWidget {
             final isProfileComplete =
                 doc != null &&
                 doc.exists &&
-                profileData?['isProfileComplete'] == true;
+                ((profileData?['is_profile_complete'] as bool?) ??
+                    (profileData?['isProfileComplete'] as bool?) ??
+                    false);
 
             if (!isProfileComplete) {
               return const OnboardingScreen();

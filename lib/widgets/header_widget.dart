@@ -141,7 +141,7 @@ class HeaderWidget extends StatelessWidget {
                     'kcal $burnedCalories 🔥',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: const Color(0xFFD0D0D0),
-                      fontSize: 16,
+                      fontSize: 18,
                       fontWeight: FontWeight.w600,
                     ),
                   );

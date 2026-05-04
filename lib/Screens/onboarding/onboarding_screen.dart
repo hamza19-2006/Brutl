@@ -556,7 +556,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       targetProtein: _targetProtein,
       targetCarbs: _targetCarbs,
       targetFats: _targetFats,
-      isProfileComplete: false,
+      isProfileComplete: true,
     );
 
     try {
@@ -568,6 +568,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
       await docRef.set(<String, dynamic>{
         ...brutlUser.toJson(),
+        'workout_split_template': normalizedSplitTemplate,
+        'custom_split_days': finalSplitDays,
         'workout_master_template': workoutMasterTemplate,
         'is_profile_complete': true,
         // Remove legacy camelCase keys so only canonical snake_case remains.

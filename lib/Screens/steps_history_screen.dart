@@ -1,9 +1,11 @@
+import 'dart:async';
+
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../services/local_storage_service.dart';
+import '../services/step_service.dart';
 
 class StepsHistoryScreen extends StatefulWidget {
   const StepsHistoryScreen({super.key});
@@ -14,71 +16,99 @@ class StepsHistoryScreen extends StatefulWidget {
 
 class _StepsHistoryScreenState extends State<StepsHistoryScreen>
     with SingleTickerProviderStateMixin {
-  final LocalStorageService _storage = LocalStorageService();
-
+  // ─── state ───────────────────────────────────────────────────────────────
   /// 0 = current week, -1 = last week, -2, -3
   int _weekOffset = 0;
-
   List<int> _weekData = List.filled(7, 0);
-  bool _isReady = false;
   int _stepGoal = 10000;
+  bool _isReady = false;
+  int? _touchedIndex;
 
-  late final AnimationController _chartAnim;
-  late final Animation<double> _chartCurve;
+  Map<String, int> _history = {};
+
+  // ─── animation ───────────────────────────────────────────────────────────
+  late final AnimationController _animCtrl;
+  late final Animation<double> _animCurve;
+
+  // ─── live step stream ─────────────────────────────────────────────────────
+  StreamSubscription<int>? _stepSub;
 
   @override
   void initState() {
     super.initState();
-    _chartAnim = AnimationController(
+    _animCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 600),
+      duration: const Duration(milliseconds: 550),
     );
-    _chartCurve = CurvedAnimation(
-      parent: _chartAnim,
-      curve: Curves.easeOutCubic,
-    );
+    _animCurve = CurvedAnimation(parent: _animCtrl, curve: Curves.easeOutCubic);
     _init();
   }
 
   Future<void> _init() async {
-    await _storage.initialize();
     final prefs = await SharedPreferences.getInstance();
     _stepGoal = prefs.getInt('step_goal') ?? 10000;
+    _history = await StepService.instance.getStepHistory();
     _loadWeek();
     if (mounted) setState(() => _isReady = true);
-    _chartAnim.forward();
+    _animCtrl.forward();
+
+    // Listen for live step updates so today's bar refreshes in real time
+    _stepSub = StepService.instance.todayStepsStream.listen((steps) {
+      if (!mounted) return;
+      final today = _dateKey(DateTime.now());
+      _history[today] = steps;
+      _loadWeek();
+      setState(() {});
+    });
   }
 
   @override
   void dispose() {
-    _chartAnim.dispose();
+    _stepSub?.cancel();
+    _animCtrl.dispose();
     super.dispose();
   }
 
-  // Week starts on Monday to match Image 2 (Mon-Sun layout)
+  // ─── date helpers ─────────────────────────────────────────────────────────
+
+  /// Monday of the selected week (offset 0 = this week).
   DateTime get _weekStart {
     final now = DateTime.now();
-    final daysFromMonday = (now.weekday - 1) % 7; // Mon=0 … Sun=6
+    final daysFromMon = (now.weekday - 1) % 7;
     final thisMonday = DateTime(
       now.year,
       now.month,
       now.day,
-    ).subtract(Duration(days: daysFromMonday));
+    ).subtract(Duration(days: daysFromMon));
     return thisMonday.add(Duration(days: _weekOffset * 7));
   }
 
   DateTime get _weekEnd => _weekStart.add(const Duration(days: 6));
+
+  String _dateKey(DateTime d) {
+    return '${d.year.toString().padLeft(4, '0')}-'
+        '${d.month.toString().padLeft(2, '0')}-'
+        '${d.day.toString().padLeft(2, '0')}';
+  }
 
   String get _weekLabel {
     final fmt = DateFormat('MMM d');
     return '${fmt.format(_weekStart)} \u2013 ${fmt.format(_weekEnd)}';
   }
 
+  // ─── data ─────────────────────────────────────────────────────────────────
+
   void _loadWeek() {
     _weekData = List.generate(7, (i) {
       final date = _weekStart.add(Duration(days: i));
-      return _storage.getStepsForKey(LocalStorageService.dateKeyFor(date));
+      return _history[_dateKey(date)] ?? 0;
     });
+  }
+
+  int get _weekAvg {
+    final nonZero = _weekData.where((v) => v > 0).toList();
+    if (nonZero.isEmpty) return 0;
+    return (nonZero.reduce((a, b) => a + b) / nonZero.length).round();
   }
 
   void _changeWeek(int delta) {
@@ -86,27 +116,37 @@ class _StepsHistoryScreenState extends State<StepsHistoryScreen>
     if (next < -3 || next > 0) return;
     setState(() {
       _weekOffset = next;
+      _touchedIndex = null;
       _loadWeek();
     });
-    _chartAnim.forward(from: 0);
+    _animCtrl.forward(from: 0);
   }
+
+  // ─── build ────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    final avgSteps = _storage.dailyAverage;
-
     return Scaffold(
-      backgroundColor: const Color(0xFF000000),
+      backgroundColor: const Color(0xFF0A0A0A),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildHeader(avgSteps),
-              const SizedBox(height: 28),
+              _buildHeader(),
+              const SizedBox(height: 24),
               _buildWeekNav(),
-              const SizedBox(height: 28),
-              Expanded(child: _isReady ? _buildChart() : const SizedBox()),
+              const SizedBox(height: 24),
+              Expanded(
+                child: _isReady
+                    ? _buildChart()
+                    : const Center(
+                        child: CircularProgressIndicator(
+                          color: Color(0xFFFF3D00),
+                        ),
+                      ),
+              ),
             ],
           ),
         ),
@@ -114,10 +154,16 @@ class _StepsHistoryScreenState extends State<StepsHistoryScreen>
     );
   }
 
-  Widget _buildHeader(int avgSteps) {
-    final formattedAvg = NumberFormat.decimalPattern().format(avgSteps);
+  // ─── header ───────────────────────────────────────────────────────────────
+
+  Widget _buildHeader() {
+    final avg = _weekAvg;
+    final formattedAvg = NumberFormat.decimalPattern().format(avg);
+
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
+        // Back button
         GestureDetector(
           onTap: () => Navigator.pop(context),
           child: Container(
@@ -141,7 +187,7 @@ class _StepsHistoryScreenState extends State<StepsHistoryScreen>
           style: Theme.of(context).textTheme.headlineSmall?.copyWith(
             color: Colors.white,
             fontWeight: FontWeight.w800,
-            fontSize: 24,
+            fontSize: 26,
           ),
         ),
         const Spacer(),
@@ -160,8 +206,8 @@ class _StepsHistoryScreenState extends State<StepsHistoryScreen>
               '$formattedAvg steps',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: Colors.white,
-                fontWeight: FontWeight.w600,
-                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                fontSize: 15,
               ),
             ),
           ],
@@ -169,6 +215,8 @@ class _StepsHistoryScreenState extends State<StepsHistoryScreen>
       ],
     );
   }
+
+  // ─── week navigation ──────────────────────────────────────────────────────
 
   Widget _buildWeekNav() {
     return Container(
@@ -223,6 +271,8 @@ class _StepsHistoryScreenState extends State<StepsHistoryScreen>
     );
   }
 
+  // ─── bar chart ────────────────────────────────────────────────────────────
+
   Widget _buildChart() {
     const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -230,13 +280,12 @@ class _StepsHistoryScreenState extends State<StepsHistoryScreen>
         .fold(0, (prev, v) => v > prev ? v : prev)
         .toDouble();
     final goalY = _stepGoal.toDouble();
-    // maxY is at least 20% above the highest value or goal, whichever is bigger
     final rawMax = maxRaw > goalY ? maxRaw : goalY;
     final maxY = rawMax <= 0 ? 20000.0 : rawMax * 1.25;
-    final interval = maxY / 5;
+    final interval = (maxY / 5).ceilToDouble();
 
     return AnimatedBuilder(
-      animation: _chartCurve,
+      animation: _animCurve,
       builder: (context, _) {
         return BarChart(
           BarChartData(
@@ -245,13 +294,24 @@ class _StepsHistoryScreenState extends State<StepsHistoryScreen>
             alignment: BarChartAlignment.spaceAround,
             barTouchData: BarTouchData(
               enabled: true,
+              touchCallback: (event, response) {
+                if (!event.isInterestedForInteractions ||
+                    response == null ||
+                    response.spot == null) {
+                  setState(() => _touchedIndex = null);
+                  return;
+                }
+                setState(
+                  () => _touchedIndex = response.spot!.touchedBarGroupIndex,
+                );
+              },
               touchTooltipData: BarTouchTooltipData(
-                tooltipRoundedRadius: 8,
+                tooltipRoundedRadius: 10,
                 tooltipPadding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
+                  horizontal: 12,
+                  vertical: 8,
                 ),
-                getTooltipColor: (_) => const Color(0xFF1E1E1E),
+                getTooltipColor: (_) => Colors.white,
                 getTooltipItem: (group, groupIndex, rod, rodIndex) {
                   final steps = _weekData[group.x];
                   if (steps == 0) return null;
@@ -260,15 +320,15 @@ class _StepsHistoryScreenState extends State<StepsHistoryScreen>
                   return BarTooltipItem(
                     '${NumberFormat.decimalPattern().format(steps)} steps\n',
                     const TextStyle(
-                      color: Color(0xFFFF3D00),
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
+                      color: Color(0xFF111111),
+                      fontWeight: FontWeight.w800,
+                      fontSize: 14,
                     ),
                     children: [
                       TextSpan(
                         text: dateStr,
                         style: const TextStyle(
-                          color: Color(0xFFAAAAAA),
+                          color: Color(0xFF888888),
                           fontWeight: FontWeight.w400,
                           fontSize: 11,
                         ),
@@ -283,7 +343,7 @@ class _StepsHistoryScreenState extends State<StepsHistoryScreen>
               horizontalLines: [
                 HorizontalLine(
                   y: goalY,
-                  color: const Color(0xFFFF3D00).withValues(alpha: 0.55),
+                  color: const Color(0xFFFF3D00).withValues(alpha: 0.6),
                   strokeWidth: 1.5,
                   dashArray: [6, 4],
                   label: HorizontalLineLabel(
@@ -320,10 +380,14 @@ class _StepsHistoryScreenState extends State<StepsHistoryScreen>
                   interval: interval,
                   getTitlesWidget: (value, meta) {
                     if (value >= meta.max) return const SizedBox.shrink();
+                    final k = value / 1000;
+                    final label = k % 1 == 0
+                        ? '${k.toInt()}k'
+                        : '${k.toStringAsFixed(1)}k';
                     return Padding(
                       padding: const EdgeInsets.only(right: 6),
                       child: Text(
-                        '${(value / 1000).toStringAsFixed(1)}k',
+                        label,
                         style: const TextStyle(
                           color: Color(0xFF555555),
                           fontSize: 10,
@@ -342,14 +406,19 @@ class _StepsHistoryScreenState extends State<StepsHistoryScreen>
                     if (idx < 0 || idx >= dayLabels.length) {
                       return const SizedBox.shrink();
                     }
+                    final isTouched = idx == _touchedIndex;
                     return Padding(
                       padding: const EdgeInsets.only(top: 8),
                       child: Text(
                         dayLabels[idx],
-                        style: const TextStyle(
-                          color: Color(0xFF777777),
+                        style: TextStyle(
+                          color: isTouched
+                              ? const Color(0xFFFF6B00)
+                              : const Color(0xFF777777),
                           fontSize: 11,
-                          fontWeight: FontWeight.w500,
+                          fontWeight: isTouched
+                              ? FontWeight.w700
+                              : FontWeight.w500,
                         ),
                       ),
                     );
@@ -367,24 +436,23 @@ class _StepsHistoryScreenState extends State<StepsHistoryScreen>
             borderData: FlBorderData(show: false),
             barGroups: List.generate(7, (i) {
               final raw = _weekData[i].toDouble();
-              final animated = raw * _chartCurve.value;
+              final animated = raw * _animCurve.value;
+              final isTouched = i == _touchedIndex;
+
               return BarChartGroupData(
                 x: i,
                 barRods: [
                   BarChartRodData(
                     toY: animated.clamp(0, maxY),
-                    width: 26,
+                    width: 18,
                     borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(6),
+                      top: Radius.circular(4),
                     ),
-                    gradient: animated > 0
-                        ? const LinearGradient(
-                            begin: Alignment.bottomCenter,
-                            end: Alignment.topCenter,
-                            colors: [Color(0xFFFF3D00), Color(0xFFFF6B00)],
-                          )
-                        : null,
-                    color: animated > 0 ? null : const Color(0xFF1A1A1A),
+                    color: animated > 0
+                        ? (isTouched
+                              ? const Color(0xFFFFAA00)
+                              : const Color(0xFFFF6B00))
+                        : const Color(0xFF1E1E1E),
                   ),
                 ],
               );

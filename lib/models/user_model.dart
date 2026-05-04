@@ -12,10 +12,16 @@ class BrutlUser {
     this.heightUnit = 'cm',
     this.weight = 0.0,
     this.weightUnit = 'kg',
+    this.bodyFatString = '',
+    this.bodyFatAverage = 0.0,
     this.dailySteps = 10000,
     this.bodyGoal = 'Maintenance',
     this.workoutSplitTemplate = 'Push, Pull, Legs, Repeat',
     this.customSplitDays = const [],
+    this.compoundRepMin = 4,
+    this.compoundRepMax = 8,
+    this.isolationRepMin = 8,
+    this.isolationRepMax = 12,
     this.targetCalories = 2000,
     this.maintenanceCalories = 2000,
     this.targetProtein = 150,
@@ -33,10 +39,16 @@ class BrutlUser {
   final String heightUnit;
   final double weight;
   final String weightUnit;
+  final String bodyFatString;
+  final double bodyFatAverage;
   final int dailySteps;
   final String bodyGoal;
   final String workoutSplitTemplate;
   final List<String> customSplitDays;
+  final int compoundRepMin;
+  final int compoundRepMax;
+  final int isolationRepMin;
+  final int isolationRepMax;
   final int targetCalories;
   final int maintenanceCalories;
   final int targetProtein;
@@ -54,10 +66,16 @@ class BrutlUser {
     String? heightUnit,
     double? weight,
     String? weightUnit,
+    String? bodyFatString,
+    double? bodyFatAverage,
     int? dailySteps,
     String? bodyGoal,
     String? workoutSplitTemplate,
     List<String>? customSplitDays,
+    int? compoundRepMin,
+    int? compoundRepMax,
+    int? isolationRepMin,
+    int? isolationRepMax,
     int? targetCalories,
     int? maintenanceCalories,
     int? targetProtein,
@@ -75,10 +93,16 @@ class BrutlUser {
       heightUnit: heightUnit ?? this.heightUnit,
       weight: weight ?? this.weight,
       weightUnit: weightUnit ?? this.weightUnit,
+      bodyFatString: bodyFatString ?? this.bodyFatString,
+      bodyFatAverage: bodyFatAverage ?? this.bodyFatAverage,
       dailySteps: dailySteps ?? this.dailySteps,
       bodyGoal: bodyGoal ?? this.bodyGoal,
       workoutSplitTemplate: workoutSplitTemplate ?? this.workoutSplitTemplate,
       customSplitDays: customSplitDays ?? this.customSplitDays,
+      compoundRepMin: compoundRepMin ?? this.compoundRepMin,
+      compoundRepMax: compoundRepMax ?? this.compoundRepMax,
+      isolationRepMin: isolationRepMin ?? this.isolationRepMin,
+      isolationRepMax: isolationRepMax ?? this.isolationRepMax,
       targetCalories: targetCalories ?? this.targetCalories,
       maintenanceCalories: maintenanceCalories ?? this.maintenanceCalories,
       targetProtein: targetProtein ?? this.targetProtein,
@@ -99,11 +123,23 @@ class BrutlUser {
       'heightUnit': heightUnit,
       'weight': weight,
       'weightUnit': weightUnit,
+      'bodyFatString': bodyFatString,
+      'body_fat_string': bodyFatString,
+      'bodyFatAverage': bodyFatAverage,
+      'body_fat_average': bodyFatAverage,
       'dailySteps': dailySteps,
       'step_goal': dailySteps,
       'bodyGoal': bodyGoal,
       'workoutSplitTemplate': workoutSplitTemplate,
       'customSplitDays': customSplitDays,
+      'compoundRepMin': compoundRepMin,
+      'compoundRepMax': compoundRepMax,
+      'isolationRepMin': isolationRepMin,
+      'isolationRepMax': isolationRepMax,
+      'compound_rep_min': compoundRepMin,
+      'compound_rep_max': compoundRepMax,
+      'isolation_rep_min': isolationRepMin,
+      'isolation_rep_max': isolationRepMax,
       'targetCalories': targetCalories,
       'maintenance_calories': maintenanceCalories,
       'targetProtein': targetProtein,
@@ -124,6 +160,14 @@ class BrutlUser {
       heightUnit: json['heightUnit'] as String? ?? 'cm',
       weight: (json['weight'] as num?)?.toDouble() ?? 0.0,
       weightUnit: json['weightUnit'] as String? ?? 'kg',
+      bodyFatString:
+          json['body_fat_string'] as String? ??
+          json['bodyFatString'] as String? ??
+          '',
+      bodyFatAverage:
+          (json['body_fat_average'] as num?)?.toDouble() ??
+          (json['bodyFatAverage'] as num?)?.toDouble() ??
+          0.0,
       dailySteps:
           (json['dailySteps'] as num?)?.toInt() ??
           (json['step_goal'] as num?)?.toInt() ??
@@ -137,6 +181,22 @@ class BrutlUser {
               ?.map((e) => e as String)
               .toList() ??
           const [],
+      compoundRepMin:
+          (json['compound_rep_min'] as num?)?.toInt() ??
+          (json['compoundRepMin'] as num?)?.toInt() ??
+          4,
+      compoundRepMax:
+          (json['compound_rep_max'] as num?)?.toInt() ??
+          (json['compoundRepMax'] as num?)?.toInt() ??
+          8,
+      isolationRepMin:
+          (json['isolation_rep_min'] as num?)?.toInt() ??
+          (json['isolationRepMin'] as num?)?.toInt() ??
+          8,
+      isolationRepMax:
+          (json['isolation_rep_max'] as num?)?.toInt() ??
+          (json['isolationRepMax'] as num?)?.toInt() ??
+          12,
       targetCalories: (json['targetCalories'] as num?)?.toInt() ?? 2000,
       maintenanceCalories:
           (json['maintenance_calories'] as num?)?.toInt() ??

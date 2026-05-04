@@ -8,6 +8,8 @@ import '../../core/theme/app_text_styles.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/auth_validation_provider.dart';
 import '../../widgets/password_input_field.dart';
+import '../home_screen.dart';
+import '../onboarding/onboarding_screen.dart';
 import 'forgot_password_screen.dart';
 import 'sign_up_screen.dart';
 
@@ -21,6 +23,8 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   late final TextEditingController _emailController;
   late final TextEditingController _passwordController;
+  bool _isEmailLoading = false;
+  bool _isGoogleLoading = false;
 
   @override
   void initState() {
@@ -37,6 +41,10 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _handleLogin() async {
+    if (_isEmailLoading || _isGoogleLoading) {
+      return;
+    }
+
     final validation = context.read<AuthValidationProvider>();
     final authProvider = context.read<BrutlAuthProvider>();
 
@@ -55,41 +63,88 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
-    final success = await authProvider.signInWithEmail(
-      email: email,
-      password: password,
-    );
+    setState(() {
+      _isEmailLoading = true;
+    });
 
-    if (!mounted) {
-      return;
+    try {
+      final success = await authProvider.signInWithEmail(
+        email: email,
+        password: password,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      if (success) {
+        validation.clearLoginError();
+        return;
+      }
+
+      final errorMessage =
+          authProvider.errorMessage ?? 'Login failed. Please try again.';
+      final isWrongPasswordError = _isWrongPasswordError(errorMessage);
+
+      validation.setLoginError(
+        errorMessage,
+        showForgotPasswordLink: isWrongPasswordError,
+      );
+      _showErrorDialog(errorMessage);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isEmailLoading = false;
+        });
+      }
     }
-
-    if (success) {
-      validation.clearLoginError();
-      return;
-    }
-
-    final errorMessage =
-        authProvider.errorMessage ?? 'Login failed. Please try again.';
-    final isWrongPasswordError = _isWrongPasswordError(errorMessage);
-
-    validation.setLoginError(
-      errorMessage,
-      showForgotPasswordLink: isWrongPasswordError,
-    );
-    _showErrorDialog(errorMessage);
   }
 
   Future<void> _handleGoogleSignIn() async {
-    final authProvider = context.read<BrutlAuthProvider>();
-    final success = await authProvider.signInWithGoogle();
-
-    if (!mounted || success) {
+    if (_isEmailLoading || _isGoogleLoading) {
       return;
     }
 
-    _showErrorDialog(
-      authProvider.errorMessage ?? 'Google sign-in failed. Please try again.',
+    final authProvider = context.read<BrutlAuthProvider>();
+    setState(() {
+      _isGoogleLoading = true;
+    });
+
+    try {
+      final result = await authProvider.signInWithGoogleWithResult();
+
+      if (!mounted) {
+        return;
+      }
+
+      if (result.success) {
+        _navigateAfterGoogleAuth(isNewUser: result.isNewUser);
+        return;
+      }
+
+      if (!result.wasCancelled) {
+        _showErrorSnackBar(
+          result.errorMessage ??
+              authProvider.errorMessage ??
+              'Google sign-in failed. Please try again.',
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isGoogleLoading = false;
+        });
+      }
+    }
+  }
+
+  void _navigateAfterGoogleAuth({required bool isNewUser}) {
+    final destination = isNewUser
+        ? const OnboardingScreen()
+        : const HomeScreen();
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute<void>(builder: (_) => destination),
+      (route) => false,
     );
   }
 
@@ -130,6 +185,17 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
+  void _showErrorSnackBar(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text(message),
+        ),
+      );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -142,7 +208,8 @@ class _LoginScreenState extends State<LoginScreen> {
             vertical: AppSpacing.xxl,
           ),
           child: Consumer2<AuthValidationProvider, BrutlAuthProvider>(
-            builder: (context, validation, authProvider, _) {
+            builder: (context, validation, __, _) {
+              final isAnyLoading = _isEmailLoading || _isGoogleLoading;
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -190,11 +257,11 @@ class _LoginScreenState extends State<LoginScreen> {
                         ],
                         const SizedBox(height: AppSpacing.xl),
                         _BrutlGradientButton(
-                          label: authProvider.isLoading
+                          label: _isEmailLoading
                               ? 'Signing In...'
                               : 'Sign In with Email',
-                          isLoading: authProvider.isLoading,
-                          onPressed: authProvider.isLoading
+                          isLoading: _isEmailLoading,
+                          onPressed: isAnyLoading
                               ? null
                               : _handleLogin,
                         ),
@@ -204,7 +271,8 @@ class _LoginScreenState extends State<LoginScreen> {
                         _BrutlSecondaryButton(
                           label: 'Sign In with Google',
                           iconAssetPath: 'assets/Images/google_logo.jpg',
-                          onPressed: authProvider.isLoading
+                          isLoading: _isGoogleLoading,
+                          onPressed: isAnyLoading
                               ? null
                               : _handleGoogleSignIn,
                         ),
@@ -384,11 +452,13 @@ class _BrutlSecondaryButton extends StatelessWidget {
     required this.label,
     required this.iconAssetPath,
     required this.onPressed,
+    this.isLoading = false,
   });
 
   final String label;
   final String iconAssetPath;
   final VoidCallback? onPressed;
+  final bool isLoading;
 
   @override
   Widget build(BuildContext context) {
@@ -408,22 +478,31 @@ class _BrutlSecondaryButton extends StatelessWidget {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Image.asset(
-              iconAssetPath,
-              width: 20,
-              height: 20,
-              errorBuilder: (context, error, stackTrace) => const Icon(
-                Icons.g_mobiledata,
-                size: 22,
-                color: Color(0xFF1A1A1A),
+            if (isLoading)
+              const SizedBox(
+                height: 20,
+                width: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF1A1A1A)),
+                ),
+              )
+            else ...[
+              Image.asset(
+                iconAssetPath,
+                width: 20,
+                height: 20,
+                errorBuilder: (context, error, stackTrace) => const Icon(
+                  Icons.g_mobiledata,
+                  size: 22,
+                  color: Color(0xFF1A1A1A),
+                ),
               ),
-            ),
-            const SizedBox(width: AppSpacing.sm),
+              const SizedBox(width: AppSpacing.sm),
+            ],
             Text(
-              label,
-              style: AppTextStyles.headingSmall(
-                color: const Color(0xFF1A1A1A),
-              ),
+              isLoading ? 'Signing In...' : label,
+              style: AppTextStyles.headingSmall(color: const Color(0xFF1A1A1A)),
             ),
           ],
         ),

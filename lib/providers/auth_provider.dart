@@ -3,6 +3,35 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
+@immutable
+class GoogleAuthResult {
+  const GoogleAuthResult._({
+    required this.success,
+    required this.isNewUser,
+    required this.wasCancelled,
+    this.errorMessage,
+  });
+
+  const GoogleAuthResult.success({required bool isNewUser})
+    : this._(success: true, isNewUser: isNewUser, wasCancelled: false);
+
+  const GoogleAuthResult.cancelled()
+    : this._(success: false, isNewUser: false, wasCancelled: true);
+
+  const GoogleAuthResult.failure(String message)
+    : this._(
+        success: false,
+        isNewUser: false,
+        wasCancelled: false,
+        errorMessage: message,
+      );
+
+  final bool success;
+  final bool isNewUser;
+  final bool wasCancelled;
+  final String? errorMessage;
+}
+
 class BrutlAuthProvider extends ChangeNotifier {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -80,6 +109,11 @@ class BrutlAuthProvider extends ChangeNotifier {
   }
 
   Future<bool> signInWithGoogle() async {
+    final result = await signInWithGoogleWithResult();
+    return result.success;
+  }
+
+  Future<GoogleAuthResult> signInWithGoogleWithResult() async {
     _setLoading(true);
     _setError(null);
     try {
@@ -92,14 +126,19 @@ class BrutlAuthProvider extends ChangeNotifier {
       final idToken = account.authentication.idToken;
 
       if (idToken == null || idToken.isEmpty) {
-        _setError('Unable to authenticate with Google.');
-        return false;
+        const message = 'Unable to authenticate with Google.';
+        _setError(message);
+        return const GoogleAuthResult.failure(message);
       }
 
       final credential = GoogleAuthProvider.credential(idToken: idToken);
       final result = await _auth.signInWithCredential(credential);
       final user = result.user;
       if (user != null) {
+        final userDocRef = _firestore.collection('users').doc(user.uid);
+        final existingDoc = await userDocRef.get();
+        final existedBefore = existingDoc.exists;
+
         await _firestore
             .collection('users')
             .doc(user.uid)
@@ -109,22 +148,38 @@ class BrutlAuthProvider extends ChangeNotifier {
               'displayName': user.displayName,
               'photoUrl': user.photoURL,
               'lastSignInAt': FieldValue.serverTimestamp(),
+              if (!existedBefore) 'createdAt': FieldValue.serverTimestamp(),
             }, SetOptions(merge: true));
+
+        final isNewUser =
+            result.additionalUserInfo?.isNewUser ?? !existedBefore;
+        return GoogleAuthResult.success(isNewUser: isNewUser);
       }
-      return true;
+
+      const message = 'Google sign-in did not return a valid user.';
+      _setError(message);
+      return const GoogleAuthResult.failure(message);
     } on GoogleSignInException catch (error) {
       if (error.code == GoogleSignInExceptionCode.canceled) {
-        _setError('Google sign-in was cancelled.');
-        return false;
+        _setError(null);
+        return const GoogleAuthResult.cancelled();
       }
-      _setError('Google sign-in failed. Please try again.');
-      return false;
+      const message = 'Google sign-in failed. Please try again.';
+      _setError(message);
+      return const GoogleAuthResult.failure(message);
     } on FirebaseAuthException catch (error) {
-      _setError(_mapAuthException(error));
-      return false;
+      final message = _mapAuthException(error);
+      _setError(message);
+      return GoogleAuthResult.failure(message);
+    } on FirebaseException catch (error) {
+      final message = error.message ?? 'Google account sync failed.';
+      _setError(message);
+      return GoogleAuthResult.failure(message);
     } catch (_) {
-      _setError('Unable to sign in with Google right now. Please try again.');
-      return false;
+      const message =
+          'Unable to sign in with Google right now. Please try again.';
+      _setError(message);
+      return const GoogleAuthResult.failure(message);
     } finally {
       _setLoading(false);
     }

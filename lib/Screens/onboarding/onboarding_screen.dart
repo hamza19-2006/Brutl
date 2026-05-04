@@ -18,6 +18,19 @@ class OnboardingScreen extends StatefulWidget {
 
 class _OnboardingScreenState extends State<OnboardingScreen> {
   static const int _defaultStepGoal = 10000;
+  static const int _totalPages = 7;
+  static const int _lastPageIndex = _totalPages - 1;
+  static const int _goalsPageIndex = 4;
+  static const List<String> _bodyFatOptions = <String>[
+    '5% to 10%',
+    '11% to 15%',
+    '16% to 20%',
+    '21% to 25%',
+    '26% to 30%',
+    '31% to 35%',
+    '36% to 40%',
+    '40%+',
+  ];
 
   final PageController _pageController = PageController();
   int _currentPage = 0;
@@ -49,6 +62,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   String _weightUnit = 'kg';
   final _weightCtrl = TextEditingController();
   final _ageCtrl = TextEditingController();
+  String? _bodyFatString;
 
   // --- Page 3: Workout Split ---
   String _splitTemplate = 'Push, Pull, Legs, Repeat';
@@ -62,11 +76,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   double _customDays = 3;
   late List<TextEditingController> _customDayCtrls;
 
-  // --- Page 4: Goals & Activity ---
+  // --- Page 4: Preferences ---
+  RangeValues _compoundRepRange = const RangeValues(4, 8);
+  RangeValues _isolationRepRange = const RangeValues(8, 12);
+
+  // --- Page 5: Goals & Activity ---
   final _stepsCtrl = TextEditingController(text: _defaultStepGoal.toString());
   String _bodyGoal = 'Weight Loss';
 
-  // --- Page 5: Macros ---
+  // --- Page 6: Macros ---
   int _targetCalories = 2000;
   int _targetProtein = 150;
   int _targetCarbs = 200;
@@ -280,12 +298,99 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         : parsedSteps;
   }
 
+  bool get _shouldShowBodyFatHelp =>
+      _gender == 'Male' || _gender == 'Female';
+
+  double? _parseBodyFatAverage(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return null;
+    }
+
+    if (value.trim() == '40%+') {
+      return 42.0;
+    }
+
+    final match = RegExp(r'^(\d+)% to (\d+)%$').firstMatch(value.trim());
+    if (match == null) {
+      return null;
+    }
+
+    final min = double.tryParse(match.group(1) ?? '');
+    final max = double.tryParse(match.group(2) ?? '');
+    if (min == null || max == null) {
+      return null;
+    }
+    return (min + max) / 2;
+  }
+
+  void _showBodyFatHelpDialog() {
+    if (!_shouldShowBodyFatHelp) {
+      return;
+    }
+
+    final imagePath = _gender == 'Female'
+        ? 'assets/Images/Female_BodyFat.jpg'
+        : 'assets/Images/Male_BodyFat.jpg';
+
+    showDialog<void>(
+      context: context,
+      builder: (context) {
+        return Dialog(
+          backgroundColor: const Color(0xFF111111),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                IconButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.arrow_back, color: Colors.white),
+                  padding: EdgeInsets.zero,
+                  visualDensity: VisualDensity.compact,
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  height: 320,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.asset(
+                      imagePath,
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Note: These images are for visual approximation only. Actual body fat percentages may vary.',
+                  style: TextStyle(
+                    color: Color(0xFFFFB4A3),
+                    fontSize: 13,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   double _calculateBmr({
     required double weightKg,
     required double heightCm,
     required int ageYears,
     required String gender,
+    double? bodyFatAverage,
   }) {
+    if (bodyFatAverage != null && bodyFatAverage > 0 && bodyFatAverage < 100) {
+      final leanBodyMassKg = weightKg * (1 - (bodyFatAverage / 100));
+      return 370 + (21.6 * leanBodyMassKg);
+    }
+
     final base = (10 * weightKg) + (6.25 * heightCm) - (5 * ageYears);
     switch (gender) {
       case 'Male':
@@ -304,11 +409,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     final heightCm = _getHeightCm();
     final ageYears = _getAgeYears();
     final stepGoal = _getStepGoal();
+    final bodyFatAverage = _parseBodyFatAverage(_bodyFatString);
     final bmr = _calculateBmr(
       weightKg: weightKg,
       heightCm: heightCm,
       ageYears: ageYears,
       gender: _gender,
+      bodyFatAverage: bodyFatAverage,
     );
     final activityMultiplier = _activityMultiplierForSteps(stepGoal);
     return bmr * activityMultiplier;
@@ -348,11 +455,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     final ageYears = _getAgeYears();
     final stepGoal = _getStepGoal();
     final activityMultiplier = _activityMultiplierForSteps(stepGoal);
+    final bodyFatAverage = _parseBodyFatAverage(_bodyFatString);
     final bmr = _calculateBmr(
       weightKg: weightKg,
       heightCm: heightCm,
       ageYears: ageYears,
       gender: _gender,
+      bodyFatAverage: bodyFatAverage,
     );
     final tdee = bmr * activityMultiplier;
 
@@ -376,6 +485,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     _calculateMacros();
     final maintenanceCalories = _calculateMaintenanceCalories().round();
     final stepGoal = _getStepGoal();
+    final bodyFatAverage = _parseBodyFatAverage(_bodyFatString);
+    final compoundRepMin = _compoundRepRange.start.round();
+    final compoundRepMax = _compoundRepRange.end.round();
+    final isolationRepMin = _isolationRepRange.start.round();
+    final isolationRepMax = _isolationRepRange.end.round();
 
     final customDays = _customDayCtrls.isNotEmpty
         ? _customDayCtrls
@@ -394,10 +508,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       heightUnit: 'cm',
       weight: double.tryParse(_weightCtrl.text) ?? 0.0,
       weightUnit: _weightUnit,
+      bodyFatString: _bodyFatString ?? '',
+      bodyFatAverage: bodyFatAverage ?? 0.0,
       dailySteps: stepGoal,
       bodyGoal: _bodyGoal,
       workoutSplitTemplate: _splitTemplate,
       customSplitDays: customDays,
+      compoundRepMin: compoundRepMin,
+      compoundRepMax: compoundRepMax,
+      isolationRepMin: isolationRepMin,
+      isolationRepMax: isolationRepMax,
       maintenanceCalories: maintenanceCalories,
       targetCalories: _targetCalories,
       targetProtein: _targetProtein,
@@ -450,11 +570,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
 
     // Pre-calculate macros BEFORE entering the macros page so TDEE is visible.
-    if (_currentPage == 3) {
+    if (_currentPage == _goalsPageIndex) {
       _calculateMacros();
     }
 
-    if (_currentPage < 5) {
+    if (_currentPage < _lastPageIndex) {
       if (_pageController.hasClients) {
         _pageController.nextPage(
           duration: const Duration(milliseconds: 300),
@@ -530,6 +650,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       _buildIdentityPage(),
                       _buildBiometricsPage(),
                       _buildSplitPage(),
+                      _buildPreferencesPage(),
                       _buildGoalsPage(),
                       _buildMacrosPage(),
                       _buildReviewPage(),
@@ -550,7 +671,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       height: 4,
       margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       child: Row(
-        children: List.generate(6, (index) {
+        children: List.generate(_totalPages, (index) {
           final isActive = index <= _currentPage;
           return Expanded(
             child: AnimatedContainer(
@@ -570,7 +691,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   Widget _buildBottomBar() {
-    final isLastPage = _currentPage == 5;
+    final isLastPage = _currentPage == _lastPageIndex;
     final isIdentityPage = _currentPage == 0;
     final isNextButtonEnabled =
         !_isSaving &&
@@ -825,6 +946,34 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             hint: '25',
             keyboardType: TextInputType.number,
           ),
+          const SizedBox(height: 20),
+          _buildOptionalTextDropdown(
+            value: _bodyFatString,
+            items: _bodyFatOptions,
+            label: 'Estimated Body Fat %',
+            hint: 'Select a range (optional)',
+            onChanged: (value) {
+              setState(() {
+                _bodyFatString = value;
+              });
+            },
+          ),
+          if (_shouldShowBodyFatHelp) ...[
+            const SizedBox(height: 10),
+            GestureDetector(
+              onTap: _showBodyFatHelpDialog,
+              child: const Text(
+                "Don't Know About Body Fat? Click To See Here!",
+                style: TextStyle(
+                  color: Colors.redAccent,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  decoration: TextDecoration.underline,
+                  decorationColor: Colors.redAccent,
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -957,6 +1106,82 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   // ===================== PAGE 4 =====================
+  Widget _buildPreferencesPage() {
+    final compoundMin = _compoundRepRange.start.round();
+    final compoundMax = _compoundRepRange.end.round();
+    final isolationMin = _isolationRepRange.start.round();
+    final isolationMax = _isolationRepRange.end.round();
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Preferences',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 28,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Select your preferred rep ranges.',
+            style: TextStyle(color: Color(0xFF9A9A9A), fontSize: 16),
+          ),
+          const SizedBox(height: 28),
+          const Text(
+            'Compound Exercises',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '$compoundMin - $compoundMax reps',
+            style: const TextStyle(color: Color(0xFFFF3D00), fontSize: 14),
+          ),
+          RangeSlider(
+            values: _compoundRepRange,
+            min: 1,
+            max: 20,
+            divisions: 19,
+            activeColor: const Color(0xFFFF3D00),
+            labels: RangeLabels('$compoundMin', '$compoundMax'),
+            onChanged: (value) => setState(() => _compoundRepRange = value),
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            'Isolation Exercises',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '$isolationMin - $isolationMax reps',
+            style: const TextStyle(color: Color(0xFFFF3D00), fontSize: 14),
+          ),
+          RangeSlider(
+            values: _isolationRepRange,
+            min: 5,
+            max: 30,
+            divisions: 25,
+            activeColor: const Color(0xFFFF3D00),
+            labels: RangeLabels('$isolationMin', '$isolationMax'),
+            onChanged: (value) => setState(() => _isolationRepRange = value),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ===================== PAGE 5 =====================
   Widget _buildGoalsPage() {
     final goals = ['Weight Loss', 'Body Recomposition', 'Weight Gain'];
     final goalIcons = ['🔥', '⚖️', '💪'];
@@ -1059,7 +1284,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     );
   }
 
-  // ===================== PAGE 5 =====================
+  // ===================== PAGE 6 =====================
   Widget _buildMacrosPage() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
@@ -1076,7 +1301,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Calculated based on Mifflin-St Jeor.',
+            'Calculated with Katch-McArdle (Mifflin fallback).',
             style: TextStyle(color: Color(0xFF9A9A9A), fontSize: 16),
           ),
           const SizedBox(height: 32),
@@ -1468,6 +1693,56 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     );
   }
 
+  Widget _buildOptionalTextDropdown({
+    required String? value,
+    required List<String> items,
+    required ValueChanged<String?> onChanged,
+    required String label,
+    required String hint,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: Color(0xFFD0D0D0),
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1A1A1A),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFF2A2A2A)),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: value,
+              isExpanded: true,
+              dropdownColor: const Color(0xFF1A1A1A),
+              style: const TextStyle(color: Colors.white, fontSize: 16),
+              hint: Text(
+                hint,
+                style: const TextStyle(color: Color(0xFF555555), fontSize: 15),
+              ),
+              items: items
+                  .map(
+                    (entry) =>
+                        DropdownMenuItem<String>(value: entry, child: Text(entry)),
+                  )
+                  .toList(),
+              onChanged: onChanged,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildDropdown({
     required int value,
     required List<int> items,
@@ -1566,6 +1841,19 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   'Weight',
                   '${_weightCtrl.text.trim()} $_weightUnit',
                 ),
+                _buildReviewRow('Age', '${_getAgeYears()}'),
+                _buildReviewRow(
+                  'Body Fat %',
+                  _bodyFatString ?? 'Not provided',
+                ),
+                _buildReviewRow(
+                  'Compound Rep Range',
+                  '${_compoundRepRange.start.round()} - ${_compoundRepRange.end.round()} reps',
+                ),
+                _buildReviewRow(
+                  'Isolation Rep Range',
+                  '${_isolationRepRange.start.round()} - ${_isolationRepRange.end.round()} reps',
+                ),
                 const Divider(color: Color(0xFF2A2A2A), height: 32),
                 _buildReviewRow('Goal', _bodyGoal),
                 const SizedBox(height: 16),
@@ -1599,18 +1887,25 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            label,
-            style: const TextStyle(color: Color(0xFF555555), fontSize: 16),
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(color: Color(0xFF555555), fontSize: 16),
+            ),
           ),
-          Text(
-            value,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              value,
+              textAlign: TextAlign.end,
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ],

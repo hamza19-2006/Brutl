@@ -9,8 +9,9 @@ import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/auth_validation_provider.dart';
-import 'login_screen.dart';
+import '../home_screen.dart';
 import '../onboarding/onboarding_screen.dart';
+import 'login_screen.dart';
 
 class SignUpScreen extends StatefulWidget {
   const SignUpScreen({super.key});
@@ -27,7 +28,11 @@ class _SignUpScreenState extends State<SignUpScreen> {
   bool _isPasswordHidden = true;
   bool _isConfirmPasswordHidden = true;
   bool _showPasswordRules = false;
+  bool _isEmailLoading = false;
+  bool _isGoogleLoading = false;
   final FocusNode _passwordFocusNode = FocusNode();
+
+  bool get _isAnyLoading => _isEmailLoading || _isGoogleLoading;
 
   @override
   void initState() {
@@ -55,9 +60,12 @@ class _SignUpScreenState extends State<SignUpScreen> {
   }
 
   Future<void> _handleSignUp() async {
+    if (_isAnyLoading) {
+      return;
+    }
+
     final validation = context.read<AuthValidationProvider>();
     final authProvider = context.read<BrutlAuthProvider>();
-
     final email = _emailController.text.trim();
     final password = _passwordController.text.trim();
 
@@ -76,49 +84,91 @@ class _SignUpScreenState extends State<SignUpScreen> {
       return;
     }
 
-    final success = await authProvider.signUpWithEmail(
-      email: email,
-      password: password,
-    );
+    setState(() {
+      _isEmailLoading = true;
+    });
 
-    if (!mounted) {
-      return;
-    }
-
-    if (success) {
-      _emailController.clear();
-      _passwordController.clear();
-      _confirmPasswordController.clear();
-      validation.resetValidationState();
-
-      // Fix 6: No popup, direct navigation
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) =>
-              const OnboardingScreen(), // Use OnboardingScreen instead of InfoCollectionScreen
-        ),
+    try {
+      final success = await authProvider.signUpWithEmail(
+        email: email,
+        password: password,
       );
-      return;
-    }
 
-    _showDialog(
-      authProvider.errorMessage ?? 'Sign-up failed. Please try again.',
-      isError: true,
-    );
+      if (!mounted) {
+        return;
+      }
+
+      if (success) {
+        _emailController.clear();
+        _passwordController.clear();
+        _confirmPasswordController.clear();
+        validation.resetValidationState();
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const OnboardingScreen()),
+        );
+        return;
+      }
+
+      _showDialog(
+        authProvider.errorMessage ?? 'Sign-up failed. Please try again.',
+        isError: true,
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isEmailLoading = false;
+        });
+      }
+    }
   }
 
   Future<void> _handleGoogleSignUp() async {
-    final authProvider = context.read<BrutlAuthProvider>();
-    final success = await authProvider.signInWithGoogle();
-
-    if (!mounted || success) {
+    if (_isAnyLoading) {
       return;
     }
 
-    _showDialog(
-      authProvider.errorMessage ?? 'Google sign-up failed. Please try again.',
-      isError: true,
+    final authProvider = context.read<BrutlAuthProvider>();
+
+    setState(() {
+      _isGoogleLoading = true;
+    });
+
+    try {
+      final result = await authProvider.signInWithGoogleWithResult();
+
+      if (!mounted) {
+        return;
+      }
+
+      if (result.success) {
+        _navigateAfterGoogleAuth(isNewUser: result.isNewUser);
+        return;
+      }
+
+      if (!result.wasCancelled) {
+        _showErrorSnackBar(
+          result.errorMessage ??
+              authProvider.errorMessage ??
+              'Google sign-up failed. Please try again.',
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isGoogleLoading = false;
+        });
+      }
+    }
+  }
+
+  void _navigateAfterGoogleAuth({required bool isNewUser}) {
+    final destination = isNewUser
+        ? const OnboardingScreen()
+        : const HomeScreen();
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute<void>(builder: (_) => destination),
+      (route) => false,
     );
   }
 
@@ -180,6 +230,17 @@ class _SignUpScreenState extends State<SignUpScreen> {
     }
   }
 
+  void _showErrorSnackBar(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text(message),
+        ),
+      );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -191,8 +252,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
             horizontal: AppSpacing.xl,
             vertical: AppSpacing.xxl,
           ),
-          child: Consumer2<AuthValidationProvider, BrutlAuthProvider>(
-            builder: (context, validation, authProvider, _) {
+          child: Consumer<AuthValidationProvider>(
+            builder: (context, validation, _) {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -223,8 +284,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
                       children: [
                         _buildEmailInput(),
                         const SizedBox(height: AppSpacing.lg),
-
-                        // Password Field (Bug 4 Fix)
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -281,16 +340,11 @@ class _SignUpScreenState extends State<SignUpScreen> {
                             ),
                           ],
                         ),
-
                         const SizedBox(height: AppSpacing.md),
-
-                        // Password Rules Visibility (Bug 5 Fix)
                         if (_showPasswordRules) ...[
                           _buildPasswordRulesDisplay(validation),
                           const SizedBox(height: AppSpacing.lg),
                         ],
-
-                        // Confirm Password Field (Bug 4 Fix)
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -347,20 +401,18 @@ class _SignUpScreenState extends State<SignUpScreen> {
                             ),
                           ],
                         ),
-
                         const SizedBox(height: AppSpacing.md),
                         if (_passwordController.text.isNotEmpty ||
                             _confirmPasswordController.text.isNotEmpty)
                           _buildPasswordMatchIndicator(validation),
                         const SizedBox(height: AppSpacing.xl),
                         _BrutlGradientButton(
-                          label: authProvider.isLoading
+                          label: _isEmailLoading
                               ? 'Creating Account...'
                               : 'Sign Up with Email',
-                          isLoading: authProvider.isLoading,
-                          onPressed:
-                              validation.isSignUpButtonEnabled &&
-                                  !authProvider.isLoading
+                          isLoading: _isEmailLoading,
+                          onPressed: !_isAnyLoading &&
+                                  validation.isSignUpButtonEnabled
                               ? _handleSignUp
                               : null,
                         ),
@@ -370,9 +422,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
                         _BrutlSecondaryButton(
                           label: 'Sign Up with Google',
                           iconAssetPath: 'assets/Images/google_logo.jpg',
-                          onPressed: authProvider.isLoading
-                              ? null
-                              : _handleGoogleSignUp,
+                          isLoading: _isGoogleLoading,
+                          onPressed: _isAnyLoading ? null : _handleGoogleSignUp,
                         ),
                       ],
                     ),
@@ -387,7 +438,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
                           style: AppTextStyles.bodySmall(),
                         ),
                         GestureDetector(
-                          // Fix 6: Correct routing to LoginScreen
                           onTap: () {
                             Navigator.pushReplacement(
                               context,
@@ -595,11 +645,13 @@ class _BrutlSecondaryButton extends StatelessWidget {
     required this.label,
     required this.iconAssetPath,
     required this.onPressed,
+    this.isLoading = false,
   });
 
   final String label;
   final String iconAssetPath;
   final VoidCallback? onPressed;
+  final bool isLoading;
 
   @override
   Widget build(BuildContext context) {
@@ -619,19 +671,30 @@ class _BrutlSecondaryButton extends StatelessWidget {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Image.asset(
-              iconAssetPath,
-              width: 20,
-              height: 20,
-              errorBuilder: (context, error, stackTrace) => const Icon(
-                Icons.g_mobiledata,
-                size: 22,
-                color: Color(0xFF1A1A1A),
+            if (isLoading)
+              const SizedBox(
+                height: 20,
+                width: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF1A1A1A)),
+                ),
+              )
+            else ...[
+              Image.asset(
+                iconAssetPath,
+                width: 20,
+                height: 20,
+                errorBuilder: (context, error, stackTrace) => const Icon(
+                  Icons.g_mobiledata,
+                  size: 22,
+                  color: Color(0xFF1A1A1A),
+                ),
               ),
-            ),
-            const SizedBox(width: AppSpacing.sm),
+              const SizedBox(width: AppSpacing.sm),
+            ],
             Text(
-              label,
+              isLoading ? 'Signing Up...' : label,
               style: AppTextStyles.headingSmall(color: const Color(0xFF1A1A1A)),
             ),
           ],

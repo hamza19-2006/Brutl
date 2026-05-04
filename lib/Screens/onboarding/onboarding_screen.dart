@@ -181,6 +181,24 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     _splitTemplate = option;
   }
 
+  String _normalizeSplitTemplateName(String option) {
+    // Maps onboarding UI names to standardized template names used throughout the app
+    switch (option) {
+      case 'Push, Pull, Legs, Repeat':
+        return 'Push/Pull/Legs';
+      case 'Bro Split (1 muscle per day)':
+        return 'Bro Split';
+      case 'Upper, Lower, Rest, Repeat':
+        return 'Upper/Lower';
+      case 'Push, Pull, Legs, Upper, Lower':
+        return 'Push, Pull, Legs, Upper, Lower'; // Keep as-is or map to custom
+      case 'Customize Split':
+        return 'Customize Split';
+      default:
+        return option;
+    }
+  }
+
   String? _validateUsername(String value) {
     final trimmed = value.trim();
     if (trimmed.isEmpty) {
@@ -298,8 +316,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         : parsedSteps;
   }
 
-  bool get _shouldShowBodyFatHelp =>
-      _gender == 'Male' || _gender == 'Female';
+  bool get _shouldShowBodyFatHelp => _gender == 'Male' || _gender == 'Female';
 
   double? _parseBodyFatAverage(String? value) {
     if (value == null || value.trim().isEmpty) {
@@ -337,7 +354,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       builder: (context) {
         return Dialog(
           backgroundColor: const Color(0xFF111111),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -356,10 +375,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   height: 320,
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(12),
-                    child: Image.asset(
-                      imagePath,
-                      fit: BoxFit.contain,
-                    ),
+                    child: Image.asset(imagePath, fit: BoxFit.contain),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -491,12 +507,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     final isolationRepMin = _isolationRepRange.start.round();
     final isolationRepMax = _isolationRepRange.end.round();
 
+    // Ensure consistent split data
     final customDays = _customDayCtrls.isNotEmpty
         ? _customDayCtrls
               .map((e) => e.text.trim())
               .where((e) => e.isNotEmpty)
               .toList()
         : <String>[];
+
+    // Normalize split template name for consistency across templates, master template, and custom split days
+    final normalizedSplitTemplate = _normalizeSplitTemplateName(_splitTemplate);
 
     final brutlUser = BrutlUser(
       uid: user.uid,
@@ -512,7 +532,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       bodyFatAverage: bodyFatAverage ?? 0.0,
       dailySteps: stepGoal,
       bodyGoal: _bodyGoal,
-      workoutSplitTemplate: _splitTemplate,
+      workoutSplitTemplate: normalizedSplitTemplate,
       customSplitDays: customDays,
       compoundRepMin: compoundRepMin,
       compoundRepMax: compoundRepMax,
@@ -531,8 +551,20 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           .collection('users')
           .doc(user.uid);
 
-      await docRef.set(brutlUser.toJson(), SetOptions(merge: true));
-      await docRef.update({'isProfileComplete': true});
+      final workoutMasterTemplate = customDays.isEmpty
+          ? _splitDefaultsForOption(_splitTemplate)
+          : customDays;
+
+      await docRef.set(<String, dynamic>{
+        ...brutlUser.toJson(),
+        'workout_master_template': workoutMasterTemplate,
+        'is_profile_complete': true,
+        // Remove legacy camelCase split/profile keys so only canonical snake_case remains.
+        'workoutSplitTemplate': FieldValue.delete(),
+        'workoutMasterTemplate': FieldValue.delete(),
+        'customSplitDays': FieldValue.delete(),
+        'isProfileComplete': FieldValue.delete(),
+      }, SetOptions(merge: true));
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt('step_goal', brutlUser.dailySteps);
@@ -568,7 +600,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         ),
       );
   }
-
 
   String? _validationErrorForCurrentPage() {
     if (_currentPage == 0) {
@@ -1794,8 +1825,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               ),
               items: items
                   .map(
-                    (entry) =>
-                        DropdownMenuItem<String>(value: entry, child: Text(entry)),
+                    (entry) => DropdownMenuItem<String>(
+                      value: entry,
+                      child: Text(entry),
+                    ),
                   )
                   .toList(),
               onChanged: onChanged,
@@ -1905,10 +1938,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   '${_weightCtrl.text.trim()} $_weightUnit',
                 ),
                 _buildReviewRow('Age', '${_getAgeYears()}'),
-                _buildReviewRow(
-                  'Body Fat %',
-                  _bodyFatString ?? 'Not provided',
-                ),
+                _buildReviewRow('Body Fat %', _bodyFatString ?? 'Not provided'),
                 _buildReviewRow(
                   'Compound Rep Range',
                   '${_compoundRepRange.start.round()} - ${_compoundRepRange.end.round()} reps',

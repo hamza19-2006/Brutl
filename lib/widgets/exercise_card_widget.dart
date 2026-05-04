@@ -16,12 +16,13 @@ class ExerciseCardWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final repsDisplay = exercise.reps.trim().isEmpty ? '--' : exercise.reps;
-
-    final weightDisplay = (exercise.weight <= 0)
+    final categoryDisplay = exercise.categoryType.trim().isEmpty
         ? '--'
-        : exercise.weight % 1 == 0
-        ? exercise.weight.toStringAsFixed(0)
-        : exercise.weight.toString();
+        : exercise.categoryType;
+
+    final weightDisplay = exercise.weight.trim().isEmpty
+        ? '--'
+        : exercise.weight;
 
     final unit = exercise.weightUnit.trim().isEmpty
         ? 'Kg'
@@ -63,7 +64,7 @@ class ExerciseCardWidget extends StatelessWidget {
                       'Sets: ${exercise.sets}',
                       style: const TextStyle(
                         color: Color(0xFF888888),
-                        fontSize: 14,
+                        fontSize: 13,
                         fontWeight: FontWeight.w400,
                       ),
                     ),
@@ -72,7 +73,16 @@ class ExerciseCardWidget extends StatelessWidget {
                       'Reps: $repsDisplay',
                       style: const TextStyle(
                         color: Color(0xFF888888),
-                        fontSize: 14,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Type: $categoryDisplay',
+                      style: const TextStyle(
+                        color: Color(0xFF888888),
+                        fontSize: 13,
                         fontWeight: FontWeight.w400,
                       ),
                     ),

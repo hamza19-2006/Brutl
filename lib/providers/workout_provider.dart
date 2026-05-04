@@ -49,6 +49,7 @@ class WorkoutProvider extends ChangeNotifier {
   final int _totalProgramWeeks = 4;
   String _selectedWorkoutSplit = _defaultWorkoutSplit;
   List<String> _masterTemplate = const <String>[];
+  List<String> _customSplitDays = const <String>[];
   Map<String, brutl.ProgramDayModel> _selectedWeekOverrides =
       <String, brutl.ProgramDayModel>{};
   List<brutl.ProgramDayModel> _programDays = <brutl.ProgramDayModel>[];
@@ -134,7 +135,32 @@ class WorkoutProvider extends ChangeNotifier {
   String workoutNameForWeekday(int weekday) =>
       _workoutPlan.workoutForWeekday(weekday);
 
-  String get todayWorkoutName => workoutNameForWeekday(DateTime.now().weekday);
+  String get todayWorkoutName {
+    final now = DateTime.now();
+    final weekday = now.weekday;
+
+    // If user has custom split days configured, map weekday (1-7) to split index (0-6).
+    if (_customSplitDays.isNotEmpty) {
+      if (weekday - 1 < _customSplitDays.length) {
+        return _customSplitDays[weekday - 1];
+      } else {
+        // Day exceeds configured training days, so render explicit rest-day subtitle text.
+        const dayNames = <String>[
+          'Monday',
+          'Tuesday',
+          'Wednesday',
+          'Thursday',
+          'Friday',
+          'Saturday',
+          'Sunday',
+        ];
+        return '${dayNames[weekday - 1]} Rest';
+      }
+    }
+
+    // Fallback to the plan-based workout name
+    return workoutNameForWeekday(weekday);
+  }
 
   Future<void> initialize() async {
     if (_isInitialized) {
@@ -209,6 +235,15 @@ class WorkoutProvider extends ChangeNotifier {
                     (data['workoutSplit'] as String?) ??
                     (data['split'] as String?) ??
                     _selectedWorkoutSplit;
+                
+                // Extract custom split days from Firestore
+                final customSplitDays = <String>[];
+                final rawCustomSplitDays = data['custom_split_days'] as List<dynamic>?;
+                if (rawCustomSplitDays != null) {
+                  customSplitDays.addAll(
+                    rawCustomSplitDays.map((e) => e.toString())
+                  );
+                }
 
                 _user = _user.copyWith(
                   name: displayName.isNotEmpty ? displayName : _user.name,
@@ -221,6 +256,7 @@ class WorkoutProvider extends ChangeNotifier {
                 _currentDailyCaloriesBurned = remoteCalories
                     .clamp(0, 5000)
                     .toDouble();
+                _customSplitDays = customSplitDays;
                 _setWorkoutSplit(remoteSplit, persist: true);
                 unawaited(prefs.setString(_userPrefsKey, _user.toRawJson()));
                 notifyListeners();

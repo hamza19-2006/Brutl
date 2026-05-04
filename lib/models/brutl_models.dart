@@ -1,7 +1,5 @@
 import 'package:flutter/foundation.dart';
 
-import '../utils/formatters.dart';
-
 enum WorkoutSplitType { chestTriceps, backBiceps, legsShoulders }
 
 extension WorkoutSplitTypeX on WorkoutSplitType {
@@ -86,6 +84,7 @@ class ExerciseModel {
     required this.sets,
     required this.reps,
     required this.weight,
+    required this.categoryType,
     this.weightUnit = 'Kg',
     this.isSynced = false,
     this.splitName = '',
@@ -95,11 +94,12 @@ class ExerciseModel {
   final String name;
   final int sets;
   final String reps;
-  final double weight;
+  final String weight;
+  final String categoryType;
   final String weightUnit;
   final bool isSynced;
   final String splitName;
-  String get weightDisplay => formatWeight(weight, weightUnit);
+  String get weightDisplay => weight.trim();
 
   double get averageReps {
     final parsedReps = repValues;
@@ -123,7 +123,8 @@ class ExerciseModel {
     String? name,
     int? sets,
     String? reps,
-    double? weight,
+    String? weight,
+    String? categoryType,
     String? weightUnit,
     bool? isSynced,
     String? splitName,
@@ -134,6 +135,7 @@ class ExerciseModel {
       sets: sets ?? this.sets,
       reps: reps ?? this.reps,
       weight: weight ?? this.weight,
+      categoryType: categoryType ?? this.categoryType,
       weightUnit: weightUnit ?? this.weightUnit,
       isSynced: isSynced ?? this.isSynced,
       splitName: splitName ?? this.splitName,
@@ -147,6 +149,8 @@ class ExerciseModel {
       'sets': sets,
       'reps': reps,
       'weight': weight,
+      'categoryType': categoryType,
+      'category_type': categoryType,
       'weightUnit': weightUnit,
       'weightDisplay': weightDisplay,
       'isSynced': isSynced,
@@ -156,9 +160,7 @@ class ExerciseModel {
 
   factory ExerciseModel.fromJson(Map<String, dynamic> json) {
     final setsSource = json['sets'];
-    final weightSource = json['weight'];
-    final weightUnitSource = json['weightUnit'];
-    final weightDisplaySource = json['weightDisplay'];
+    final categoryTypeSource = json['categoryType'] ?? json['category_type'];
     final repsSource = json['reps'];
     final normalizedReps = switch (repsSource) {
       String value => value.trim(),
@@ -171,10 +173,10 @@ class ExerciseModel {
       _ => '',
     };
 
-    final parsedWeight = _parseWeight(
-      weightSource,
-      weightUnitSource,
-      weightDisplaySource,
+    final parsedWeight = _parseWeightData(
+      json['weight'],
+      json['weightUnit'],
+      json['weightDisplay'],
     );
 
     return ExerciseModel(
@@ -184,67 +186,83 @@ class ExerciseModel {
           ? setsSource.toInt()
           : int.tryParse(setsSource?.toString() ?? '') ?? 1,
       reps: normalizedReps.isEmpty ? '10' : normalizedReps,
-      weight: parsedWeight.value,
-      weightUnit: parsedWeight.unit,
+      weight: parsedWeight.weight,
+      categoryType: categoryTypeSource?.toString().trim().isNotEmpty == true
+          ? categoryTypeSource.toString().trim()
+          : '',
+      weightUnit: parsedWeight.weightUnit,
       isSynced: json['isSynced'] as bool? ?? false,
       splitName: json['splitName']?.toString() ?? '',
     );
   }
 }
 
-class _ParsedWeight {
-  const _ParsedWeight({required this.value, required this.unit});
+class _ParsedWeightData {
+  const _ParsedWeightData({required this.weight, required this.weightUnit});
 
-  final double value;
-  final String unit;
+  final String weight;
+  final String weightUnit;
 }
 
-_ParsedWeight _parseWeight(
+_ParsedWeightData _parseWeightData(
   dynamic weightSource,
   dynamic unitSource,
   dynamic displaySource,
 ) {
   const defaultUnit = 'Kg';
-  String unit = unitSource?.toString() ?? defaultUnit;
-  double value = 0;
+  var resolvedUnit = unitSource?.toString().trim() ?? '';
+  var resolvedWeight = _extractWeightText(weightSource);
 
-  if (weightSource is num) {
-    // Preferred path: numeric weight value.
-    value = weightSource.toDouble(); // Convert numeric weight.
-    return _ParsedWeight(value: value, unit: unit); // Return parsed weight.
+  if (resolvedWeight.isEmpty) {
+    resolvedWeight = _extractWeightText(displaySource);
   }
 
-  final rawValue =
-      weightSource?.toString() ?? ''; // Fallback: string weight value.
-  final rawValueParts = rawValue.trim().split(
-    RegExp(r'\s+'),
-  ); // Split weight/unit.
-  if (rawValueParts.isNotEmpty && rawValueParts.first.isNotEmpty) {
-    // Parse numeric portion.
-    value = double.tryParse(rawValueParts.first) ?? 0; // Parse weight value.
+  if (resolvedUnit.isEmpty) {
+    resolvedUnit = _extractUnitText(weightSource);
   }
-  if (rawValueParts.length > 1 && unitSource == null) {
-    // Extract unit from weight string.
-    unit = rawValueParts
-        .sublist(1)
-        .join(' ')
-        .trim(); // Use unit from weight string.
+  if (resolvedUnit.isEmpty) {
+    resolvedUnit = _extractUnitText(displaySource);
+  }
+  if (resolvedUnit.isEmpty) {
+    resolvedUnit = defaultUnit;
   }
 
-  final rawDisplay =
-      displaySource?.toString() ?? ''; // Fallback: display field.
-  final displayParts = rawDisplay.trim().split(
-    RegExp(r'\s+'),
-  ); // Split display value.
-  if (displayParts.length > 1 && unitSource == null) {
-    // Extract unit from display.
-    unit = displayParts.sublist(1).join(' ').trim(); // Use unit from display.
-  }
-  if (unit.isEmpty) {
-    unit = defaultUnit;
+  if (resolvedWeight.isEmpty) {
+    resolvedWeight = '0';
   }
 
-  return _ParsedWeight(value: value, unit: unit);
+  return _ParsedWeightData(weight: resolvedWeight, weightUnit: resolvedUnit);
+}
+
+String _extractWeightText(dynamic source) {
+  if (source == null) return '';
+
+  if (source is num) {
+    final value = source.toDouble();
+    return value % 1 == 0 ? value.toStringAsFixed(0) : value.toString();
+  }
+
+  final raw = source.toString().trim();
+  if (raw.isEmpty) return '';
+
+  final match = RegExp(r'\d+(?:[\d., ]*\d)?').firstMatch(raw);
+  if (match == null) return '';
+
+  return match.group(0)?.trim() ?? '';
+}
+
+String _extractUnitText(dynamic source) {
+  if (source == null) return '';
+
+  final raw = source.toString().trim();
+  if (raw.isEmpty) return '';
+
+  final weightText = _extractWeightText(raw);
+  if (weightText.isEmpty) {
+    return raw;
+  }
+
+  return raw.replaceFirst(weightText, '').trim();
 }
 
 @immutable

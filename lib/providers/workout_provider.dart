@@ -29,13 +29,7 @@ class WorkoutProvider extends ChangeNotifier {
           'Pull',
           'Legs',
         ],
-        'Bro Split': <String>[
-          'Chest',
-          'Back',
-          'Legs',
-          'Shoulders',
-          'Arms',
-        ],
+        'Bro Split': <String>['Chest', 'Back', 'Legs', 'Shoulders', 'Arms'],
       };
 
   UserModel _user = const UserModel(
@@ -101,7 +95,8 @@ class WorkoutProvider extends ChangeNotifier {
   int get selectedWeek => _selectedWeek;
   int get totalProgramWeeks => _totalProgramWeeks;
   String get selectedWorkoutSplit => _selectedWorkoutSplit;
-  List<String> get customSplitDays => List<String>.unmodifiable(_customSplitDays);
+  List<String> get customSplitDays =>
+      List<String>.unmodifiable(_customSplitDays);
   List<String> get activeSplitDays {
     if (_customSplitDays.isNotEmpty) {
       return List<String>.unmodifiable(_customSplitDays);
@@ -419,7 +414,8 @@ class WorkoutProvider extends ChangeNotifier {
             await prefs.setString('brutl_workout_split', _selectedWorkoutSplit);
             return;
           }
-          if (remoteCustomSplitDays != null && remoteCustomSplitDays.isNotEmpty) {
+          if (remoteCustomSplitDays != null &&
+              remoteCustomSplitDays.isNotEmpty) {
             _customSplitDays = remoteCustomSplitDays;
             _masterTemplate = remoteCustomSplitDays;
             _selectedWorkoutSplit =

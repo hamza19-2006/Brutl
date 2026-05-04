@@ -50,7 +50,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   static const Map<String, String> _genderLabels = {
     'Male': 'Male ♂️',
     'Female': 'Female ♀️',
-    'Other': 'Other',
+    'Other': 'Other 🏳️‍🌈',
   };
 
   // --- Page 2: Biometrics ---

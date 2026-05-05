@@ -146,8 +146,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         return <String>[
           'Chest & Triceps',
           'Back & Biceps',
-          'Legs & Shoulders'
-              'Upper',
+          'Legs & Shoulders',
+          'Upper',
           'Lower',
         ];
       case 'Customize Split':

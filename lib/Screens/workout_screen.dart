@@ -1,12 +1,15 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/workout_nutrition_provider.dart';
 import '../providers/workout_provider.dart';
 import '../providers/nutrition_service.dart';
+import '../services/ai_meal_service.dart';
 import '../widgets/macro_dashboard_card.dart';
 import '../widgets/workout_card_widget.dart';
 import '../models/brutl_models.dart';
@@ -426,15 +429,31 @@ class _NutritionLogSheet extends StatefulWidget {
 }
 
 class _NutritionLogSheetState extends State<_NutritionLogSheet> {
+  final ImagePicker _imagePicker = ImagePicker();
   final TextEditingController _calCtrl = TextEditingController();
   final TextEditingController _carbCtrl = TextEditingController();
   final TextEditingController _proCtrl = TextEditingController();
   final TextEditingController _fatCtrl = TextEditingController();
   bool _isSaving = false;
+  bool _isScanning = false;
+  int _scanPhase = 0;
   String? _calorieError;
+  Timer? _scanPhaseOneTimer;
+  Timer? _scanPhaseTwoTimer;
+
+  static const Duration _scanPhaseOneDuration = Duration(seconds: 2);
+  static const Duration _scanPhaseTwoDuration = Duration(seconds: 5);
+
+  static const List<String> _scanMessages = [
+    '🚀 Sending image securely...',
+    '🧠 AI Analyzing food...',
+    '📊 Extracting Macros...',
+  ];
 
   @override
   void dispose() {
+    _scanPhaseOneTimer?.cancel();
+    _scanPhaseTwoTimer?.cancel();
     _calCtrl.dispose();
     _carbCtrl.dispose();
     _proCtrl.dispose();
@@ -472,6 +491,8 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
                   ),
                 ),
                 const SizedBox(height: 16),
+                _buildScanButton(),
+                const SizedBox(height: 16),
                 Text(
                   widget.meal.name,
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
@@ -503,9 +524,9 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
                 SizedBox(
                   width: double.infinity,
                   child: Opacity(
-                    opacity: _isSaving ? 0.55 : 1.0,
+                    opacity: (_isSaving || _isScanning) ? 0.55 : 1.0,
                     child: ElevatedButton(
-                      onPressed: _isSaving ? null : _handleLog,
+                      onPressed: (_isSaving || _isScanning) ? null : _handleLog,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFFFF3D00),
                         foregroundColor: Colors.white,
@@ -526,6 +547,145 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
                 ),
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _startAiScan() async {
+    if (_isSaving || _isScanning) {
+      return;
+    }
+
+    final XFile? image = await _imagePicker.pickImage(
+      source: ImageSource.camera,
+      imageQuality: 85,
+    );
+    if (image == null || !mounted) {
+      return;
+    }
+
+    final Uint8List imageBytes = await image.readAsBytes();
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _isScanning = true;
+      _scanPhase = 0;
+      _calorieError = null;
+    });
+
+    _scanPhaseOneTimer?.cancel();
+    _scanPhaseTwoTimer?.cancel();
+    _scanPhaseOneTimer = Timer(_scanPhaseOneDuration, () {
+      if (mounted && _isScanning) {
+        setState(() => _scanPhase = 1);
+      }
+    });
+    _scanPhaseTwoTimer = Timer(_scanPhaseTwoDuration, () {
+      if (mounted && _isScanning) {
+        setState(() => _scanPhase = 2);
+      }
+    });
+
+    final result = await analyzeMeal(imageBytes);
+
+    _scanPhaseOneTimer?.cancel();
+    _scanPhaseTwoTimer?.cancel();
+
+    if (!mounted) {
+      return;
+    }
+
+    if (result == null) {
+      setState(() => _isScanning = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Could not analyze image. Ensure the food is clearly visible and well-lit, then try again.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isScanning = false;
+      _calCtrl.text = result['kcal']?.toString() ?? '';
+      _carbCtrl.text = result['carbs']?.toString() ?? '';
+      _proCtrl.text = result['protein']?.toString() ?? '';
+      _fatCtrl.text = result['fat']?.toString() ?? '';
+    });
+  }
+
+  Widget _buildScanButton() {
+    if (_isScanning) {
+      return SizedBox(
+        width: double.infinity,
+        child: OutlinedButton(
+          onPressed: null,
+          style: OutlinedButton.styleFrom(
+            foregroundColor: const Color(0xFFFF3D00),
+            side: const BorderSide(color: Color(0xFFFF3D00), width: 1.5),
+            backgroundColor: const Color(0xFFFF3D00).withValues(alpha: 0.08),
+            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 250),
+            child: Column(
+              key: ValueKey<int>(_scanPhase),
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.4,
+                    color: Color(0xFFFF3D00),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  _scanMessages[_scanPhase],
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: _startAiScan,
+        icon: const Text('📸', style: TextStyle(fontSize: 18)),
+        label: const Text(
+          'Scan with AI',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.3,
+          ),
+        ),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: const Color(0xFFFF3D00),
+          side: const BorderSide(color: Color(0xFFFF3D00), width: 1.5),
+          backgroundColor: const Color(0xFFFF3D00).withValues(alpha: 0.04),
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
           ),
         ),
       ),

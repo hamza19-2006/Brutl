@@ -167,10 +167,6 @@ class _MealFlowSheetState extends State<_MealFlowSheet> {
       _scanPhase = 0;
     });
 
-    // Two independent timers fire at absolute offsets from scan start:
-    //   t=2 s  → phase 1 "🧠 AI Analyzing food..."
-    //   t=5 s  → phase 2 "📊 Extracting Macros..."
-    // This matches the spec: 0-2 s / 2-5 s / 5+ s windows.
     _phaseOneTimer?.cancel();
     _phaseTwoTimer?.cancel();
     _phaseOneTimer = Timer(_phaseOneDuration, () {
@@ -188,9 +184,22 @@ class _MealFlowSheetState extends State<_MealFlowSheet> {
     if (!mounted) return;
 
     if (result != null) {
+      // 1. Automatically save the parsed calories to the provider
+      final provider = context.read<WorkoutNutritionProvider>();
+      final kcal = result['kcal'] as int? ?? 0;
+
+      await provider.updateMealCalories(
+        mealName: widget.mealName,
+        calories: kcal,
+      );
+
+      if (!mounted) return;
+
+      // 2. Switch UI to show macros immediately and fill the boxes
       setState(() {
         _isScanning = false;
-        _calorieController.text = result['kcal'].toString();
+        _showMacroInput = true; // Automatically jump to macro view
+        _calorieController.text = kcal.toString();
         _carbsController.text = result['carbs'].toString();
         _proteinController.text = result['protein'].toString();
         _fatsController.text = result['fat'].toString();
@@ -310,6 +319,11 @@ class _MealFlowSheetState extends State<_MealFlowSheet> {
                   ),
                 ),
                 const SizedBox(height: 16),
+
+                // Moved the Scan Button UP so it is always visible first
+                _buildScanButton(),
+                const SizedBox(height: 16),
+
                 if (!_showMacroInput) ...[
                   Text(
                     widget.mealName,
@@ -318,8 +332,6 @@ class _MealFlowSheetState extends State<_MealFlowSheet> {
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  _buildScanButton(),
                   const SizedBox(height: 14),
                   TextField(
                     controller: _calorieController,

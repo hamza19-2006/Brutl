@@ -4,4 +4,14 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!--
+      App Check (Debug Provider)
+      Your debug token is registered in Firebase Console and is used only for debug builds.
+    -->
+    <application>
+        <meta-data
+            android:name="com.google.firebase.appcheck.debug_token"
+            android:value="42C48404-1445-4A9D-8F62-CAD28CBFEC89" />
+    </application>
 </manifest>

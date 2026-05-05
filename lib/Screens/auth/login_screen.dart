@@ -118,7 +118,8 @@ class _LoginScreenState extends State<LoginScreen> {
       }
 
       if (result.success) {
-        _navigateAfterGoogleAuth(isNewUser: result.isNewUser);
+        // Keep loader active during navigation — don't reset it here
+        await _navigateAfterGoogleAuth(isNewUser: result.isNewUser);
         return;
       }
 
@@ -130,7 +131,8 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       }
     } finally {
-      if (mounted) {
+      if (mounted && !_isGoogleLoading) {
+        // Only reset if we haven't already navigated
         setState(() {
           _isGoogleLoading = false;
         });
@@ -138,14 +140,18 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  void _navigateAfterGoogleAuth({required bool isNewUser}) {
+  Future<void> _navigateAfterGoogleAuth({required bool isNewUser}) async {
     final destination = isNewUser
         ? const OnboardingScreen()
         : const HomeScreen();
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute<void>(builder: (_) => destination),
-      (route) => false,
-    );
+
+    // Navigate while loader is still active
+    if (mounted) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute<void>(builder: (_) => destination),
+        (route) => false,
+      );
+    }
   }
 
   bool _isWrongPasswordError(String message) {
@@ -189,10 +195,7 @@ class _LoginScreenState extends State<LoginScreen> {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
-        SnackBar(
-          behavior: SnackBarBehavior.floating,
-          content: Text(message),
-        ),
+        SnackBar(behavior: SnackBarBehavior.floating, content: Text(message)),
       );
   }
 
@@ -261,9 +264,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               ? 'Signing In...'
                               : 'Sign In with Email',
                           isLoading: _isEmailLoading,
-                          onPressed: isAnyLoading
-                              ? null
-                              : _handleLogin,
+                          onPressed: isAnyLoading ? null : _handleLogin,
                         ),
                         const SizedBox(height: AppSpacing.lg),
                         _buildOrDivider(),
@@ -272,9 +273,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           label: 'Sign In with Google',
                           iconAssetPath: 'assets/Images/google_logo.jpg',
                           isLoading: _isGoogleLoading,
-                          onPressed: isAnyLoading
-                              ? null
-                              : _handleGoogleSignIn,
+                          onPressed: isAnyLoading ? null : _handleGoogleSignIn,
                         ),
                       ],
                     ),

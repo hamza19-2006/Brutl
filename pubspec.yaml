@@ -46,12 +46,20 @@ dependencies:
   firebase_core: ^3.13.0
   firebase_auth: ^5.5.3
   cloud_firestore: ^5.6.7
+  
+  # AI (Vertex AI in Firebase / Gemini)
+  firebase_vertexai: ^1.5.0
+
+  # Security (App Check)
+  firebase_app_check: ^0.3.2+5
+
   flutter_animate: ^4.2.0
   google_sign_in: ^7.2.0
   fl_chart: ^0.70.2
   permission_handler: ^11.3.1
   workmanager: ^0.9.0
   http: ^1.2.2
+  image_picker: ^1.1.2
 
 dev_dependencies:
   flutter_test:

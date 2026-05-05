@@ -140,6 +140,12 @@ class BrutlAuthProvider extends ChangeNotifier {
         final existingDoc = await userDocRef.get();
         final existedBefore = existingDoc.exists;
 
+        // Check if user is new before any profile data exists
+        final isNewUser =
+            result.additionalUserInfo?.isNewUser ?? !existedBefore;
+
+        // For new users, ensure is_profile_complete is false
+        // For returning users, preserve their existing profile state
         await _firestore
             .collection('users')
             .doc(user.uid)
@@ -149,6 +155,7 @@ class BrutlAuthProvider extends ChangeNotifier {
               'display_name': user.displayName,
               'photo_url': user.photoURL,
               'last_sign_in_at': FieldValue.serverTimestamp(),
+              if (isNewUser) 'is_profile_complete': false,
               if (!existedBefore) 'created_at': FieldValue.serverTimestamp(),
               'displayName': FieldValue.delete(),
               'photoUrl': FieldValue.delete(),
@@ -156,8 +163,6 @@ class BrutlAuthProvider extends ChangeNotifier {
               'createdAt': FieldValue.delete(),
             }, SetOptions(merge: true));
 
-        final isNewUser =
-            result.additionalUserInfo?.isNewUser ?? !existedBefore;
         return GoogleAuthResult.success(isNewUser: isNewUser);
       }
 

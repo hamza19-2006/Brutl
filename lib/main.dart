@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
@@ -11,6 +10,7 @@ import 'Screens/auth/login_screen.dart';
 import 'Screens/home_screen.dart';
 import 'Screens/onboarding/onboarding_screen.dart';
 import 'core/theme/app_theme.dart';
+import 'services/firebase_bootstrap.dart';
 import 'providers/auth_provider.dart';
 import 'providers/auth_validation_provider.dart';
 import 'providers/health_provider.dart';
@@ -19,7 +19,7 @@ import 'providers/workout_provider.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
+  await FirebaseBootstrap.initialize();
   runApp(const BrutlAppBootstrap());
 }
 
@@ -132,8 +132,16 @@ class AuthWrapper extends StatelessWidget {
             if (profileSnapshot.connectionState == ConnectionState.waiting) {
               return const _BrutlLoadingScreen();
             }
+
+            // Handle errors gracefully
+            if (profileSnapshot.hasError) {
+              return const _BrutlLoadingScreen();
+            }
+
             final doc = profileSnapshot.data;
             final profileData = doc?.data();
+
+            // Check for profile completion flag — prioritize new field name
             final isProfileComplete =
                 doc != null &&
                 doc.exists &&
@@ -141,9 +149,17 @@ class AuthWrapper extends StatelessWidget {
                     (profileData?['isProfileComplete'] as bool?) ??
                     false);
 
+            // For brand new users with no profile data, route to onboarding
+            if (doc == null || !doc.exists) {
+              return const OnboardingScreen();
+            }
+
+            // If profile is not complete, show onboarding
             if (!isProfileComplete) {
               return const OnboardingScreen();
             }
+
+            // Profile complete, show home
             return const HomeScreen();
           },
         );

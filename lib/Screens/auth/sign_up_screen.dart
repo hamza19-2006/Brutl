@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
@@ -26,6 +25,8 @@ class SignUpScreen extends StatefulWidget {
 class _SignUpScreenState extends State<SignUpScreen> {
   static const String _otpWebhookUrl =
       'https://n8n.hamza-systems.tech/webhook/otp';
+  static const String _verifyOtpWebhookUrl =
+      'https://n8n.hamza-systems.tech/webhook/verify-otp';
 
   late final TextEditingController _emailController;
   late final TextEditingController _verificationCodeController;
@@ -40,6 +41,11 @@ class _SignUpScreenState extends State<SignUpScreen> {
   bool _isOtpVerifying = false;
   bool _isEmailLoading = false;
   bool _isGoogleLoading = false;
+
+  static const int _maxOtpAttempts = 3;
+  int _otpFailedAttempts = 0;
+  DateTime? _otpLockedUntil;
+
   String? _verifiedOtpEmail;
   String? _verifiedOtpCode;
   String? _lastAutoVerifiedCode;
@@ -94,7 +100,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
 
     final validation = context.read<AuthValidationProvider>();
     final authProvider = context.read<BrutlAuthProvider>();
-    final email = _emailController.text.trim();
+    final email = _emailController.text.trim().toLowerCase();
     final password = _passwordController.text.trim();
 
     if (email.isEmpty) {
@@ -226,7 +232,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
       return;
     }
 
-    final currentEmail = _emailController.text.trim();
+    final currentEmail = _emailController.text.trim().toLowerCase();
     final currentOtpCode = _verificationCodeController.text.trim();
     if (_verifiedOtpEmail != currentEmail ||
         _verifiedOtpCode != currentOtpCode) {
@@ -260,7 +266,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
       return;
     }
 
-    final email = _emailController.text.trim();
+    final email = _emailController.text.trim().toLowerCase();
     if (email.isEmpty) {
       _showErrorSnackBar('Please enter your email first.');
       return;
@@ -273,10 +279,15 @@ class _SignUpScreenState extends State<SignUpScreen> {
 
     setState(() {
       _isOtpSending = true;
+      // Preparing for a fresh incoming code.
+      _verificationCodeController.clear();
       _resetOtpVerificationState();
     });
 
     try {
+      _otpFailedAttempts = 0;
+      _otpLockedUntil = null;
+
       final response = await http.post(
         Uri.parse(_otpWebhookUrl),
         headers: {'Content-Type': 'application/json'},
@@ -305,9 +316,37 @@ class _SignUpScreenState extends State<SignUpScreen> {
     }
   }
 
+  void _postOtpFailureUi(String message) {
+    // Ensure the loader stops first; then show feedback and clear the field.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      _showErrorSnackBar(message);
+      _verificationCodeController.clear();
+    });
+  }
+
   Future<bool> verifyOtp({bool showSuccessMessage = true}) async {
     final email = _emailController.text.trim();
+    final normalizedEmail = email.toLowerCase();
     final enteredOtp = _verificationCodeController.text.trim();
+
+    final lockedUntil = _otpLockedUntil;
+    if (lockedUntil != null) {
+      final remaining = lockedUntil.difference(DateTime.now());
+      if (!remaining.isNegative) {
+        setState(_resetOtpVerificationState);
+        _showErrorSnackBar(
+          'Too many incorrect attempts. Try again in ${remaining.inMinutes + 1} minute(s) or request a new code.',
+        );
+        _verificationCodeController.clear();
+        return false;
+      }
+
+      _otpLockedUntil = null;
+      _otpFailedAttempts = 0;
+    }
 
     if (email.isEmpty) {
       _showErrorSnackBar('Please enter your email first.');
@@ -319,92 +358,101 @@ class _SignUpScreenState extends State<SignUpScreen> {
       return false;
     }
 
+    if (enteredOtp.length != 6) {
+      _showErrorSnackBar('Please enter the 6-digit verification code.');
+      return false;
+    }
+
+    String? failureMessage;
+    var shouldResetVerification = false;
+    var shouldClearVerificationCode = false;
+    var shouldCountFailedAttempt = false;
+    var isSuccess = false;
+
     try {
       if (mounted) {
         setState(() {
           _isOtpVerifying = true;
         });
       }
-      final docSnapshot = await FirebaseFirestore.instance
-          .collection('otp_verifications')
-          .doc(email)
-          .get();
 
-      if (!docSnapshot.exists) {
+      final response = await http.post(
+        Uri.parse(_verifyOtpWebhookUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'email': email, 'user_code': enteredOtp}),
+      );
+
+      Map<String, dynamic>? responseData;
+      if (response.body.isNotEmpty) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map) {
+          responseData = decoded.map(
+            (key, value) => MapEntry(key.toString(), value),
+          );
+        }
+      }
+
+      final status = responseData?['status']?.toString().toLowerCase();
+      final rawMessage = responseData?['message']?.toString();
+      final message = (rawMessage != null && rawMessage.trim().isNotEmpty)
+          ? rawMessage.trim()
+          : 'Unable to verify OTP right now. Please try again.';
+
+      if (status == 'success' &&
+          response.statusCode >= 200 &&
+          response.statusCode < 300) {
+        _otpFailedAttempts = 0;
+        _otpLockedUntil = null;
+        isSuccess = true;
+
         if (mounted) {
           setState(() {
-            _resetOtpVerificationState();
+            _isOtpVerified = true;
+            _verifiedOtpEmail = normalizedEmail;
+            _verifiedOtpCode = enteredOtp;
           });
         }
-        _showErrorSnackBar('OTP not found. Please request a new code.');
-        return false;
+      } else {
+        shouldResetVerification = true;
+        shouldClearVerificationCode = true;
+        shouldCountFailedAttempt = status == 'fail';
+        failureMessage = message;
       }
-
-      final data = docSnapshot.data();
-      final storedOtp = data?['otp']?.toString().trim();
-      final timestampValue = data?['timestamp']?.toString();
-      final otpCreatedAt = timestampValue == null
-          ? null
-          : DateTime.tryParse(timestampValue);
-
-      if (storedOtp == null || otpCreatedAt == null) {
-        if (mounted) {
-          setState(() {
-            _resetOtpVerificationState();
-          });
-        }
-        _showErrorSnackBar('Invalid OTP data. Please request a new code.');
-        return false;
-      }
-
-      final elapsed = DateTime.now().difference(otpCreatedAt);
-      if (elapsed > const Duration(minutes: 10)) {
-        if (mounted) {
-          setState(() {
-            _resetOtpVerificationState();
-          });
-        }
-        _showErrorSnackBar('This code has expired. Please request a new one.');
-        return false;
-      }
-
-      if (storedOtp != enteredOtp) {
-        if (mounted) {
-          setState(() {
-            _resetOtpVerificationState();
-          });
-        }
-        _showErrorSnackBar('Invalid code.');
-        return false;
-      }
-
-      if (mounted) {
-        setState(() {
-          _isOtpVerified = true;
-          _verifiedOtpEmail = email;
-          _verifiedOtpCode = enteredOtp;
-        });
-      }
-
-      if (showSuccessMessage) {
-        _showErrorSnackBar('OTP verified successfully.');
-      }
-      return true;
     } on Exception catch (_) {
-      if (mounted) {
-        setState(() {
-          _resetOtpVerificationState();
-        });
-      }
-      _showErrorSnackBar('Unable to verify OTP right now. Please try again.');
-      return false;
+      failureMessage = 'Unable to verify OTP right now. Please try again.';
+      shouldResetVerification = true;
+      shouldClearVerificationCode = true;
     } finally {
+      if (shouldCountFailedAttempt) {
+        _otpFailedAttempts += 1;
+        if (_otpFailedAttempts >= _maxOtpAttempts) {
+          _otpLockedUntil = DateTime.now().add(const Duration(minutes: 10));
+        }
+      }
+
       if (mounted) {
         setState(() {
           _isOtpVerifying = false;
+          if (shouldResetVerification) {
+            _resetOtpVerificationState();
+          }
         });
       }
+
+      if (failureMessage != null) {
+        if (shouldClearVerificationCode) {
+          _postOtpFailureUi(failureMessage!);
+        } else {
+          _showErrorSnackBar(failureMessage!);
+        }
+      }
     }
+
+    if (isSuccess && showSuccessMessage) {
+      _showErrorSnackBar('OTP verified successfully.');
+    }
+
+    return isSuccess;
   }
 
   Future<void> _showDialog(
@@ -637,12 +685,10 @@ class _SignUpScreenState extends State<SignUpScreen> {
                               : 'Sign Up with Email',
                           isLoading: _isEmailLoading || _isOtpVerifying,
                           onPressed:
-                              !_isAnyLoading && validation.isSignUpButtonEnabled
-                              ? (_isOtpVerified
-                                    ? _handleSignUp
-                                    : () => _showErrorSnackBar(
-                                        'Please verify your email first.',
-                                      ))
+                              (!_isAnyLoading &&
+                                  validation.isSignUpButtonEnabled &&
+                                  _isOtpVerified)
+                              ? _handleSignUp
                               : null,
                         ),
                         const SizedBox(height: AppSpacing.lg),

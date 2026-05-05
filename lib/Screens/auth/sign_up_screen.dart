@@ -342,18 +342,10 @@ class _SignUpScreenState extends State<SignUpScreen> {
 
       final data = docSnapshot.data();
       final storedOtp = data?['otp']?.toString().trim();
-      final dynamic timestampValue = data?['timestamp'];
-
-      DateTime? otpCreatedAt;
-      if (timestampValue is Timestamp) {
-        otpCreatedAt = timestampValue.toDate();
-      } else if (timestampValue is DateTime) {
-        otpCreatedAt = timestampValue;
-      } else if (timestampValue is String) {
-        otpCreatedAt = DateTime.tryParse(timestampValue);
-      } else if (timestampValue is int) {
-        otpCreatedAt = DateTime.fromMillisecondsSinceEpoch(timestampValue);
-      }
+      final timestampValue = data?['timestamp']?.toString();
+      final otpCreatedAt = timestampValue == null
+          ? null
+          : DateTime.tryParse(timestampValue);
 
       if (storedOtp == null || otpCreatedAt == null) {
         if (mounted) {
@@ -365,16 +357,14 @@ class _SignUpScreenState extends State<SignUpScreen> {
         return false;
       }
 
-      final isExpired = DateTime.now().isAfter(
-        otpCreatedAt.add(const Duration(minutes: 10)),
-      );
-      if (isExpired) {
+      final elapsed = DateTime.now().difference(otpCreatedAt);
+      if (elapsed > const Duration(minutes: 10)) {
         if (mounted) {
           setState(() {
             _resetOtpVerificationState();
           });
         }
-        _showErrorSnackBar('OTP expired. Please request a new code.');
+        _showErrorSnackBar('This code has expired. Please request a new one.');
         return false;
       }
 
@@ -384,7 +374,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
             _resetOtpVerificationState();
           });
         }
-        _showErrorSnackBar('Invalid verification code.');
+        _showErrorSnackBar('Invalid code.');
         return false;
       }
 

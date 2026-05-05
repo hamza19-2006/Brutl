@@ -153,7 +153,7 @@ class CaloriesCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(20),
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
         decoration: BoxDecoration(
           color: const Color(0xFF1A1A1A),
           borderRadius: BorderRadius.circular(20),
@@ -198,7 +198,7 @@ class CaloriesCard extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Text(
               caloriesLabel,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -206,12 +206,35 @@ class CaloriesCard extends StatelessWidget {
                 fontSize: 11,
               ),
             ),
-            const SizedBox(height: 2),
+            const SizedBox(height: 1),
             Text(
               caloriesUnitLabel,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: const Color(0xFF555555),
                 fontSize: 9,
+              ),
+            ),
+            const SizedBox(height: 6),
+            GestureDetector(
+              onTap: onTap,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    'View history',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: const Color(0xFFFF3D00),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(width: 3),
+                  const Icon(
+                    Icons.arrow_forward_ios_rounded,
+                    color: Color(0xFFFF3D00),
+                    size: 9,
+                  ),
+                ],
               ),
             ),
           ],

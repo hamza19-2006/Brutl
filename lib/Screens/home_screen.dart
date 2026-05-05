@@ -8,6 +8,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/workout_nutrition_provider.dart';
 import '../providers/nutrition_service.dart';
 import '../providers/workout_provider.dart';
+import '../screens/calories_history_screen.dart';
+import '../services/calorie_history_service.dart';
 import '../services/database_service.dart';
 import '../services/step_service.dart';
 import '../widgets/biometric_card.dart';
@@ -113,10 +115,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       body: IndexedStack(
         index: _currentIndex,
         children: [
-          _HomeTab(
-            onCaloriesTap: () => _navigateToWorkout(),
-            onExerciseTap: _navigateToWorkout,
-          ),
+          _HomeTab(onExerciseTap: _navigateToWorkout),
           const WorkoutScreen(showBottomNavigationBar: false),
           _ShopTab(label: navLabels[2]),
           _ChatTab(label: navLabels[3]),
@@ -147,9 +146,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 }
 
 class _HomeTab extends StatefulWidget {
-  const _HomeTab({required this.onCaloriesTap, required this.onExerciseTap});
+  const _HomeTab({required this.onExerciseTap});
 
-  final VoidCallback onCaloriesTap;
   final ValueChanged<String> onExerciseTap;
 
   @override
@@ -191,10 +189,25 @@ class _HomeTabState extends State<_HomeTab> {
       _isLoading = false;
     });
 
+    // Persist today's snapshot immediately on load
+    unawaited(
+      CalorieHistoryService.instance.saveTodayFromNutrition(
+        calories: nutrition.caloriesEaten,
+        calorieGoal: nutrition.calorieGoal,
+        carbs: nutrition.carbs,
+        carbsGoal: nutrition.carbsGoal,
+        protein: nutrition.protein,
+        proteinGoal: nutrition.proteinGoal,
+        fats: nutrition.fats,
+        fatsGoal: nutrition.fatsGoal,
+      ),
+    );
+
     _stepSub = StepService.instance.todayStepsStream.listen((steps) {
       if (mounted) setState(() => _currentSteps = steps);
     });
 
+    // ── CHANGE 3: Save to calorie history every time nutrition updates ────────
     _nutritionSub = NutritionService.instance.stream.listen((data) {
       if (mounted) {
         setState(() {
@@ -202,6 +215,19 @@ class _HomeTabState extends State<_HomeTab> {
           _calorieGoal = data.calorieGoal;
         });
       }
+      // Save to local 28-day history on every nutrition update
+      unawaited(
+        CalorieHistoryService.instance.saveTodayFromNutrition(
+          calories: data.caloriesEaten,
+          calorieGoal: data.calorieGoal,
+          carbs: data.carbs,
+          carbsGoal: data.carbsGoal,
+          protein: data.protein,
+          proteinGoal: data.proteinGoal,
+          fats: data.fats,
+          fatsGoal: data.fatsGoal,
+        ),
+      );
     });
   }
 
@@ -227,7 +253,9 @@ class _HomeTabState extends State<_HomeTab> {
 
     final providerStepGoal = workoutProvider.user.dailyStepGoal;
     final cachedStepGoal = _stepGoal > 0 ? _stepGoal : 10000;
-    final safeStepGoal = providerStepGoal > 0 ? providerStepGoal : cachedStepGoal;
+    final safeStepGoal = providerStepGoal > 0
+        ? providerStepGoal
+        : cachedStepGoal;
     final stepProgress = (_currentSteps / safeStepGoal).clamp(0.0, 1.0);
 
     final safeCalGoal = _calorieGoal <= 0 ? 2000 : _calorieGoal;
@@ -264,6 +292,7 @@ class _HomeTabState extends State<_HomeTab> {
                       ),
                     ),
                     const SizedBox(width: 12),
+                    // ── CHANGE 2: CaloriesCard now opens CaloriesHistoryScreen ─
                     Expanded(
                       flex: 4,
                       child: CaloriesCard(
@@ -273,7 +302,12 @@ class _HomeTabState extends State<_HomeTab> {
                         caloriesLabel: workoutProvider.homeUi.caloriesLabel,
                         caloriesUnitLabel:
                             workoutProvider.homeUi.caloriesUnitLabel,
-                        onTap: widget.onCaloriesTap,
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const CaloriesHistoryScreen(),
+                          ),
+                        ),
                       ),
                     ),
                   ],

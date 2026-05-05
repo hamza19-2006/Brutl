@@ -3,10 +3,12 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../models/user_model.dart';
+import '../../providers/workout_provider.dart';
 import '../home_screen.dart';
 
 class OnboardingScreen extends StatefulWidget {
@@ -595,6 +597,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         'customSplitDays': FieldValue.delete(),
         'isProfileComplete': FieldValue.delete(),
       }, SetOptions(merge: true));
+      await context.read<WorkoutProvider>().loadUserData();
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt('step_goal', brutlUser.dailySteps);

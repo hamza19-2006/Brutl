@@ -313,6 +313,13 @@ class WorkoutProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> loadUserData() async {
+    final prefs = await SharedPreferences.getInstance();
+    await _loadUser(prefs);
+    await _loadWorkoutSplit(prefs);
+    notifyListeners();
+  }
+
   Future<void> _loadUser(SharedPreferences prefs) async {
     final firebaseUser = FirebaseAuth.instance.currentUser;
     if (firebaseUser != null) {

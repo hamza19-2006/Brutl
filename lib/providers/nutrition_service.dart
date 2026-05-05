@@ -95,20 +95,25 @@ class NutritionService {
 
   Future<NutritionData> loadTodayNutrition() async {
     final prefs = await SharedPreferences.getInstance();
-    await _checkAndResetIfNewDay(prefs);
-    return _buildFromPrefs(prefs);
+    final didReset = await _checkAndResetIfNewDay(prefs);
+    final data = _buildFromPrefs(prefs);
+    if (didReset && !_controller.isClosed) {
+      _controller.add(data);
+    }
+    return data;
   }
 
-  Future<void> _checkAndResetIfNewDay(SharedPreferences prefs) async {
+  Future<bool> _checkAndResetIfNewDay(SharedPreferences prefs) async {
     final storedDate = prefs.getString(_nutritionDateKey) ?? '';
     final today = _todayStamp();
     if (storedDate != today) {
       await _resetAll(prefs, today);
+      return true;
     }
+    return false;
   }
 
   Future<void> _resetAll(SharedPreferences prefs, String today) async {
-    await prefs.setString(_nutritionDateKey, today);
     await prefs.setInt(_caloriesKey, 0);
     await prefs.setInt(_carbsKey, 0);
     await prefs.setInt(_proteinKey, 0);
@@ -119,6 +124,7 @@ class NutritionService {
       await prefs.setInt(_mealKey(meal, 'protein'), 0);
       await prefs.setInt(_mealKey(meal, 'fats'), 0);
     }
+    await prefs.setString(_nutritionDateKey, today);
   }
 
   NutritionData _buildFromPrefs(SharedPreferences prefs) {

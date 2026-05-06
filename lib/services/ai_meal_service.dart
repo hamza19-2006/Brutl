@@ -6,7 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 const String _geminiApiKey = geminiApiKey;
-const String _model = 'gemini-1.5-flash';
+const String _model = 'gemini-2.0-flash';
 
 const String _systemPrompt =
     'You are a precise macro calculator. Analyze this food image. '

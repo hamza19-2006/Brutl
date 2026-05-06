@@ -621,10 +621,10 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
 
     setState(() {
       _isScanning = false;
-      _calCtrl.text = result['kcal']?.toString() ?? '';
-      _carbCtrl.text = result['carbs']?.toString() ?? '';
-      _proCtrl.text = result['protein']?.toString() ?? '';
-      _fatCtrl.text = result['fat']?.toString() ?? '';
+      _calCtrl.text = result?['kcal']?.toString() ?? '';
+      _carbCtrl.text = result?['carbs']?.toString() ?? '';
+      _proCtrl.text = result?['protein']?.toString() ?? '';
+      _fatCtrl.text = result?['fat']?.toString() ?? '';
     });
   }
 

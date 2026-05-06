@@ -441,9 +441,9 @@ class _SignUpScreenState extends State<SignUpScreen> {
 
       if (failureMessage != null) {
         if (shouldClearVerificationCode) {
-          _postOtpFailureUi(failureMessage!);
+          _postOtpFailureUi(failureMessage);
         } else {
-          _showErrorSnackBar(failureMessage!);
+          _showErrorSnackBar(failureMessage);
         }
       }
     }

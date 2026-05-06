@@ -186,7 +186,7 @@ class _MealFlowSheetState extends State<_MealFlowSheet> {
     if (result != null) {
       // 1. Automatically save the parsed calories to the provider
       final provider = context.read<WorkoutNutritionProvider>();
-      final kcal = result['kcal'] as int? ?? 0;
+      final kcal = result['kcal'] ?? 0;
 
       await provider.updateMealCalories(
         mealName: widget.mealName,

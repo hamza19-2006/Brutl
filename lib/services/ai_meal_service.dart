@@ -1,54 +1,44 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import '../config/secrets.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
-// ---------------------------------------------------------------------------
-// Gemini API Configuration
-// ---------------------------------------------------------------------------
-const String _geminiApiKey = 'AIzaSyBDHjvaM7B1N-3KCLusPs_4JYZJ1m06zYs';
+const String _geminiApiKey = geminiApiKey;
 const String _model = 'gemini-1.5-flash';
 
 const String _systemPrompt =
     'You are a precise macro calculator. Analyze this food image. '
     'Return ONLY a raw, unformatted JSON object. '
-    'Do not include markdown code blocks (like ```json). '
-    'Do not include any other words, explanations, or text. '
-    'The JSON keys must be exactly: "kcal" (integer), "carbs" (integer), '
-    '"protein" (integer), "fat" (integer).';
+    'Do not include any markdown, code blocks, or extra text. '
+    'The JSON keys must be exactly: "kcal", "carbs", "protein", "fat". '
+    'All values must be integers.';
 
-/// Sends [imageBytes] to the Gemini Vision API and returns a macro map.
 Future<Map<String, int>?> analyzeMeal(Uint8List imageBytes) async {
   if (_geminiApiKey.isEmpty) {
     debugPrint('analyzeMeal: GEMINI_API_KEY is not set.');
     return null;
   }
 
-  // Cleaned URL to remove hidden FormatException characters
   final String url =
-      '[https://generativelanguage.googleapis.com/v1beta/models/$_model:generateContent?key=$_geminiApiKey](https://generativelanguage.googleapis.com/v1beta/models/$_model:generateContent?key=$_geminiApiKey)';
-  final Uri uri = Uri.parse(url.trim());
+      'https://generativelanguage.googleapis.com/v1beta/models/$_model:generateContent?key=$_geminiApiKey';
+  final Uri uri = Uri.parse(url);
 
   final String base64Image = base64Encode(imageBytes);
 
   final Map<String, dynamic> requestBody = {
-    'system_instruction': {
-      'parts': [
-        {'text': _systemPrompt},
-      ],
-    },
     'contents': [
       {
         'role': 'user',
         'parts': [
+          {'text': _systemPrompt},
           {
             'inline_data': {'mime_type': 'image/jpeg', 'data': base64Image},
           },
         ],
       },
     ],
-    'generationConfig': {'responseMimeType': 'application/json'},
   };
 
   try {
@@ -69,18 +59,21 @@ Future<Map<String, int>?> analyzeMeal(Uint8List imageBytes) async {
     }
 
     final Map<String, dynamic> decoded = jsonDecode(response.body);
-    final List<dynamic>? candidates = decoded['candidates'];
-    final Map<String, dynamic>? firstCandidate = candidates?.firstOrNull;
-    final Map<String, dynamic>? content = firstCandidate?['content'];
-    final List<dynamic>? parts = content?['parts'];
-    final String? text = parts?.firstOrNull?['text'];
+    final String? text =
+        decoded['candidates']?[0]['content']?['parts']?[0]['text'];
 
-    if (text == null || text.isEmpty) return null;
+    if (text == null || text.isEmpty) {
+      debugPrint('--- [AI SCAN] ERROR: No text in response ---');
+      return null;
+    }
 
     final String cleaned = text
         .replaceAll('```json', '')
         .replaceAll('```', '')
         .trim();
+
+    debugPrint('--- [AI SCAN] PARSED TEXT: $cleaned ---');
+
     final Map<String, dynamic> parsed = jsonDecode(cleaned);
 
     return {

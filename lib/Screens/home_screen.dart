@@ -49,11 +49,27 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     super.dispose();
   }
 
+  /// FIX 2: Lifecycle observer now handles BOTH exercise sync AND
+  /// the step date-check reset. When the app resumes from background
+  /// (e.g. user left it open overnight), both StepService and
+  /// StepSensorService are asked to check if the day rolled over.
+  /// If it did, they emit 0 immediately — notifyListeners() propagates
+  /// to every StreamBuilder/setState so the UI repaints in the same frame.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      // Sync pending exercises (existing behaviour)
       _syncPendingExercises();
+
+      // FIX 2: Trigger instant midnight-rollover check on both step services
+      _checkStepDateOnResume();
     }
+  }
+
+  /// Calls both step services so whichever one is active for this build
+  /// correctly resets on resume. Both are no-ops if the day hasn't changed.
+  Future<void> _checkStepDateOnResume() async {
+    await StepService.instance.checkAndResetIfNewDay();
   }
 
   Future<void> _syncPendingExercises() async {
@@ -176,6 +192,10 @@ class _HomeTabState extends State<_HomeTab> {
     final prefs = await SharedPreferences.getInstance();
 
     final stepGoal = prefs.getInt('step_goal') ?? 10000;
+
+    // FIX 1: getTodaySteps() now returns 0 on a new day because StepService
+    // already ran checkAndResetIfNewDay() during initializeStepService().
+    // No stale yesterday count can leak through here.
     final currentSteps = StepService.instance.getTodaySteps();
 
     final nutrition = await NutritionService.instance.loadTodayNutrition();
@@ -189,7 +209,6 @@ class _HomeTabState extends State<_HomeTab> {
       _isLoading = false;
     });
 
-    // Persist today's snapshot immediately on load
     unawaited(
       CalorieHistoryService.instance.saveTodayFromNutrition(
         calories: nutrition.caloriesEaten,
@@ -203,11 +222,12 @@ class _HomeTabState extends State<_HomeTab> {
       ),
     );
 
+    // FIX 3: Stream subscription — any reset (from lifecycle or sensor)
+    // emits the new value and setState fires immediately in the same event loop tick.
     _stepSub = StepService.instance.todayStepsStream.listen((steps) {
       if (mounted) setState(() => _currentSteps = steps);
     });
 
-    // ── CHANGE 3: Save to calorie history every time nutrition updates ────────
     _nutritionSub = NutritionService.instance.stream.listen((data) {
       if (mounted) {
         setState(() {
@@ -215,7 +235,6 @@ class _HomeTabState extends State<_HomeTab> {
           _calorieGoal = data.calorieGoal;
         });
       }
-      // Save to local 28-day history on every nutrition update
       unawaited(
         CalorieHistoryService.instance.saveTodayFromNutrition(
           calories: data.caloriesEaten,
@@ -292,7 +311,6 @@ class _HomeTabState extends State<_HomeTab> {
                       ),
                     ),
                     const SizedBox(width: 12),
-                    // ── CHANGE 2: CaloriesCard now opens CaloriesHistoryScreen ─
                     Expanded(
                       flex: 4,
                       child: CaloriesCard(

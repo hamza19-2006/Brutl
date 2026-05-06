@@ -44,7 +44,7 @@ class StepSensorService {
     _onDailyReset = onDailyReset;
     _prefs = await SharedPreferences.getInstance();
     await _syncStagedBackgroundStepsToHive();
-    _hydrateFromStorage();
+    _hydrateFromStorage(); // FIX: now emits 0 immediately when new day detected
     _scheduleMidnightRollover();
 
     try {
@@ -84,6 +84,40 @@ class StepSensorService {
       rawSensor: latest,
       initialHardwareSteps: initial,
     );
+  }
+
+  /// FIX: Public method for app-resume date check.
+  /// Called by the lifecycle observer so opening the app after midnight
+  /// instantly shows 0 without waiting for a sensor event.
+  Future<void> checkAndResetIfNewDay() async {
+    final today = _todayStamp();
+    if (_lastSavedDate == today) return; // same day, nothing to do
+
+    debugPrint(
+      'BRUTL_STEPS: [StepSensorService.resume] New day detected '
+      '(stored=$_lastSavedDate, today=$today) — resetting stream to 0.',
+    );
+
+    // Save yesterday's final count to Hive history
+    final yesterdaySteps = calculateDailySteps(
+      rawSensor: _latestRaw,
+      initialHardwareSteps: _initialHardwareSteps,
+    );
+    if (yesterdaySteps > 0 && _lastSavedDate.isNotEmpty) {
+      await _saveToHiveHistory(_lastSavedDate, yesterdaySteps);
+    }
+
+    // Reset baseline — real sensor values come on next pedometer event
+    _initialHardwareSteps = 0;
+    _latestRaw = 0;
+    _lastSavedDate = today;
+    _persistState(today);
+
+    // FIX 3: Force-emit 0 so every StreamBuilder rebuilds immediately
+    _lastEmittedSteps = -1;
+    _emitSteps(0);
+
+    unawaited(_onDailyReset?.call());
   }
 
   Future<void> refreshFromSensor() async {
@@ -168,6 +202,8 @@ class StepSensorService {
     _lastSavedDate = newDate;
 
     _persistState(newDate);
+    // Force re-emit even if last emitted was also 0
+    _lastEmittedSteps = -1;
     _emitSteps(0);
     _scheduleMidnightRollover();
     unawaited(_onDailyReset?.call());
@@ -198,6 +234,7 @@ class StepSensorService {
     _lastSavedDate = _prefs?.getString(_keyLastSavedDate) ?? '';
 
     if (_lastSavedDate == today) {
+      // Same day — restore persisted counts and emit them
       _initialHardwareSteps = _prefs?.getInt(_keyInitialHardwareSteps) ?? 0;
       _latestRaw = _prefs?.getInt(_keyLatestRaw) ?? 0;
 
@@ -212,13 +249,30 @@ class StepSensorService {
         'latest=$_latestRaw, steps=$restoredSteps',
       );
     } else {
+      // FIX 1: New day detected on init. Save yesterday's data to history,
+      // reset counters, then IMMEDIATELY emit 0 before any UI paints.
       debugPrint(
-        'BRUTL_STEPS: Stored date "$_lastSavedDate" ≠ today "$today". '
-        'Waiting for first sensor event to set baseline.',
+        'BRUTL_STEPS: New day on hydration '
+        '(stored="$_lastSavedDate", today="$today") — emitting 0 instantly.',
       );
+
+      // Persist yesterday's count if we have meaningful data
+      final yesterdaySteps = calculateDailySteps(
+        rawSensor: _latestRaw,
+        initialHardwareSteps: _initialHardwareSteps,
+      );
+      if (yesterdaySteps > 0 && _lastSavedDate.isNotEmpty) {
+        unawaited(_saveToHiveHistory(_lastSavedDate, yesterdaySteps));
+      }
+
+      // Reset everything for today
       _lastSavedDate = today;
       _initialHardwareSteps = 0;
       _latestRaw = 0;
+      _persistState(today);
+
+      // FIX 1: Emit 0 immediately so the UI paints the correct value
+      _emitSteps(0);
     }
   }
 
@@ -241,16 +295,21 @@ class StepSensorService {
   Future<void> _syncStagedBackgroundStepsToHive() async {
     final prefs = _prefs;
     if (prefs == null) return;
-    
-    final keys = prefs.getKeys().where((k) => k.startsWith('brutl_pending_hive_steps_')).toList();
+
+    final keys = prefs
+        .getKeys()
+        .where((k) => k.startsWith('brutl_pending_hive_steps_'))
+        .toList();
     if (keys.isEmpty) return;
-    
+
     for (final key in keys) {
       final dateString = key.replaceFirst('brutl_pending_hive_steps_', '');
       final steps = prefs.getInt(key);
       if (steps != null && steps > 0) {
         await _saveToHiveHistory(dateString, steps);
-        debugPrint('BRUTL_STEPS: Synced background staged steps to Hive — $dateString = $steps');
+        debugPrint(
+          'BRUTL_STEPS: Synced background staged steps to Hive — $dateString = $steps',
+        );
       }
       await prefs.remove(key);
     }
@@ -259,7 +318,7 @@ class StepSensorService {
   // ─── Helpers ────────────────────────────────────────────────────────────
 
   void _emitSteps(int steps) {
-    if (steps == _lastEmittedSteps) return; // Deduplicate
+    if (steps == _lastEmittedSteps) return;
     _lastEmittedSteps = steps;
     if (!_stepsController.isClosed) {
       _stepsController.add(steps);
@@ -273,7 +332,6 @@ class StepSensorService {
     return '${now.year}-$m-$d';
   }
 
-  /// Public accessor so background tasks can build date keys in the same format.
   static String dateStampFor(DateTime date) {
     final m = date.month.toString().padLeft(2, '0');
     final d = date.day.toString().padLeft(2, '0');

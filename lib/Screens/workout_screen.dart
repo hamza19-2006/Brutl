@@ -590,7 +590,15 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
       }
     });
 
-    final result = await analyzeMeal(imageBytes);
+    print('--- SENDING IMAGE TO AI ---');
+    Map<String, int>? result;
+    try {
+      result = await analyzeMeal(imageBytes);
+    } catch (e) {
+      print('--- AI CRASH: $e ---');
+      result = null;
+    }
+    print('--- AI RESULT: $result ---');
 
     _scanPhaseOneTimer?.cancel();
     _scanPhaseTwoTimer?.cancel();
@@ -604,7 +612,7 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Could not analyze image. Ensure the food is clearly visible and well-lit, then try again.',
+            'AI Analysis Failed: Check API Key or Internet Connection.',
           ),
         ),
       );

@@ -1,16 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // CALORIES HISTORY SCREEN
 // ═══════════════════════════════════════════════════════════════════════════════
-//
-// Displays 28-day macro history stored locally via CalorieHistoryService.
-// NO FIREBASE — all data is read from SharedPreferences.
-//
-// Layout (top → bottom):
-//   1. Header         — back button + "Calories" title + weekly avg chip
-//   2. Week Paginator — < Apr 27 – May 3 >
-//   3. Day Strip      — Mon/4/circle … Sun/10/circle (tap to select)
-//   4. Detail Section — large calorie ring + macro stats for selected day
-// ═══════════════════════════════════════════════════════════════════════════════
 
 import 'dart:async';
 
@@ -32,18 +22,16 @@ class CaloriesHistoryScreen extends StatefulWidget {
 class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
     with SingleTickerProviderStateMixin {
   // ─── week navigation ──────────────────────────────────────────────────────
-  /// 0 = current week, -1 = last week, …, -3 = 4 weeks ago
   int _weekOffset = 0;
 
   // ─── selected day within the visible week ─────────────────────────────────
   late int _selectedDayIndex; // 0 = Mon, 6 = Sun
 
   // ─── loaded data ──────────────────────────────────────────────────────────
-  /// key = "YYYY-MM-DD", value = snapshot or null (no data for that day)
   Map<String, DailyMacroSnapshot?> _weekData = {};
   bool _isLoading = true;
 
-  // ─── goals (read from SharedPreferences, same source as NutritionService) ─
+  // ─── goals ────────────────────────────────────────────────────────────────
   int _calorieGoal = 2000;
   int _carbsGoal = 200;
   int _proteinGoal = 150;
@@ -53,7 +41,11 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
   late final AnimationController _animCtrl;
   late final Animation<double> _animCurve;
 
-  // ─── live nutrition stream (keeps today's ring live) ──────────────────────
+  // ─── bar entrance animation ───────────────────────────────────────────────
+  // FIX 4: Separate animation for bar growth so bars animate on every load
+  bool _barsVisible = false;
+
+  // ─── live nutrition stream ────────────────────────────────────────────────
   StreamSubscription<NutritionData>? _nutritionSub;
 
   // ─── constants ────────────────────────────────────────────────────────────
@@ -76,7 +68,7 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
   @override
   void initState() {
     super.initState();
-    // Default selected day = today's weekday index (Mon=0)
+    // FIX 1: Always default to today's weekday index (Mon=0)
     _selectedDayIndex = (DateTime.now().weekday - 1) % 7;
 
     _animCtrl = AnimationController(
@@ -90,10 +82,9 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
 
   Future<void> _init() async {
     await _loadGoals();
-    await _snapshotToday(); // persist today before reading
-    await _loadWeek();
+    await _snapshotToday();
+    await _loadWeek(); // This sets _selectedDayIndex to today and loads data
 
-    // Subscribe to live nutrition so today's data stays fresh
     _nutritionSub = NutritionService.instance.stream.listen((data) async {
       if (!mounted) return;
       await CalorieHistoryService.instance.saveTodayFromNutrition(
@@ -120,7 +111,6 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
     });
   }
 
-  /// Ensure today's nutrition is persisted before we read history.
   Future<void> _snapshotToday() async {
     final nutrition = await NutritionService.instance.loadTodayNutrition();
     await CalorieHistoryService.instance.saveTodayFromNutrition(
@@ -137,7 +127,10 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
 
   Future<void> _loadWeek() async {
     if (!mounted) return;
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _barsVisible = false; // reset so bars animate again on each load
+    });
 
     final weekData = await CalorieHistoryService.instance.loadWeek(_weekStart);
 
@@ -146,7 +139,13 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
       _weekData = weekData;
       _isLoading = false;
     });
+
     _animCtrl.forward(from: 0);
+
+    // FIX 4: Small delay then trigger bar growth animation
+    Future.delayed(const Duration(milliseconds: 80), () {
+      if (mounted) setState(() => _barsVisible = true);
+    });
   }
 
   @override
@@ -183,7 +182,7 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
     return _weekData[key];
   }
 
-  // ─── selected day values (fall back to goals so UI never looks broken) ────
+  // ─── selected day values ──────────────────────────────────────────────────
   int get _selCalories => _selectedSnapshot?.calories ?? 0;
   int get _selCalGoal => _selectedSnapshot?.calorieGoal ?? _calorieGoal;
   int get _selCarbs => _selectedSnapshot?.carbs ?? 0;
@@ -210,6 +209,7 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
     if (next < -3 || next > 0) return;
     setState(() {
       _weekOffset = next;
+      // FIX 1: When going back to current week, snap to today; else go to Mon
       _selectedDayIndex = next == 0 ? (DateTime.now().weekday - 1) % 7 : 0;
     });
     _loadWeek();
@@ -254,7 +254,6 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        // Back button
         GestureDetector(
           onTap: () => Navigator.pop(context),
           child: Container(
@@ -282,7 +281,6 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
           ),
         ),
         const Spacer(),
-        // Weekly avg chip
         if (avg > 0)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -383,10 +381,13 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
         final snap = _weekData[key];
         final isSelected = i == _selectedDayIndex;
         final isToday = _isToday(day);
+
+        // FIX 2: Always use full accent color for progress rings — never gray
         final progress = snap != null ? snap.calorieProgress : 0.0;
 
         return Expanded(
           child: GestureDetector(
+            // FIX 3: On tap, immediately update _selectedDayIndex so ring + macros sync
             onTap: () => setState(() => _selectedDayIndex = i),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 200),
@@ -407,10 +408,11 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Day name
+                  // Day name — always full brightness accent when selected
                   Text(
                     _dayNames[i],
                     style: TextStyle(
+                      // FIX 2: selected = accent, unselected = secondary (never dimmed)
                       color: isSelected ? _accent : _textSecondary,
                       fontSize: 10,
                       fontWeight: isSelected
@@ -419,7 +421,7 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
                     ),
                   ),
                   const SizedBox(height: 4),
-                  // Date number
+                  // Date circle — today gets filled accent background
                   Container(
                     width: 22,
                     height: 22,
@@ -442,12 +444,12 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
                     ),
                   ),
                   const SizedBox(height: 6),
-                  // Single-line mini circular progress
+                  // FIX 2: Mini ring is ALWAYS bright — accent when selected, accentSoft otherwise
                   _MiniRing(
                     progress: progress,
                     size: 24,
                     strokeWidth: 3,
-                    color: isSelected ? _accent : _textTertiary,
+                    color: isSelected ? _accent : _accentSoft,
                   ),
                 ],
               ),
@@ -474,7 +476,6 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Date label
           Text(
             formattedDate,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -485,11 +486,11 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
           ),
           const SizedBox(height: 16),
 
-          // Big ring + macro stats side-by-side
+          // FIX 3: Big ring + macro stats update instantly because they read
+          // _selCalories / _selCarbs etc which are derived from _selectedDayIndex
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              // Large calorie ring
               AnimatedBuilder(
                 animation: _animCurve,
                 builder: (context, _) {
@@ -501,7 +502,6 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
                 },
               ),
               const SizedBox(width: 20),
-              // Macro stats column
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -546,8 +546,6 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
           if (!hasData) ...[const SizedBox(height: 24), _buildNoDataChip()],
 
           const SizedBox(height: 28),
-
-          // Mini bar chart for the week
           _buildWeekBarChart(),
         ],
       ),
@@ -586,30 +584,6 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
   // ── Week bar chart ─────────────────────────────────────────────────────────
 
   Widget _buildWeekBarChart() {
-    final bars = <BarChartGroupData>[];
-    for (var i = 0; i < 7; i++) {
-      final key = CalorieHistoryService.dateKeyFor(_dayAt(i));
-      final snap = _weekData[key];
-      final val = (snap?.calories ?? 0).toDouble();
-      bars.add(
-        BarChartGroupData(
-          x: i,
-          barRods: [
-            BarChartRodData(
-              toY: val * _animCurve.value,
-              width: 14,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(4),
-              ),
-              color: i == _selectedDayIndex
-                  ? _accent
-                  : (val > 0 ? _accentSoft.withValues(alpha: 0.5) : _bg3),
-            ),
-          ],
-        ),
-      );
-    }
-
     final maxRaw = _weekData.values
         .whereType<DailyMacroSnapshot>()
         .map((s) => s.calories.toDouble())
@@ -618,154 +592,177 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
     final maxY = (maxRaw > goalY ? maxRaw : goalY) * 1.25;
     final safeMax = maxY <= 0 ? 3000.0 : maxY;
 
-    return AnimatedBuilder(
-      animation: _animCurve,
-      builder: (context, _) {
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'This Week',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: _textSecondary,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              height: 140,
-              child: BarChart(
-                BarChartData(
-                  maxY: safeMax,
-                  minY: 0,
-                  alignment: BarChartAlignment.spaceAround,
-                  barTouchData: BarTouchData(
-                    enabled: true,
-                    touchCallback: (event, response) {
-                      if (!event.isInterestedForInteractions ||
-                          response?.spot == null)
-                        return;
-                      setState(
-                        () => _selectedDayIndex =
-                            response!.spot!.touchedBarGroupIndex,
-                      );
-                    },
-                    touchTooltipData: BarTouchTooltipData(
-                      tooltipRoundedRadius: 8,
-                      tooltipPadding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 6,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'This Week',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: _textSecondary,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 12),
+        // FIX 4: AnimatedContainer wraps the chart so bars grow upward on open
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 400),
+          curve: Curves.easeOutCubic,
+          height: _barsVisible ? 140 : 0,
+          child: BarChart(
+            BarChartData(
+              maxY: safeMax,
+              minY: 0,
+              alignment: BarChartAlignment.spaceAround,
+              barTouchData: BarTouchData(
+                enabled: true,
+                touchCallback: (event, response) {
+                  if (!event.isInterestedForInteractions ||
+                      response?.spot == null)
+                    return;
+                  setState(
+                    () => _selectedDayIndex =
+                        response!.spot!.touchedBarGroupIndex,
+                  );
+                },
+                touchTooltipData: BarTouchTooltipData(
+                  tooltipRoundedRadius: 8,
+                  tooltipPadding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  getTooltipColor: (_) => _bg2,
+                  getTooltipItem: (group, _, rod, __) {
+                    final snap =
+                        _weekData[CalorieHistoryService.dateKeyFor(
+                          _dayAt(group.x),
+                        )];
+                    if (snap == null || snap.calories == 0) return null;
+                    return BarTooltipItem(
+                      '${snap.calories} kcal',
+                      const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
                       ),
-                      getTooltipColor: (_) => _bg2,
-                      getTooltipItem: (group, _, rod, __) {
-                        final snap =
-                            _weekData[CalorieHistoryService.dateKeyFor(
-                              _dayAt(group.x),
-                            )];
-                        if (snap == null || snap.calories == 0) return null;
-                        return BarTooltipItem(
-                          '${snap.calories} kcal',
-                          const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 12,
-                          ),
-                        );
+                    );
+                  },
+                ),
+              ),
+              extraLinesData: ExtraLinesData(
+                horizontalLines: [
+                  HorizontalLine(
+                    y: goalY,
+                    color: _accent.withValues(alpha: 0.5),
+                    strokeWidth: 1.2,
+                    dashArray: [5, 4],
+                    label: HorizontalLineLabel(
+                      show: true,
+                      alignment: Alignment.topRight,
+                      padding: const EdgeInsets.only(right: 4, bottom: 2),
+                      style: const TextStyle(
+                        color: _accent,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      labelResolver: (_) {
+                        final k = goalY / 1000;
+                        final lbl = k % 1 == 0
+                            ? '${k.toInt()}k'
+                            : '${k.toStringAsFixed(1)}k';
+                        return '$lbl goal';
                       },
                     ),
                   ),
-                  // Goal dashed line
-                  extraLinesData: ExtraLinesData(
-                    horizontalLines: [
-                      HorizontalLine(
-                        y: goalY,
-                        color: _accent.withValues(alpha: 0.5),
-                        strokeWidth: 1.2,
-                        dashArray: [5, 4],
-                        label: HorizontalLineLabel(
-                          show: true,
-                          alignment: Alignment.topRight,
-                          padding: const EdgeInsets.only(right: 4, bottom: 2),
-                          style: const TextStyle(
-                            color: _accent,
-                            fontSize: 9,
-                            fontWeight: FontWeight.w600,
-                          ),
-                          labelResolver: (_) {
-                            final k = goalY / 1000;
-                            final lbl = k % 1 == 0
-                                ? '${k.toInt()}k'
-                                : '${k.toStringAsFixed(1)}k';
-                            return '$lbl goal';
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                  titlesData: FlTitlesData(
-                    topTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false),
-                    ),
-                    rightTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false),
-                    ),
-                    leftTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false),
-                    ),
-                    bottomTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        reservedSize: 24,
-                        getTitlesWidget: (value, _) {
-                          final idx = value.toInt();
-                          if (idx < 0 || idx >= _dayNames.length) {
-                            return const SizedBox.shrink();
-                          }
-                          return Padding(
-                            padding: const EdgeInsets.only(top: 6),
-                            child: Text(
-                              _dayNames[idx],
-                              style: TextStyle(
-                                color: idx == _selectedDayIndex
-                                    ? _accent
-                                    : _textTertiary,
-                                fontSize: 9,
-                                fontWeight: idx == _selectedDayIndex
-                                    ? FontWeight.w700
-                                    : FontWeight.w500,
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                  gridData: FlGridData(
-                    show: true,
-                    drawVerticalLine: false,
-                    horizontalInterval: safeMax / 4,
-                    getDrawingHorizontalLine: (_) => const FlLine(
-                      color: Color(0xFF1E1E1E),
-                      strokeWidth: 0.6,
-                    ),
-                  ),
-                  borderData: FlBorderData(show: false),
-                  barGroups: bars,
-                ),
-                duration: Duration.zero,
+                ],
               ),
+              titlesData: FlTitlesData(
+                topTitles: const AxisTitles(
+                  sideTitles: SideTitles(showTitles: false),
+                ),
+                rightTitles: const AxisTitles(
+                  sideTitles: SideTitles(showTitles: false),
+                ),
+                leftTitles: const AxisTitles(
+                  sideTitles: SideTitles(showTitles: false),
+                ),
+                bottomTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    reservedSize: 24,
+                    getTitlesWidget: (value, _) {
+                      final idx = value.toInt();
+                      if (idx < 0 || idx >= _dayNames.length) {
+                        return const SizedBox.shrink();
+                      }
+                      final isSelected = idx == _selectedDayIndex;
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Text(
+                          _dayNames[idx],
+                          style: TextStyle(
+                            // FIX 2: Chart labels always bright — accent for selected, secondary otherwise
+                            color: isSelected ? _accent : _textSecondary,
+                            fontSize: 9,
+                            fontWeight: isSelected
+                                ? FontWeight.w700
+                                : FontWeight.w500,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+              gridData: FlGridData(
+                show: true,
+                drawVerticalLine: false,
+                horizontalInterval: safeMax / 4,
+                getDrawingHorizontalLine: (_) =>
+                    const FlLine(color: Color(0xFF1E1E1E), strokeWidth: 0.6),
+              ),
+              borderData: FlBorderData(show: false),
+              // FIX 2: Bar colors are ALWAYS bright — accent for selected, accentSoft for others
+              // Never use _bg3 (gray) for bars regardless of data presence
+              barGroups: List.generate(7, (i) {
+                final key = CalorieHistoryService.dateKeyFor(_dayAt(i));
+                final snap = _weekData[key];
+                final val = (snap?.calories ?? 0).toDouble();
+                final isSelected = i == _selectedDayIndex;
+
+                return BarChartGroupData(
+                  x: i,
+                  barRods: [
+                    BarChartRodData(
+                      // FIX 4: bars always show full height (no animation multiplier)
+                      // AnimatedContainer handles the grow effect
+                      toY: val,
+                      width: 14,
+                      borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(4),
+                      ),
+                      // FIX 2: Always colorful — selected = bright accent, rest = accentSoft
+                      // Zero-value bars get a subtle accent tint (not gray)
+                      color: isSelected
+                          ? _accent
+                          : val > 0
+                          ? _accentSoft
+                          : _accentSoft.withValues(alpha: 0.25),
+                    ),
+                  ],
+                );
+              }),
             ),
-          ],
-        );
-      },
+            duration: Duration.zero,
+          ),
+        ),
+      ],
     );
   }
 }
 
 // ─── Extracted Widgets ────────────────────────────────────────────────────────
 
-/// Single-line circular progress ring (mini, for the day strip).
 class _MiniRing extends StatelessWidget {
   const _MiniRing({
     required this.progress,
@@ -796,7 +793,6 @@ class _MiniRing extends StatelessWidget {
   }
 }
 
-/// Large calorie ring shown in the detail section.
 class _BigCalorieRing extends StatelessWidget {
   const _BigCalorieRing({
     required this.progress,
@@ -855,7 +851,6 @@ class _BigCalorieRing extends StatelessWidget {
   }
 }
 
-/// Custom painter that draws a single arc (no percent_indicator dependency needed).
 class _RingPainter extends CustomPainter {
   _RingPainter({
     required this.progress,
@@ -878,7 +873,6 @@ class _RingPainter extends CustomPainter {
     final radius = (size.width - strokeWidth) / 2;
     final rect = Rect.fromCircle(center: Offset(cx, cy), radius: radius);
 
-    // Track
     final trackPaint = Paint()
       ..color = trackColor
       ..style = PaintingStyle.stroke
@@ -888,7 +882,6 @@ class _RingPainter extends CustomPainter {
 
     if (progress <= 0) return;
 
-    // Progress arc
     final progressPaint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = strokeWidth
@@ -896,8 +889,8 @@ class _RingPainter extends CustomPainter {
 
     if (ringColorEnd != null) {
       progressPaint.shader = SweepGradient(
-        startAngle: -1.5708, // -π/2 = top
-        endAngle: -1.5708 + 6.2832, // full circle
+        startAngle: -1.5708,
+        endAngle: -1.5708 + 6.2832,
         colors: [ringColor, ringColorEnd!],
         stops: const [0.0, 1.0],
         tileMode: TileMode.clamp,
@@ -906,13 +899,7 @@ class _RingPainter extends CustomPainter {
       progressPaint.color = ringColor;
     }
 
-    canvas.drawArc(
-      rect,
-      -1.5708, // start at top
-      progress * 6.2832, // sweep angle
-      false,
-      progressPaint,
-    );
+    canvas.drawArc(rect, -1.5708, progress * 6.2832, false, progressPaint);
   }
 
   @override
@@ -920,7 +907,6 @@ class _RingPainter extends CustomPainter {
       old.progress != progress || old.ringColor != ringColor;
 }
 
-/// A single macro row: label + thin progress bar + "value / goal unit"
 class _MacroRow extends StatelessWidget {
   const _MacroRow({
     required this.label,

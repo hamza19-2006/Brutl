@@ -14,7 +14,7 @@ class StepService extends ChangeNotifier {
   static const String _todayStepsKey = 'today_steps';
   static const String _lastResetDateKey = 'last_reset_date';
   static const String _stepHistoryKey = 'step_history';
-  static const int _maxHistoryDays = 28; // 4 weeks
+  static const int _maxHistoryDays = 28;
 
   StreamSubscription<StepCount>? _stepSubscription;
   SharedPreferences? _preferences;
@@ -47,6 +47,27 @@ class StepService extends ChangeNotifier {
     _lastResetDate = prefs.getString(_lastResetDateKey) ?? '';
     _hasStoredBaseline = prefs.containsKey(_baselineStepsKey);
 
+    // FIX 1: Check date BEFORE emitting steps to the UI.
+    // If a new day has started since last launch, reset to 0 immediately
+    // so the UI never flashes yesterday's stale count.
+    final today = _todayStamp();
+    if (_lastResetDate.isNotEmpty && _lastResetDate != today) {
+      debugPrint(
+        'BRUTL_STEPS: [StepService.init] New day detected '
+        '(stored=$_lastResetDate, today=$today) — resetting to 0 before UI paint.',
+      );
+      // Save yesterday's final count to history before wiping
+      if (_todaySteps > 0) {
+        await _saveToHistory(_lastResetDate, _todaySteps);
+      }
+      _todaySteps = 0;
+      _lastResetDate = today;
+      _hasStoredBaseline = false; // baseline will be set on first sensor event
+      await prefs.setInt(_todayStepsKey, 0);
+      await prefs.setString(_lastResetDateKey, today);
+    }
+
+    // Now emit the correct value (0 if new day, restored count if same day)
     _emitSteps(_todaySteps);
 
     _stepSubscription ??= Pedometer.stepCountStream.listen(
@@ -64,8 +85,39 @@ class StepService extends ChangeNotifier {
     _isInitialized = true;
   }
 
+  /// FIX 2: Public method called on app resume (lifecycle observer).
+  /// Re-checks date and resets to 0 if the day rolled over while the
+  /// app was backgrounded. Notifies all listeners immediately.
+  Future<void> checkAndResetIfNewDay() async {
+    final today = _todayStamp();
+    if (_lastResetDate == today) return; // nothing to do
+
+    debugPrint(
+      'BRUTL_STEPS: [StepService.resume] New day detected '
+      '(stored=$_lastResetDate, today=$today) — resetting to 0.',
+    );
+
+    final prefs = _preferences ?? await SharedPreferences.getInstance();
+
+    // Persist yesterday's final count before wiping
+    if (_todaySteps > 0) {
+      await _saveToHistory(_lastResetDate, _todaySteps);
+    }
+
+    _todaySteps = 0;
+    _lastResetDate = today;
+    _hasStoredBaseline = false; // baseline reset on next sensor event
+    await prefs.setInt(_todayStepsKey, 0);
+    await prefs.setString(_lastResetDateKey, today);
+
+    // FIX 3: Push 0 instantly so every stream listener rebuilds immediately
+    _lastEmittedSteps = -1; // force re-emit even if previous was also 0
+    _emitSteps(0);
+    notifyListeners();
+  }
+
   void onStepCount(StepCount event) {
-    final currentDate = _dateKeyFor(DateTime.now());
+    final currentDate = _todayStamp();
     final incomingSteps = event.steps < 0 ? 0 : event.steps;
 
     if (!_hasStoredBaseline || _lastResetDate.isEmpty) {
@@ -79,9 +131,8 @@ class StepService extends ChangeNotifier {
       return;
     }
 
-    // New day detected — midnight rollover
+    // New day detected via sensor event (belt-and-suspenders alongside init check)
     if (_lastResetDate != currentDate) {
-      // Save yesterday's final step count to history before resetting
       unawaited(_saveToHistory(_lastResetDate, _todaySteps));
 
       _baselineSteps = incomingSteps;
@@ -89,6 +140,8 @@ class StepService extends ChangeNotifier {
       _lastResetDate = currentDate;
       _hasStoredBaseline = true;
       unawaited(_saveState());
+      // Force re-emit even if _lastEmittedSteps is already 0
+      _lastEmittedSteps = -1;
       _emitSteps(_todaySteps);
       notifyListeners();
       return;
@@ -116,8 +169,6 @@ class StepService extends ChangeNotifier {
 
   // ─── History ─────────────────────────────────────────────────────────────
 
-  /// Save a day's step count into the persistent history Map.
-  /// Keeps only the last [_maxHistoryDays] entries (oldest deleted first).
   Future<void> _saveToHistory(String dateKey, int steps) async {
     if (dateKey.isEmpty || steps < 0) return;
     final prefs = _preferences ?? await SharedPreferences.getInstance();
@@ -125,7 +176,6 @@ class StepService extends ChangeNotifier {
     final history = _readHistory(prefs);
     history[dateKey] = steps;
 
-    // Prune to keep only the most recent _maxHistoryDays entries
     if (history.length > _maxHistoryDays) {
       final sortedKeys = history.keys.toList()..sort();
       final keysToRemove = sortedKeys
@@ -140,7 +190,6 @@ class StepService extends ChangeNotifier {
     debugPrint('BRUTL_STEPS: Saved history $dateKey = $steps');
   }
 
-  /// Reads the full history Map from SharedPreferences.
   Map<String, int> _readHistory(SharedPreferences prefs) {
     final raw = prefs.getString(_stepHistoryKey);
     if (raw == null || raw.isEmpty) return {};
@@ -152,14 +201,10 @@ class StepService extends ChangeNotifier {
     }
   }
 
-  /// Public method — returns the full history map.
-  /// History key format: "YYYY-MM-DD", value: step count.
-  /// Today's live value is injected automatically.
   Future<Map<String, int>> getStepHistory() async {
     final prefs = _preferences ?? await SharedPreferences.getInstance();
     final history = _readHistory(prefs);
-    // Inject today's live steps so chart always shows current day
-    final today = _dateKeyFor(DateTime.now());
+    final today = _todayStamp();
     if (_todaySteps > 0) {
       history[today] = _todaySteps;
     }
@@ -185,10 +230,11 @@ class StepService extends ChangeNotifier {
     await prefs.setString(_lastResetDateKey, _lastResetDate);
   }
 
-  String _dateKeyFor(DateTime date) {
-    final y = date.year.toString().padLeft(4, '0');
-    final m = date.month.toString().padLeft(2, '0');
-    final d = date.day.toString().padLeft(2, '0');
+  String _todayStamp() {
+    final now = DateTime.now();
+    final y = now.year.toString().padLeft(4, '0');
+    final m = now.month.toString().padLeft(2, '0');
+    final d = now.day.toString().padLeft(2, '0');
     return '$y-$m-$d';
   }
 

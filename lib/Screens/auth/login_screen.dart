@@ -211,7 +211,7 @@ class _LoginScreenState extends State<LoginScreen> {
             vertical: AppSpacing.xxl,
           ),
           child: Consumer2<AuthValidationProvider, BrutlAuthProvider>(
-            builder: (context, validation, __, _) {
+            builder: (context, validation, _unused, _unused2) {
               final isAnyLoading = _isEmailLoading || _isGoogleLoading;
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

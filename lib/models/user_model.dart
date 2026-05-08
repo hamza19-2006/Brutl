@@ -28,6 +28,8 @@ class BrutlUser {
     this.targetCarbs = 200,
     this.targetFats = 60,
     this.isProfileComplete = false,
+    this.photoUrl = '',
+    this.usernameChangedAt,
   });
 
   final String uid;
@@ -55,6 +57,8 @@ class BrutlUser {
   final int targetCarbs;
   final int targetFats;
   final bool isProfileComplete;
+  final String photoUrl;
+  final DateTime? usernameChangedAt;
 
   BrutlUser copyWith({
     String? uid,
@@ -82,6 +86,8 @@ class BrutlUser {
     int? targetCarbs,
     int? targetFats,
     bool? isProfileComplete,
+    String? photoUrl,
+    DateTime? usernameChangedAt,
   }) {
     return BrutlUser(
       uid: uid ?? this.uid,
@@ -109,6 +115,8 @@ class BrutlUser {
       targetCarbs: targetCarbs ?? this.targetCarbs,
       targetFats: targetFats ?? this.targetFats,
       isProfileComplete: isProfileComplete ?? this.isProfileComplete,
+      photoUrl: photoUrl ?? this.photoUrl,
+      usernameChangedAt: usernameChangedAt ?? this.usernameChangedAt,
     );
   }
 
@@ -139,6 +147,9 @@ class BrutlUser {
       'target_carbs': targetCarbs,
       'target_fats': targetFats,
       'is_profile_complete': isProfileComplete,
+      'photo_url': photoUrl,
+      if (usernameChangedAt != null)
+        'username_changed_at': usernameChangedAt!.toUtc().toIso8601String(),
     };
   }
 
@@ -179,6 +190,26 @@ class BrutlUser {
       targetCarbs: (json['target_carbs'] as num?)?.toInt() ?? 200,
       targetFats: (json['target_fats'] as num?)?.toInt() ?? 60,
       isProfileComplete: json['is_profile_complete'] as bool? ?? false,
+      photoUrl:
+          (json['photo_url'] as String?) ??
+          (json['photoUrl'] as String?) ??
+          '',
+      usernameChangedAt: _parseTimestamp(
+        json['username_changed_at'] ?? json['usernameChangedAt'],
+      ),
     );
+  }
+
+  static DateTime? _parseTimestamp(dynamic raw) {
+    if (raw == null) return null;
+    if (raw is DateTime) return raw;
+    if (raw is String) return DateTime.tryParse(raw);
+    try {
+      // Firestore Timestamp: dynamic to avoid hard import.
+      final dyn = raw as dynamic;
+      final dt = dyn.toDate();
+      if (dt is DateTime) return dt;
+    } catch (_) {}
+    return null;
   }
 }

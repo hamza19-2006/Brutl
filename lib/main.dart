@@ -13,6 +13,7 @@ import 'core/theme/app_theme.dart';
 import 'services/firebase_bootstrap.dart';
 import 'providers/auth_provider.dart';
 import 'providers/auth_validation_provider.dart';
+import 'providers/brutl_user_provider.dart';
 import 'providers/health_provider.dart';
 import 'providers/workout_nutrition_provider.dart';
 import 'providers/workout_provider.dart';
@@ -42,6 +43,9 @@ class BrutlAppBootstrap extends StatelessWidget {
         ChangeNotifierProvider<StepProvider>(create: (_) => StepProvider()),
         ChangeNotifierProvider<WorkoutNutritionProvider>(
           create: (_) => WorkoutNutritionProvider(),
+        ),
+        ChangeNotifierProvider<BrutlUserProvider>(
+          create: (_) => BrutlUserProvider(),
         ),
       ],
       child: const AppWarmupGate(),
@@ -82,6 +86,11 @@ class _AppWarmupGateState extends State<AppWarmupGate> {
 
       await workoutProvider.initialize();
       await nutritionProvider.initialize();
+
+      if (mounted) {
+        // Bind canonical user document for Settings module.
+        await context.read<BrutlUserProvider>().bindToCurrentUser();
+      }
     } catch (error) {
       debugPrint('BRUTL_BOOT: Startup warmup failed — $error');
     }

@@ -618,8 +618,9 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
                 enabled: true,
                 touchCallback: (event, response) {
                   if (!event.isInterestedForInteractions ||
-                      response?.spot == null)
+                      response?.spot == null) {
                     return;
+                  }
                   setState(
                     () => _selectedDayIndex =
                         response!.spot!.touchedBarGroupIndex,
@@ -632,7 +633,7 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
                     vertical: 6,
                   ),
                   getTooltipColor: (_) => _bg2,
-                  getTooltipItem: (group, _, rod, __) {
+                  getTooltipItem: (group, _unused, rod, _unused2) {
                     final snap =
                         _weekData[CalorieHistoryService.dateKeyFor(
                           _dayAt(group.x),

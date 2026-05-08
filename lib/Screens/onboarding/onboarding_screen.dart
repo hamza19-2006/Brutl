@@ -623,7 +623,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       await prefs.setInt('carbs_goal', _targetCarbs);
       await prefs.setInt('protein_goal', _targetProtein);
       await prefs.setInt('fats_goal', _targetFats);
-
       if (!mounted) return;
 
       Navigator.pushAndRemoveUntil(

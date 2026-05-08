@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
-
-import 'package:firebase_vertexai/firebase_vertexai.dart';
+import 'package:firebase_ai/firebase_ai.dart';
 import 'package:flutter/foundation.dart';
 
 const String _systemPrompt =
@@ -14,7 +13,7 @@ Future<Map<String, dynamic>> analyzeMeal(Uint8List imageBytes) async {
   if (imageBytes.isEmpty) return {};
 
   try {
-    final model = FirebaseVertexAI.instance.generativeModel(
+    final model = FirebaseAI.googleAI().generativeModel(
       model: 'gemini-3-flash',
       systemInstruction: Content.system(_systemPrompt),
       generationConfig: GenerationConfig(

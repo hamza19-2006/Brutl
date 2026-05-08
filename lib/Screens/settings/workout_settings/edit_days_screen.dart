@@ -6,12 +6,20 @@ import 'package:provider/provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_text_styles.dart';
+import '../../../models/brutl_models.dart' as brutl;
 import '../../../providers/workout_provider.dart';
 import '../widgets/settings_widgets.dart';
 import 'edit_exercises_screen.dart';
 
-class EditDaysScreen extends StatelessWidget {
+class EditDaysScreen extends StatefulWidget {
   const EditDaysScreen({super.key});
+
+  @override
+  State<EditDaysScreen> createState() => _EditDaysScreenState();
+}
+
+class _EditDaysScreenState extends State<EditDaysScreen> {
+  int _selectedWeekIndex = 0;
 
   @override
   Widget build(BuildContext context) {
@@ -21,28 +29,82 @@ class EditDaysScreen extends StatelessWidget {
       body: SafeArea(
         child: Consumer<WorkoutProvider>(
           builder: (context, provider, _) {
-            final allDays = provider.activeSplitDays;
-            final seen = <String>{};
-            final days = allDays.where((d) => seen.add(d)).toList();
-
-            if (days.isEmpty) {
-              return Center(
-                child: Text(
-                  'No split configured.',
-                  style: AppTextStyles.bodyMedium(),
-                ),
-              );
+            final maxWeekIndex = provider.totalProgramWeeks - 1;
+            if (_selectedWeekIndex > maxWeekIndex) {
+              _selectedWeekIndex = maxWeekIndex < 0 ? 0 : maxWeekIndex;
             }
 
-            return ListView.separated(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.xl,
-                vertical: AppSpacing.lg,
-              ),
-              itemCount: days.length,
-              separatorBuilder: (_, __) =>
-                  const SizedBox(height: AppSpacing.sm),
-              itemBuilder: (context, index) => _DayRow(dayName: days[index]),
+            final days = provider.getDaysForWeek(_selectedWeekIndex);
+
+            return Column(
+              children: [
+                SizedBox(
+                  height: 45,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
+                    itemCount: provider.totalProgramWeeks,
+                    itemBuilder: (context, index) {
+                      final isSelected = _selectedWeekIndex == index;
+                      final weekNumber = index + 1;
+                      return GestureDetector(
+                        onTap: () {
+                          setState(() => _selectedWeekIndex = index);
+                        },
+                        child: Container(
+                          margin: const EdgeInsets.only(right: 12),
+                          padding: const EdgeInsets.symmetric(horizontal: 24),
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: isSelected
+                                ? const Color(0xFFFF3D00)
+                                : const Color(0xFF1A1A1A),
+                            borderRadius: BorderRadius.circular(20),
+                            border: isSelected
+                                ? null
+                                : Border.all(color: const Color(0xFF2A2A2A)),
+                          ),
+                          child: Text(
+                            'Week $weekNumber',
+                            style: TextStyle(
+                              color: isSelected
+                                  ? Colors.white
+                                  : const Color(0xFF888888),
+                              fontWeight: isSelected
+                                  ? FontWeight.bold
+                                  : FontWeight.w500,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.lg),
+                Expanded(
+                  child: days.isEmpty
+                      ? Center(
+                          child: Text(
+                            'No workouts configured for this week.',
+                            style: AppTextStyles.bodyMedium(),
+                          ),
+                        )
+                      : ListView.separated(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.xl,
+                            vertical: AppSpacing.lg,
+                          ),
+                          itemCount: days.length,
+                          separatorBuilder: (context, index) =>
+                              const SizedBox(height: AppSpacing.sm),
+                          itemBuilder: (context, index) => _DayRow(
+                            weekIndex: _selectedWeekIndex,
+                            day: days[index],
+                          ),
+                        ),
+                ),
+              ],
             );
           },
         ),
@@ -52,9 +114,10 @@ class EditDaysScreen extends StatelessWidget {
 }
 
 class _DayRow extends StatelessWidget {
-  const _DayRow({required this.dayName});
+  const _DayRow({required this.weekIndex, required this.day});
 
-  final String dayName;
+  final int weekIndex;
+  final brutl.ProgramDayModel day;
 
   @override
   Widget build(BuildContext context) {
@@ -64,7 +127,11 @@ class _DayRow extends StatelessWidget {
           child: GestureDetector(
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute<void>(
-                builder: (_) => EditExercisesScreen(dayName: dayName),
+                builder: (_) => EditExercisesScreen(
+                  dayId: day.id,
+                  dayName: day.splitName,
+                  weekIndex: weekIndex,
+                ),
               ),
             ),
             child: Container(
@@ -76,7 +143,7 @@ class _DayRow extends StatelessWidget {
                 ),
                 border: Border.all(color: AppColors.borderDefault),
               ),
-              child: Text(dayName, style: AppTextStyles.headingSmall()),
+              child: Text(day.splitName, style: AppTextStyles.headingSmall()),
             ),
           ),
         ),
@@ -103,7 +170,7 @@ class _DayRow extends StatelessWidget {
   }
 
   Future<void> _showRenameDialog(BuildContext context) async {
-    final controller = TextEditingController(text: dayName);
+    final controller = TextEditingController(text: day.splitName);
     final newName = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -139,11 +206,15 @@ class _DayRow extends StatelessWidget {
     );
     controller.dispose();
 
-    if (newName == null || newName.isEmpty || newName == dayName) return;
+    if (newName == null || newName.isEmpty || newName == day.splitName) return;
     if (!context.mounted) return;
 
     unawaited(
-      context.read<WorkoutProvider>().renameDayOptimistic(dayName, newName),
+      context.read<WorkoutProvider>().renameDayOptimistic(
+        weekIndex,
+        day.splitName,
+        newName,
+      ),
     );
 
     ScaffoldMessenger.of(context)
@@ -172,7 +243,7 @@ class _DayRow extends StatelessWidget {
         ),
         content: Text(
           'Are you sure? This will delete ALL exercises saved under '
-          '"$dayName". The day itself will remain, but will be empty.',
+          '"${day.splitName}". The day itself will remain, but will be empty.',
           style: AppTextStyles.bodyMedium(),
         ),
         actions: [
@@ -197,7 +268,10 @@ class _DayRow extends StatelessWidget {
     if (confirmed != true || !context.mounted) return;
 
     unawaited(
-      context.read<WorkoutProvider>().clearExercisesFromDayOptimistic(dayName),
+      context.read<WorkoutProvider>().clearExercisesFromDayOptimistic(
+        weekIndex,
+        day.splitName,
+      ),
     );
 
     if (!context.mounted) return;
@@ -205,7 +279,7 @@ class _DayRow extends StatelessWidget {
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
-          content: Text('Exercises for "$dayName" cleared.'),
+          content: Text('Exercises for "${day.splitName}" cleared.'),
           backgroundColor: AppColors.statusSuccess,
           behavior: SnackBarBehavior.floating,
         ),

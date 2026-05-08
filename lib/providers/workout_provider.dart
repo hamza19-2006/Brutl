@@ -105,18 +105,52 @@ class WorkoutProvider extends ChangeNotifier {
     return List<String>.unmodifiable(_masterTemplate);
   }
 
-  List<brutl.ProgramDayModel> get currentWeekWorkouts {
-    final baseList = _programDays
-        .where((day) => day.weekNumber == _selectedWeek)
-        .toList();
-    baseList.sort((a, b) => a.dayNumber.compareTo(b.dayNumber));
-    return baseList
+  List<brutl.ProgramDayModel> get currentWeekWorkouts =>
+      getDaysForWeek(_selectedWeek - 1);
+
+  List<brutl.ProgramDayModel> getDaysForWeek(int weekIndex) {
+    final weekNumber = weekIndex + 1;
+    if (weekNumber < 1 || weekNumber > _totalProgramWeeks) {
+      return const <brutl.ProgramDayModel>[];
+    }
+
+    final baseDays = _programDays
+        .where((day) => day.weekNumber == weekNumber)
+        .toList(growable: false)
+      ..sort((a, b) => a.dayNumber.compareTo(b.dayNumber));
+
+    if (weekNumber != _selectedWeek) {
+      return baseDays;
+    }
+
+    return baseDays
         .map((baseDay) {
           final override = _selectedWeekOverrides[baseDay.id];
           if (override == null) return baseDay;
-          return baseDay.copyWith(exercises: override.exercises);
+          return baseDay.copyWith(
+            splitName: override.splitName,
+            exercises: override.exercises,
+          );
         })
         .toList(growable: false);
+  }
+
+  brutl.ProgramDayModel? getDayForWeek(int weekIndex, String dayId) {
+    final weekDays = getDaysForWeek(weekIndex);
+    for (final day in weekDays) {
+      if (day.id == dayId) {
+        return day;
+      }
+    }
+    return null;
+  }
+
+  List<brutl.ExerciseModel> getExercisesForWeekDay(int weekIndex, String dayId) {
+    final day = getDayForWeek(weekIndex, dayId);
+    if (day == null) {
+      return const <brutl.ExerciseModel>[];
+    }
+    return List<brutl.ExerciseModel>.unmodifiable(day.exercises);
   }
 
   void selectWeek(int week) {
@@ -760,191 +794,261 @@ class WorkoutProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Renames every occurrence of [oldName] to [newName] in the split day
-  /// lists and in the in-memory program days. Persists to Hive + Firestore
-  /// and reverts local state if persistence fails.
-  Future<void> renameDayOptimistic(String oldName, String newName) async {
-    final prevCustom = _customSplitDays;
-    final prevTemplate = _masterTemplate;
-    final prevDays = _programDays;
+  brutl.ProgramDayModel? _findProgramDayById(String dayId) {
+    for (final day in _programDays) {
+      if (day.id == dayId) {
+        return day;
+      }
+    }
+    return null;
+  }
 
-    _customSplitDays = _customSplitDays
-        .map((d) => d == oldName ? newName : d)
-        .toList(growable: false);
-    _masterTemplate = _customSplitDays;
+  void _syncSelectedWeekOverridesForAffectedDays(
+    int weekNumber,
+    Set<String> affectedDayIds,
+  ) {
+    if (weekNumber != _selectedWeek || affectedDayIds.isEmpty) {
+      return;
+    }
+
+    final updatedOverrides =
+        Map<String, brutl.ProgramDayModel>.from(_selectedWeekOverrides);
+    for (final dayId in affectedDayIds) {
+      final override = updatedOverrides[dayId];
+      final currentDay = _findProgramDayById(dayId);
+      if (override == null || currentDay == null) {
+        continue;
+      }
+      updatedOverrides[dayId] = override.copyWith(
+        splitName: currentDay.splitName,
+        exercises: currentDay.exercises,
+      );
+    }
+
+    _selectedWeekOverrides = updatedOverrides;
+  }
+
+  Future<void> _persistWorkoutDayLogsForIds(
+    String uid,
+    Set<String> dayIds,
+  ) async {
+    if (dayIds.isEmpty) return;
+
+    final firestore = FirebaseFirestore.instance;
+    final batch = firestore.batch();
+    for (final dayId in dayIds) {
+      final day = _findProgramDayById(dayId);
+      if (day == null) {
+        continue;
+      }
+
+      final payload = day.toJson()..['updatedAt'] = FieldValue.serverTimestamp();
+      batch.set(
+        firestore
+            .collection('users')
+            .doc(uid)
+            .collection('workout_day_logs')
+            .doc(day.id),
+        payload,
+        SetOptions(merge: true),
+      );
+    }
+
+    await batch.commit();
+  }
+
+  Future<void> renameDayOptimistic(
+    int weekIndex,
+    String oldName,
+    String newName,
+  ) async {
+    final trimmedNewName = newName.trim();
+    final weekNumber = weekIndex + 1;
+    if (trimmedNewName.isEmpty || trimmedNewName == oldName) {
+      return;
+    }
+
+    final prevDays = List<brutl.ProgramDayModel>.from(_programDays);
+    final prevOverrides =
+        Map<String, brutl.ProgramDayModel>.from(_selectedWeekOverrides);
+    final affectedDayIds = <String>{};
+
     _programDays = _programDays
-        .map((d) => d.splitName == oldName ? d.copyWith(splitName: newName) : d)
-        .toList();
+        .map((day) {
+          if (day.weekNumber != weekNumber || day.splitName != oldName) {
+            return day;
+          }
+
+          affectedDayIds.add(day.id);
+          return day.copyWith(splitName: trimmedNewName);
+        })
+        .toList(growable: false);
+
+    if (affectedDayIds.isEmpty) {
+      return;
+    }
+
+    _syncSelectedWeekOverridesForAffectedDays(weekNumber, affectedDayIds);
     notifyListeners();
 
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     try {
-      final firestore = FirebaseFirestore.instance;
-      final exercisesBox = Hive.box<String>('exercises');
-      final batch = firestore.batch();
-      for (final key in exercisesBox.keys) {
-        final jsonString = exercisesBox.get(key);
-        if (jsonString == null) continue;
-        try {
-          final exercise = brutl.ExerciseModel.fromJson(
-            jsonDecode(jsonString) as Map<String, dynamic>,
-          );
-          if (exercise.splitName == oldName) {
-            final updated = exercise.copyWith(splitName: newName);
-            await exercisesBox.put(exercise.id, jsonEncode(updated.toJson()));
-            batch.set(
-              firestore
-                  .collection('users')
-                  .doc(uid)
-                  .collection('workouts')
-                  .doc(exercise.id),
-              <String, dynamic>{
-                'splitName': newName,
-                'updatedAt': FieldValue.serverTimestamp(),
-              },
-              SetOptions(merge: true),
-            );
-          }
-        } catch (_) {}
-      }
-      batch.set(firestore.collection('users').doc(uid), <String, dynamic>{
-        'workout_master_template': _masterTemplate,
-        'custom_split_days': _customSplitDays,
-      }, SetOptions(merge: true));
-      await batch.commit();
+      await _persistWorkoutDayLogsForIds(uid, affectedDayIds);
     } catch (e) {
       debugPrint('EDIT_DAYS: Firebase rename day failed — $e');
-      _customSplitDays = prevCustom;
-      _masterTemplate = prevTemplate;
       _programDays = prevDays;
+      _selectedWeekOverrides = prevOverrides;
       notifyListeners();
     }
   }
 
-  /// Removes all exercises from every program-day entry whose split name
-  /// matches [dayName]. Persists to Hive + Firestore and reverts local state
-  /// if persistence fails.
-  Future<void> clearExercisesFromDayOptimistic(String dayName) async {
-    final prevDays = _programDays;
+  Future<void> clearExercisesFromDayOptimistic(
+    int weekIndex,
+    String dayName,
+  ) async {
+    final weekNumber = weekIndex + 1;
+    final prevDays = List<brutl.ProgramDayModel>.from(_programDays);
+    final prevOverrides =
+        Map<String, brutl.ProgramDayModel>.from(_selectedWeekOverrides);
+    final affectedDayIds = <String>{};
 
     _programDays = _programDays
-        .map(
-          (d) => d.splitName == dayName ? d.copyWith(exercises: const []) : d,
-        )
-        .toList();
+        .map((day) {
+          if (day.weekNumber != weekNumber || day.splitName != dayName) {
+            return day;
+          }
+
+          affectedDayIds.add(day.id);
+          return day.copyWith(exercises: const <brutl.ExerciseModel>[]);
+        })
+        .toList(growable: false);
+
+    if (affectedDayIds.isEmpty) {
+      return;
+    }
+
+    _syncSelectedWeekOverridesForAffectedDays(weekNumber, affectedDayIds);
     notifyListeners();
 
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     try {
-      final firestore = FirebaseFirestore.instance;
-      final exercisesBox = Hive.box<String>('exercises');
-      final batch = firestore.batch();
-      for (final key in List<dynamic>.from(exercisesBox.keys)) {
-        final jsonString = exercisesBox.get(key);
-        if (jsonString == null) continue;
-        try {
-          final exercise = brutl.ExerciseModel.fromJson(
-            jsonDecode(jsonString) as Map<String, dynamic>,
-          );
-          if (exercise.splitName == dayName) {
-            batch.delete(
-              firestore
-                  .collection('users')
-                  .doc(uid)
-                  .collection('workouts')
-                  .doc(exercise.id),
-            );
-            await exercisesBox.delete(exercise.id);
-          }
-        } catch (_) {}
-      }
-      await batch.commit();
+      await _persistWorkoutDayLogsForIds(uid, affectedDayIds);
     } catch (e) {
       debugPrint('EDIT_DAYS: Firebase clear day failed — $e');
       _programDays = prevDays;
+      _selectedWeekOverrides = prevOverrides;
       notifyListeners();
     }
   }
 
-  /// Renames [exercise] to [newExerciseName] across every program-day entry
-  /// for [dayName]. Persists to Hive + Firestore and reverts local state if
-  /// persistence fails.
   Future<void> renameExerciseOptimistic(
+    int weekIndex,
     String dayName,
-    brutl.ExerciseModel exercise,
+    String oldExerciseName,
     String newExerciseName,
   ) async {
-    final prevDays = _programDays;
-    final oldExerciseName = exercise.name;
+    final trimmedNewName = newExerciseName.trim();
+    final weekNumber = weekIndex + 1;
+    if (trimmedNewName.isEmpty || trimmedNewName == oldExerciseName) {
+      return;
+    }
 
-    _programDays = _programDays.map((day) {
-      if (day.splitName != dayName) return day;
-      final updated = day.exercises
-          .map(
-            (ex) => ex.name == oldExerciseName
-                ? ex.copyWith(name: newExerciseName)
-                : ex,
-          )
-          .toList(growable: false);
-      return day.copyWith(exercises: updated);
-    }).toList();
+    final prevDays = List<brutl.ProgramDayModel>.from(_programDays);
+    final prevOverrides =
+        Map<String, brutl.ProgramDayModel>.from(_selectedWeekOverrides);
+    final affectedDayIds = <String>{};
+
+    _programDays = _programDays
+        .map((day) {
+          if (day.weekNumber != weekNumber || day.splitName != dayName) {
+            return day;
+          }
+
+          var didRename = false;
+          final updatedExercises = day.exercises
+              .map((exercise) {
+                if (exercise.name != oldExerciseName) {
+                  return exercise;
+                }
+                didRename = true;
+                return exercise.copyWith(name: trimmedNewName);
+              })
+              .toList(growable: false);
+
+          if (!didRename) {
+            return day;
+          }
+
+          affectedDayIds.add(day.id);
+          return day.copyWith(exercises: updatedExercises);
+        })
+        .toList(growable: false);
+
+    if (affectedDayIds.isEmpty) {
+      return;
+    }
+
+    _syncSelectedWeekOverridesForAffectedDays(weekNumber, affectedDayIds);
     notifyListeners();
 
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     try {
-      final exercisesBox = Hive.box<String>('exercises');
-      final updatedExercise = exercise.copyWith(name: newExerciseName);
-      await exercisesBox.put(exercise.id, jsonEncode(updatedExercise.toJson()));
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .collection('workouts')
-          .doc(exercise.id)
-          .set(<String, dynamic>{
-            'name': newExerciseName,
-            'updatedAt': FieldValue.serverTimestamp(),
-          }, SetOptions(merge: true));
+      await _persistWorkoutDayLogsForIds(uid, affectedDayIds);
     } catch (e) {
       debugPrint('EDIT_EXERCISES: Firebase rename exercise failed — $e');
       _programDays = prevDays;
+      _selectedWeekOverrides = prevOverrides;
       notifyListeners();
     }
   }
 
-  /// Removes [exercise] from every program-day entry for [dayName]. Persists
-  /// to Hive + Firestore and reverts local state if persistence fails.
   Future<void> deleteExerciseOptimistic(
+    int weekIndex,
     String dayName,
-    brutl.ExerciseModel exercise,
+    String exerciseName,
   ) async {
-    final prevDays = _programDays;
+    final weekNumber = weekIndex + 1;
+    final prevDays = List<brutl.ProgramDayModel>.from(_programDays);
+    final prevOverrides =
+        Map<String, brutl.ProgramDayModel>.from(_selectedWeekOverrides);
+    final affectedDayIds = <String>{};
 
-    _programDays = _programDays.map((day) {
-      if (day.splitName != dayName) return day;
-      final updated = day.exercises
-          .where((ex) => ex.name != exercise.name)
-          .toList(growable: false);
-      return day.copyWith(exercises: updated);
-    }).toList();
+    _programDays = _programDays
+        .map((day) {
+          if (day.weekNumber != weekNumber || day.splitName != dayName) {
+            return day;
+          }
+
+          final updatedExercises = day.exercises
+              .where((exercise) => exercise.name != exerciseName)
+              .toList(growable: false);
+          if (updatedExercises.length == day.exercises.length) {
+            return day;
+          }
+
+          affectedDayIds.add(day.id);
+          return day.copyWith(exercises: updatedExercises);
+        })
+        .toList(growable: false);
+
+    if (affectedDayIds.isEmpty) {
+      return;
+    }
+
+    _syncSelectedWeekOverridesForAffectedDays(weekNumber, affectedDayIds);
     notifyListeners();
 
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     try {
-      final exercisesBox = Hive.box<String>('exercises');
-      await exercisesBox.delete(exercise.id);
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .collection('workouts')
-          .doc(exercise.id)
-          .delete();
+      await _persistWorkoutDayLogsForIds(uid, affectedDayIds);
     } catch (e) {
       debugPrint('EDIT_EXERCISES: Firebase delete exercise failed — $e');
       _programDays = prevDays;
+      _selectedWeekOverrides = prevOverrides;
       notifyListeners();
     }
   }

@@ -11,6 +11,7 @@ import '../../providers/brutl_user_provider.dart';
 import '../auth/login_screen.dart';
 import 'account_settings_screen.dart';
 import 'credentials/credentials_screen.dart';
+import 'feedback_screen.dart';
 import 'personal_stats_screen.dart';
 import 'widgets/settings_widgets.dart';
 import 'workout_settings/exercise_settings_screen.dart';
@@ -123,8 +124,11 @@ class _MainSettingsScreenState extends State<MainSettingsScreen> {
                   ),
                   SettingsTileWidget(
                     title: 'Feedback / Suggestion',
-                    onTap: () =>
-                        _showComingSoon(context, 'Feedback / Suggestion'),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const FeedbackScreen(),
+                      ),
+                    ),
                   ),
                 ],
               ),

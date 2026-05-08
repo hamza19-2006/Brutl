@@ -234,8 +234,6 @@ class WorkoutProvider extends ChangeNotifier {
                 final weightKg = _toKg(rawWeight, weightUnit);
                 final remoteCurrentSteps =
                     (data['currentSteps'] as num?)?.toInt() ??
-                    // Backward compatibility: if a separate step-goal field exists,
-                    // treat legacy `dailySteps` as current live steps.
                     ((data.containsKey('step_goal') ||
                             data.containsKey('daily_steps') ||
                             data.containsKey('dailyStepGoal') ||
@@ -634,6 +632,12 @@ class WorkoutProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// BUG 1 FIX: Synchronously updates the local calorie/macro targets in
+  /// WorkoutProvider so the Home and Workout screens repaint immediately
+  /// without waiting for a Firestore stream event or app restart.
+  ///
+  /// Also persists the new goals to SharedPreferences and NutritionService
+  /// so the CaloriesCard and macro dashboard stay in sync.
   void updateOptimisticMacros(
     int newKcal,
     int newCarbs,

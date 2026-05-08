@@ -10,6 +10,7 @@ import '../../providers/auth_provider.dart';
 import '../../providers/brutl_user_provider.dart';
 import '../auth/login_screen.dart';
 import 'account_settings_screen.dart';
+import 'credentials/credentials_screen.dart';
 import 'personal_stats_screen.dart';
 import 'widgets/settings_widgets.dart';
 
@@ -96,7 +97,11 @@ class _MainSettingsScreenState extends State<MainSettingsScreen> {
                   ),
                   SettingsTileWidget(
                     title: 'Credentials',
-                    onTap: () => _showComingSoon(context, 'Credentials'),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const CredentialsScreen(),
+                      ),
+                    ),
                   ),
                   SettingsTileWidget(
                     title: 'Exercise Changes',

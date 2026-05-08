@@ -49,8 +49,7 @@ class _EditUsernameScreenState extends State<EditUsernameScreen> {
 
     if (!_usernamePattern.hasMatch(value)) {
       setState(
-        () => _errorText =
-            'Use 3–24 chars: lowercase letters, numbers, "_" or "."',
+        () => _errorText = 'Use 6–15 chars: lowercase letters, numbers, "_"',
       );
       return;
     }

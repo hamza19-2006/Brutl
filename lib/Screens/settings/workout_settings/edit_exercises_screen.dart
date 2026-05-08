@@ -88,7 +88,10 @@ class _EditExercisesScreenState extends State<EditExercisesScreen> {
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
-          content: Text('Exercise renamed to "$newName".'),
+          content: Text(
+            'Exercise renamed to "$newName".',
+            style: const TextStyle(color: Colors.white),
+          ),
           backgroundColor: AppColors.statusSuccess,
           behavior: SnackBarBehavior.floating,
         ),
@@ -149,7 +152,10 @@ class _EditExercisesScreenState extends State<EditExercisesScreen> {
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
-          content: Text('"${exercise.name}" deleted.'),
+          content: Text(
+            '"${exercise.name}" deleted.',
+            style: const TextStyle(color: Colors.white),
+          ),
           backgroundColor: AppColors.statusSuccess,
           behavior: SnackBarBehavior.floating,
         ),
@@ -197,7 +203,9 @@ class _EditExercisesScreenState extends State<EditExercisesScreen> {
                                 borderRadius: BorderRadius.circular(
                                   AppSpacing.borderRadiusMedium,
                                 ),
-                                border: Border.all(color: AppColors.borderDefault),
+                                border: Border.all(
+                                  color: AppColors.borderDefault,
+                                ),
                               ),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,

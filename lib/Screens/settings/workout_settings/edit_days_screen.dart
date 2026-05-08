@@ -42,7 +42,9 @@ class _EditDaysScreenState extends State<EditDaysScreen> {
                   height: 45,
                   child: ListView.builder(
                     scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.xl,
+                    ),
                     itemCount: provider.totalProgramWeeks,
                     itemBuilder: (context, index) {
                       final isSelected = _selectedWeekIndex == index;
@@ -221,7 +223,10 @@ class _DayRow extends StatelessWidget {
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
-          content: Text('Day renamed to "$newName".'),
+          content: Text(
+            'Day renamed to "$newName".',
+            style: const TextStyle(color: Colors.white),
+          ),
           backgroundColor: AppColors.statusSuccess,
           behavior: SnackBarBehavior.floating,
         ),
@@ -279,7 +284,10 @@ class _DayRow extends StatelessWidget {
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
-          content: Text('Exercises for "${day.splitName}" cleared.'),
+          content: Text(
+            'Exercises for "${day.splitName}" cleared.',
+            style: const TextStyle(color: Colors.white),
+          ),
           backgroundColor: AppColors.statusSuccess,
           behavior: SnackBarBehavior.floating,
         ),

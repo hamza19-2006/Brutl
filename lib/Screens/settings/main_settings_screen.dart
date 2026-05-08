@@ -10,6 +10,7 @@ import '../../providers/auth_provider.dart';
 import '../../providers/brutl_user_provider.dart';
 import '../auth/login_screen.dart';
 import 'account_settings_screen.dart';
+import 'contact_support_screen.dart';
 import 'credentials/credentials_screen.dart';
 import 'feedback_screen.dart';
 import 'personal_stats_screen.dart';
@@ -120,7 +121,12 @@ class _MainSettingsScreenState extends State<MainSettingsScreen> {
                 children: [
                   SettingsTileWidget(
                     title: 'Contact Support',
-                    onTap: () => _showComingSoon(context, 'Contact Support'),
+                    showChevron: true,
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const ContactSupportScreen(),
+                      ),
+                    ),
                   ),
                   SettingsTileWidget(
                     title: 'Feedback / Suggestion',
@@ -175,17 +181,5 @@ class _MainSettingsScreenState extends State<MainSettingsScreen> {
         ),
       ),
     );
-  }
-
-  void _showComingSoon(BuildContext context, String label) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          backgroundColor: AppColors.backgroundTertiary,
-          behavior: SnackBarBehavior.floating,
-          content: Text('$label — coming soon'),
-        ),
-      );
   }
 }

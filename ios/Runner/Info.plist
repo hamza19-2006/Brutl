@@ -26,6 +26,11 @@
 		<string>$(FLUTTER_BUILD_NUMBER)</string>
 		<key>LSRequiresIPhoneOS</key>
 		<true/>
+		<key>LSApplicationQueriesSchemes</key>
+		<array>
+			<string>mailto</string>
+			<string>whatsapp</string>
+		</array>
 		<key>NSMotionUsageDescription</key>
 		<string>Brutl uses motion data to track your steps and calories burned.</string>
 		<key>UIApplicationSceneManifest</key>

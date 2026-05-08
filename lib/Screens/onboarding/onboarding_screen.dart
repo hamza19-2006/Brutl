@@ -137,16 +137,34 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           'Chest & Triceps',
           'Back & Biceps',
           'Legs & Shoulders',
+          'Rest',
         ];
       case 'Bro Split (1 muscle per day)':
-        return <String>['Chest', 'Back', 'Legs', 'Shoulders', 'Arms'];
+        return <String>[
+          'Chest',
+          'Back',
+          'Legs',
+          'Shoulders',
+          'Arms',
+          'Rest Day ',
+          'Rest Day',
+        ];
       case 'Upper, Lower, Rest, Repeat':
-        return <String>['Upper A', 'Lower A', 'Upper B', 'Lower B'];
+        return <String>[
+          'Upper A',
+          'Lower A',
+          'Rest Day ',
+          'Upper B',
+          'Lower B',
+          'Rest Day',
+          'Rest Day',
+        ];
       case 'Push, Pull, Legs, Upper, Lower':
         return <String>[
           'Chest & Triceps',
           'Back & Biceps',
           'Legs & Shoulders',
+          'Rest',
           'Upper',
           'Lower',
         ];

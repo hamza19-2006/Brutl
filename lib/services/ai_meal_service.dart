@@ -1,33 +1,65 @@
 import 'dart:convert';
 import 'dart:typed_data';
-import '../config/secrets.dart';
+import '../config/secrets.dart'; // Ensure openRouterApiKey is added here
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:image/image.dart' as img;
 
+// API Config
 const String _geminiApiKey = geminiApiKey;
-const String _model = 'gemini-2.0-flash';
+const String _openRouterApiKey =
+    openRouterApiKey; // Add this to your secrets.dart
+
+// Model IDs
+const String _geminiModel = 'gemini-flash-latest';
+const String _gptModel = 'openai/gpt-4o-mini';
 
 const String _systemPrompt =
     'You are a precise macro calculator. Analyze this food image. '
     'Return ONLY a raw, unformatted JSON object. '
-    'Do not include any markdown, code blocks, or extra text. '
     'The JSON keys must be exactly: "kcal", "carbs", "protein", "fat". '
     'All values must be integers.';
 
 Future<Map<String, int>?> analyzeMeal(Uint8List imageBytes) async {
-  if (_geminiApiKey.isEmpty) {
-    debugPrint('analyzeMeal: GEMINI_API_KEY is not set.');
-    return null;
+  // 1. --- IMAGE COMPRESSION & OPTIMIZATION ---
+  Uint8List optimizedBytes = imageBytes;
+  try {
+    img.Image? decodedImage = img.decodeImage(imageBytes);
+    if (decodedImage != null) {
+      img.Image resized = (decodedImage.width > decodedImage.height)
+          ? img.copyResize(decodedImage, width: 800)
+          : img.copyResize(decodedImage, height: 800);
+
+      optimizedBytes = Uint8List.fromList(img.encodeJpg(resized, quality: 80));
+      debugPrint(
+        '--- [IMAGE] Optimized to: ${(optimizedBytes.lengthInBytes / 1024).toStringAsFixed(2)} KB ---',
+      );
+    }
+  } catch (e) {
+    debugPrint('--- [IMAGE] Optimization failed: $e ---');
   }
 
+  // 2. --- TRY PRIMARY MODEL (GEMINI) ---
+  var result = await _attemptGemini(optimizedBytes);
+  if (result != null) return result;
+
+  // 3. --- FALLBACK: TRY SECONDARY MODEL (GPT-4O-MINI) ---
+  debugPrint(
+    '--- [AI SCAN] Gemini failed. Attempting GPT-4o-mini Fallback... ---',
+  );
+  return await _attemptGPTMini(optimizedBytes);
+}
+
+/// Primary Scan using Gemini 1.5 Flash
+Future<Map<String, int>?> _attemptGemini(Uint8List bytes) async {
+  if (_geminiApiKey.isEmpty) return null;
+
   final String url =
-      'https://generativelanguage.googleapis.com/v1beta/models/$_model:generateContent?key=$_geminiApiKey';
-  final Uri uri = Uri.parse(url);
+      'https://generativelanguage.googleapis.com/v1beta/models/$_geminiModel:generateContent?key=$_geminiApiKey';
+  final String base64Image = base64Encode(bytes);
 
-  final String base64Image = base64Encode(imageBytes);
-
-  final Map<String, dynamic> requestBody = {
+  final body = {
     'contents': [
       {
         'role': 'user',
@@ -42,38 +74,87 @@ Future<Map<String, int>?> analyzeMeal(Uint8List imageBytes) async {
   };
 
   try {
-    debugPrint('--- [AI SCAN] SENDING REQUEST ---');
-
     final response = await http.post(
-      uri,
+      Uri.parse(url),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode(requestBody),
+      body: jsonEncode(body),
     );
 
-    debugPrint('--- [AI SCAN] STATUS CODE: ${response.statusCode} ---');
-    debugPrint('--- [AI SCAN] RAW RESPONSE: ${response.body} ---');
+    if (response.statusCode == 200) {
+      return _parseResponse(response.body, isGemini: true);
+    }
+    debugPrint('--- [GEMINI] Failed with status: ${response.statusCode} ---');
+  } catch (e) {
+    debugPrint('--- [GEMINI] Exception: $e ---');
+  }
+  return null;
+}
 
-    if (response.statusCode != 200) {
-      debugPrint('--- [AI SCAN] ERROR: API rejected request ---');
-      return null;
+/// Fallback Scan using GPT-4o-mini via OpenRouter
+Future<Map<String, int>?> _attemptGPTMini(Uint8List bytes) async {
+  if (_openRouterApiKey.isEmpty) return null;
+
+  final String url = 'https://openrouter.ai/api/v1/chat/completions';
+  final String base64Image = base64Encode(bytes);
+
+  final body = {
+    "model": _gptModel,
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {"type": "text", "text": _systemPrompt},
+          {
+            "type": "image_url",
+            "image_url": {"url": "data:image/jpeg;base64,$base64Image"},
+            "detail": "low",
+          },
+        ],
+      },
+    ],
+  };
+
+  try {
+    final response = await http.post(
+      Uri.parse(url),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $_openRouterApiKey',
+      },
+      body: jsonEncode(body),
+    );
+
+    if (response.statusCode == 200) {
+      return _parseResponse(response.body, isGemini: false);
+    }
+    debugPrint('--- [GPT-MINI] Failed with status: ${response.statusCode} ---');
+  } catch (e) {
+    debugPrint('--- [GPT-MINI] Exception: $e ---');
+  }
+  return null;
+}
+
+/// Helper to clean and parse JSON from both AI formats
+Map<String, int>? _parseResponse(
+  String responseBody, {
+  required bool isGemini,
+}) {
+  try {
+    final Map<String, dynamic> decoded = jsonDecode(responseBody);
+    String? text;
+
+    if (isGemini) {
+      text = decoded['candidates']?[0]['content']?['parts']?[0]['text'];
+    } else {
+      text = decoded['choices']?[0]['message']?['content'];
     }
 
-    final Map<String, dynamic> decoded = jsonDecode(response.body);
-    final String? text =
-        decoded['candidates']?[0]['content']?['parts']?[0]['text'];
-
-    if (text == null || text.isEmpty) {
-      debugPrint('--- [AI SCAN] ERROR: No text in response ---');
-      return null;
-    }
+    if (text == null) return null;
 
     final String cleaned = text
         .replaceAll('```json', '')
         .replaceAll('```', '')
         .trim();
-
-    debugPrint('--- [AI SCAN] PARSED TEXT: $cleaned ---');
-
     final Map<String, dynamic> parsed = jsonDecode(cleaned);
 
     return {
@@ -83,7 +164,7 @@ Future<Map<String, int>?> analyzeMeal(Uint8List imageBytes) async {
       'fat': (parsed['fat'] as num).toInt(),
     };
   } catch (e) {
-    debugPrint('--- [AI SCAN] EXCEPTION: $e ---');
+    debugPrint('--- [PARSING] Error: $e ---');
     return null;
   }
 }

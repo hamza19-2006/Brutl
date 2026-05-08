@@ -17,8 +17,52 @@ import 'edit_password_screen.dart';
 /// Navigation targets:
 /// - [EditEmailScreen]    — two-step email-change flow.
 /// - [EditPasswordScreen] — three-field password-update form.
-class CredentialsScreen extends StatelessWidget {
+class CredentialsScreen extends StatefulWidget {
   const CredentialsScreen({super.key});
+
+  @override
+  State<CredentialsScreen> createState() => _CredentialsScreenState();
+}
+
+class _CredentialsScreenState extends State<CredentialsScreen> {
+  void _showRefreshErrorSnackBar() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          backgroundColor: AppColors.statusError,
+          content: Text(
+            'Could not refresh your latest email right now.',
+            style: TextStyle(color: Colors.white),
+          ),
+        ),
+      );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshUser();
+  }
+
+  Future<void> _refreshUser() async {
+    try {
+      await FirebaseAuth.instance.currentUser?.reload();
+    } on FirebaseAuthException catch (error) {
+      debugPrint(
+        'CREDENTIALS_SCREEN: Failed to reload Firebase user — ${error.toString()}',
+      );
+      _showRefreshErrorSnackBar();
+    } catch (error) {
+      debugPrint(
+        'CREDENTIALS_SCREEN: Unexpected user reload failure — ${error.toString()}',
+      );
+      _showRefreshErrorSnackBar();
+    }
+    // Rebuild so `currentUser?.email` is re-read after reload().
+    if (mounted) setState(() {});
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -26,8 +70,7 @@ class CredentialsScreen extends StatelessWidget {
     /// This is intentionally NOT reactive because [currentUser.email] only
     /// changes after the user clicks the verification link in their new inbox —
     /// at which point the app will rebuild naturally via auth state changes.
-    final String email =
-        FirebaseAuth.instance.currentUser?.email ?? '';
+    final String email = FirebaseAuth.instance.currentUser?.email ?? '';
 
     return Scaffold(
       backgroundColor: AppColors.backgroundPrimary,

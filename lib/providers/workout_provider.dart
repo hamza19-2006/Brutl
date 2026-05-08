@@ -668,6 +668,21 @@ class WorkoutProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Forces immediate macro-goal propagation to local state and persistence.
+  ///
+  /// Use from settings flows right after macro updates are saved so Home/Workout
+  /// visuals refresh instantly instead of waiting for remote stream updates.
+  void forceUpdateMacros(
+    int newKcal,
+    int newCarbs,
+    int newProtein,
+    int newFats,
+  ) {
+    // Public settings-facing API that delegates to the shared optimistic
+    // macro-sync implementation in updateOptimisticMacros.
+    updateOptimisticMacros(newKcal, newCarbs, newProtein, newFats);
+  }
+
   void setHighlightedExercise(String? exerciseName) {
     _highlightedExerciseName = exerciseName;
     notifyListeners();

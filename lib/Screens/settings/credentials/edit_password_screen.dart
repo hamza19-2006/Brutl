@@ -129,7 +129,10 @@ class _EditPasswordScreenState extends State<EditPasswordScreen> {
         ..hideCurrentSnackBar()
         ..showSnackBar(
           const SnackBar(
-            content: Text('Password successfully updated.'),
+            content: Text(
+              'Password successfully updated.',
+              style: TextStyle(color: Colors.white),
+            ),
             behavior: SnackBarBehavior.floating,
             backgroundColor: AppColors.statusSuccess,
           ),
@@ -178,7 +181,7 @@ class _EditPasswordScreenState extends State<EditPasswordScreen> {
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
-          content: Text(message),
+          content: Text(message, style: const TextStyle(color: Colors.white)),
           behavior: SnackBarBehavior.floating,
           backgroundColor: AppColors.backgroundTertiary,
         ),
@@ -225,11 +228,12 @@ class _EditPasswordScreenState extends State<EditPasswordScreen> {
                               color: AppColors.textTertiary,
                               size: 20,
                             ),
+
                             /// Toggle [_showCurrentPassword] independently of
                             /// the other two visibility booleans.
                             onPressed: () => setState(
-                              () => _showCurrentPassword =
-                                  !_showCurrentPassword,
+                              () =>
+                                  _showCurrentPassword = !_showCurrentPassword,
                             ),
                           ),
                         ),
@@ -245,8 +249,7 @@ class _EditPasswordScreenState extends State<EditPasswordScreen> {
                       Align(
                         alignment: Alignment.centerRight,
                         child: TextButton(
-                          onPressed:
-                              _loading ? null : _sendForgotPasswordEmail,
+                          onPressed: _loading ? null : _sendForgotPasswordEmail,
                           style: TextButton.styleFrom(
                             foregroundColor: AppColors.accentPrimary,
                             padding: const EdgeInsets.symmetric(
@@ -282,6 +285,7 @@ class _EditPasswordScreenState extends State<EditPasswordScreen> {
                               color: AppColors.textTertiary,
                               size: 20,
                             ),
+
                             /// Toggle [_showNewPassword] independently.
                             onPressed: () => setState(
                               () => _showNewPassword = !_showNewPassword,
@@ -315,10 +319,11 @@ class _EditPasswordScreenState extends State<EditPasswordScreen> {
                               color: AppColors.textTertiary,
                               size: 20,
                             ),
+
                             /// Toggle [_showConfirmPassword] independently.
                             onPressed: () => setState(
-                              () => _showConfirmPassword =
-                                  !_showConfirmPassword,
+                              () =>
+                                  _showConfirmPassword = !_showConfirmPassword,
                             ),
                           ),
                         ),

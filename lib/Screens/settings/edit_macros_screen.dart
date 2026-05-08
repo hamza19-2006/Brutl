@@ -107,7 +107,7 @@ class _EditMacrosScreenState extends State<EditMacrosScreen> {
       // BUG 1 FIX: Immediately push the new macro values into WorkoutProvider
       // so the Home screen's CaloriesCard and step-calorie calculations
       // repaint in the same frame — no restart or Firestore round-trip needed.
-      workoutProvider.updateOptimisticMacros(cal, carbs, protein, fat);
+      workoutProvider.forceUpdateMacros(cal, carbs, protein, fat);
 
       if (!mounted) return;
       Navigator.of(context).pop();

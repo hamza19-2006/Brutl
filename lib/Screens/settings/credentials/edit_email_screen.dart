@@ -151,9 +151,7 @@ class _EditEmailScreenState extends State<EditEmailScreen> {
   /// bypassing the need to navigate away.  Shows a confirmation SnackBar.
   Future<void> _handleForgotPassword() async {
     try {
-      await FirebaseAuth.instance.sendPasswordResetEmail(
-        email: _currentEmail,
-      );
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: _currentEmail);
       if (!mounted) return;
       _showSnackBar('Password reset link sent to $_currentEmail.');
     } on FirebaseAuthException catch (e) {
@@ -193,8 +191,9 @@ class _EditEmailScreenState extends State<EditEmailScreen> {
     setState(() => _loading = true);
 
     try {
-      await FirebaseAuth.instance.currentUser!
-          .verifyBeforeUpdateEmail(newEmail);
+      await FirebaseAuth.instance.currentUser!.verifyBeforeUpdateEmail(
+        newEmail,
+      );
 
       if (!mounted) return;
       setState(() => _loading = false);
@@ -299,7 +298,7 @@ class _EditEmailScreenState extends State<EditEmailScreen> {
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
-          content: Text(message),
+          content: Text(message, style: const TextStyle(color: Colors.white)),
           behavior: SnackBarBehavior.floating,
           backgroundColor: AppColors.backgroundTertiary,
         ),
@@ -344,8 +343,8 @@ class _EditEmailScreenState extends State<EditEmailScreen> {
                     onPressed: _loading
                         ? null
                         : (_currentStep == 1
-                            ? _verifyPassword
-                            : _sendVerificationLink),
+                              ? _verifyPassword
+                              : _sendVerificationLink),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.accentPrimary,
                       foregroundColor: Colors.white,
@@ -440,9 +439,7 @@ class _EditEmailScreenState extends State<EditEmailScreen> {
               ),
               child: Text(
                 'Forgot Password? Reset it here.',
-                style: AppTextStyles.bodySmall(
-                  color: AppColors.accentPrimary,
-                ),
+                style: AppTextStyles.bodySmall(color: AppColors.accentPrimary),
               ),
             ),
           ),

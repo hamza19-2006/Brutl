@@ -1,16 +1,11 @@
 import 'dart:async';
-import 'dart:convert';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_text_styles.dart';
-import '../../../models/brutl_models.dart' as brutl;
 import '../../../providers/workout_provider.dart';
 import '../widgets/settings_widgets.dart';
 import 'edit_exercises_screen.dart';
@@ -47,8 +42,7 @@ class EditDaysScreen extends StatelessWidget {
               itemCount: days.length,
               separatorBuilder: (_, __) =>
                   const SizedBox(height: AppSpacing.sm),
-              itemBuilder: (context, index) =>
-                  _DayRow(dayName: days[index]),
+              itemBuilder: (context, index) => _DayRow(dayName: days[index]),
             );
           },
         ),
@@ -148,10 +142,8 @@ class _DayRow extends StatelessWidget {
     if (newName == null || newName.isEmpty || newName == dayName) return;
     if (!context.mounted) return;
 
-    final provider = context.read<WorkoutProvider>();
-    provider.renameDayOptimistic(dayName, newName);
     unawaited(
-      _firebaseRenameDay(dayName, newName, provider.activeSplitDays),
+      context.read<WorkoutProvider>().renameDayOptimistic(dayName, newName),
     );
 
     ScaffoldMessenger.of(context)
@@ -204,8 +196,9 @@ class _DayRow extends StatelessWidget {
 
     if (confirmed != true || !context.mounted) return;
 
-    context.read<WorkoutProvider>().clearExercisesFromDayOptimistic(dayName);
-    unawaited(_firebaseClearDay(dayName));
+    unawaited(
+      context.read<WorkoutProvider>().clearExercisesFromDayOptimistic(dayName),
+    );
 
     if (!context.mounted) return;
     ScaffoldMessenger.of(context)
@@ -217,90 +210,5 @@ class _DayRow extends StatelessWidget {
           behavior: SnackBarBehavior.floating,
         ),
       );
-  }
-
-  static Future<void> _firebaseRenameDay(
-    String oldName,
-    String newName,
-    List<String> updatedDays,
-  ) async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-    try {
-      final firestore = FirebaseFirestore.instance;
-      final exercisesBox = Hive.box<String>('exercises');
-      final batch = firestore.batch();
-
-      for (final key in exercisesBox.keys) {
-        final jsonString = exercisesBox.get(key);
-        if (jsonString == null) continue;
-        try {
-          final exercise = brutl.ExerciseModel.fromJson(
-            jsonDecode(jsonString) as Map<String, dynamic>,
-          );
-          if (exercise.splitName == oldName) {
-            final updated = exercise.copyWith(splitName: newName);
-            await exercisesBox.put(exercise.id, jsonEncode(updated.toJson()));
-            batch.set(
-              firestore
-                  .collection('users')
-                  .doc(uid)
-                  .collection('workouts')
-                  .doc(exercise.id),
-              <String, dynamic>{
-                'splitName': newName,
-                'updatedAt': FieldValue.serverTimestamp(),
-              },
-              SetOptions(merge: true),
-            );
-          }
-        } catch (_) {}
-      }
-
-      batch.set(
-        firestore.collection('users').doc(uid),
-        <String, dynamic>{
-          'workout_master_template': updatedDays,
-          'custom_split_days': updatedDays,
-        },
-        SetOptions(merge: true),
-      );
-      await batch.commit();
-    } catch (e) {
-      debugPrint('EDIT_DAYS: Firebase rename day failed — $e');
-    }
-  }
-
-  static Future<void> _firebaseClearDay(String dayName) async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-    try {
-      final firestore = FirebaseFirestore.instance;
-      final exercisesBox = Hive.box<String>('exercises');
-      final batch = firestore.batch();
-
-      for (final key in List<dynamic>.from(exercisesBox.keys)) {
-        final jsonString = exercisesBox.get(key);
-        if (jsonString == null) continue;
-        try {
-          final exercise = brutl.ExerciseModel.fromJson(
-            jsonDecode(jsonString) as Map<String, dynamic>,
-          );
-          if (exercise.splitName == dayName) {
-            batch.delete(
-              firestore
-                  .collection('users')
-                  .doc(uid)
-                  .collection('workouts')
-                  .doc(exercise.id),
-            );
-            await exercisesBox.delete(exercise.id);
-          }
-        } catch (_) {}
-      }
-      await batch.commit();
-    } catch (e) {
-      debugPrint('EDIT_DAYS: Firebase clear day failed — $e');
-    }
   }
 }

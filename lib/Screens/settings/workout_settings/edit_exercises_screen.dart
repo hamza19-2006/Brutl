@@ -1,8 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
@@ -100,12 +98,13 @@ class _EditExercisesScreenState extends State<EditExercisesScreen> {
           .toList();
     });
 
-    context.read<WorkoutProvider>().renameExerciseOptimistic(
-          widget.dayName,
-          exercise.name,
-          newName,
-        );
-    unawaited(_firebaseRenameExercise(exercise, newName));
+    unawaited(
+      context.read<WorkoutProvider>().renameExerciseOptimistic(
+        widget.dayName,
+        exercise,
+        newName,
+      ),
+    );
 
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
@@ -160,11 +159,12 @@ class _EditExercisesScreenState extends State<EditExercisesScreen> {
       _exercises = _exercises.where((e) => e.id != exercise.id).toList();
     });
 
-    context.read<WorkoutProvider>().deleteExerciseOptimistic(
-          widget.dayName,
-          exercise.name,
-        );
-    unawaited(_firebaseDeleteExercise(exercise));
+    unawaited(
+      context.read<WorkoutProvider>().deleteExerciseOptimistic(
+        widget.dayName,
+        exercise,
+      ),
+    );
 
     if (!mounted) return;
     ScaffoldMessenger.of(context)
@@ -176,52 +176,6 @@ class _EditExercisesScreenState extends State<EditExercisesScreen> {
           behavior: SnackBarBehavior.floating,
         ),
       );
-  }
-
-  static Future<void> _firebaseRenameExercise(
-    brutl.ExerciseModel exercise,
-    String newName,
-  ) async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-    try {
-      final exercisesBox = Hive.box<String>('exercises');
-      final updated = exercise.copyWith(name: newName);
-      await exercisesBox.put(exercise.id, jsonEncode(updated.toJson()));
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .collection('workouts')
-          .doc(exercise.id)
-          .set(
-            <String, dynamic>{
-              'name': newName,
-              'updatedAt': FieldValue.serverTimestamp(),
-            },
-            SetOptions(merge: true),
-          );
-    } catch (e) {
-      debugPrint('EDIT_EXERCISES: Firebase rename exercise failed — $e');
-    }
-  }
-
-  static Future<void> _firebaseDeleteExercise(
-    brutl.ExerciseModel exercise,
-  ) async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-    try {
-      final exercisesBox = Hive.box<String>('exercises');
-      await exercisesBox.delete(exercise.id);
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .collection('workouts')
-          .doc(exercise.id)
-          .delete();
-    } catch (e) {
-      debugPrint('EDIT_EXERCISES: Firebase delete exercise failed — $e');
-    }
   }
 
   @override
@@ -257,9 +211,7 @@ class _EditExercisesScreenState extends State<EditExercisesScreen> {
                             borderRadius: BorderRadius.circular(
                               AppSpacing.borderRadiusMedium,
                             ),
-                            border: Border.all(
-                              color: AppColors.borderDefault,
-                            ),
+                            border: Border.all(color: AppColors.borderDefault),
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,

@@ -761,8 +761,13 @@ class WorkoutProvider extends ChangeNotifier {
   }
 
   /// Renames every occurrence of [oldName] to [newName] in the split day
-  /// lists and in the in-memory program days. Caller handles persistence.
-  void renameDayOptimistic(String oldName, String newName) {
+  /// lists and in the in-memory program days. Persists to Hive + Firestore
+  /// and reverts local state if persistence fails.
+  Future<void> renameDayOptimistic(String oldName, String newName) async {
+    final prevCustom = _customSplitDays;
+    final prevTemplate = _masterTemplate;
+    final prevDays = _programDays;
+
     _customSplitDays = _customSplitDays
         .map((d) => d == oldName ? newName : d)
         .toList(growable: false);
@@ -771,27 +776,109 @@ class WorkoutProvider extends ChangeNotifier {
         .map((d) => d.splitName == oldName ? d.copyWith(splitName: newName) : d)
         .toList();
     notifyListeners();
+
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      final firestore = FirebaseFirestore.instance;
+      final exercisesBox = Hive.box<String>('exercises');
+      final batch = firestore.batch();
+      for (final key in exercisesBox.keys) {
+        final jsonString = exercisesBox.get(key);
+        if (jsonString == null) continue;
+        try {
+          final exercise = brutl.ExerciseModel.fromJson(
+            jsonDecode(jsonString) as Map<String, dynamic>,
+          );
+          if (exercise.splitName == oldName) {
+            final updated = exercise.copyWith(splitName: newName);
+            await exercisesBox.put(exercise.id, jsonEncode(updated.toJson()));
+            batch.set(
+              firestore
+                  .collection('users')
+                  .doc(uid)
+                  .collection('workouts')
+                  .doc(exercise.id),
+              <String, dynamic>{
+                'splitName': newName,
+                'updatedAt': FieldValue.serverTimestamp(),
+              },
+              SetOptions(merge: true),
+            );
+          }
+        } catch (_) {}
+      }
+      batch.set(firestore.collection('users').doc(uid), <String, dynamic>{
+        'workout_master_template': _masterTemplate,
+        'custom_split_days': _customSplitDays,
+      }, SetOptions(merge: true));
+      await batch.commit();
+    } catch (e) {
+      debugPrint('EDIT_DAYS: Firebase rename day failed — $e');
+      _customSplitDays = prevCustom;
+      _masterTemplate = prevTemplate;
+      _programDays = prevDays;
+      notifyListeners();
+    }
   }
 
   /// Removes all exercises from every program-day entry whose split name
-  /// matches [dayName]. Caller handles Hive/Firestore deletion.
-  void clearExercisesFromDayOptimistic(String dayName) {
+  /// matches [dayName]. Persists to Hive + Firestore and reverts local state
+  /// if persistence fails.
+  Future<void> clearExercisesFromDayOptimistic(String dayName) async {
+    final prevDays = _programDays;
+
     _programDays = _programDays
         .map(
-          (d) =>
-              d.splitName == dayName ? d.copyWith(exercises: const []) : d,
+          (d) => d.splitName == dayName ? d.copyWith(exercises: const []) : d,
         )
         .toList();
     notifyListeners();
+
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      final firestore = FirebaseFirestore.instance;
+      final exercisesBox = Hive.box<String>('exercises');
+      final batch = firestore.batch();
+      for (final key in List<dynamic>.from(exercisesBox.keys)) {
+        final jsonString = exercisesBox.get(key);
+        if (jsonString == null) continue;
+        try {
+          final exercise = brutl.ExerciseModel.fromJson(
+            jsonDecode(jsonString) as Map<String, dynamic>,
+          );
+          if (exercise.splitName == dayName) {
+            batch.delete(
+              firestore
+                  .collection('users')
+                  .doc(uid)
+                  .collection('workouts')
+                  .doc(exercise.id),
+            );
+            await exercisesBox.delete(exercise.id);
+          }
+        } catch (_) {}
+      }
+      await batch.commit();
+    } catch (e) {
+      debugPrint('EDIT_DAYS: Firebase clear day failed — $e');
+      _programDays = prevDays;
+      notifyListeners();
+    }
   }
 
-  /// Renames [oldExerciseName] to [newExerciseName] across every program-day
-  /// entry for [dayName]. Caller handles Hive/Firestore updates.
-  void renameExerciseOptimistic(
+  /// Renames [exercise] to [newExerciseName] across every program-day entry
+  /// for [dayName]. Persists to Hive + Firestore and reverts local state if
+  /// persistence fails.
+  Future<void> renameExerciseOptimistic(
     String dayName,
-    String oldExerciseName,
+    brutl.ExerciseModel exercise,
     String newExerciseName,
-  ) {
+  ) async {
+    final prevDays = _programDays;
+    final oldExerciseName = exercise.name;
+
     _programDays = _programDays.map((day) {
       if (day.splitName != dayName) return day;
       final updated = day.exercises
@@ -804,19 +891,62 @@ class WorkoutProvider extends ChangeNotifier {
       return day.copyWith(exercises: updated);
     }).toList();
     notifyListeners();
+
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      final exercisesBox = Hive.box<String>('exercises');
+      final updatedExercise = exercise.copyWith(name: newExerciseName);
+      await exercisesBox.put(exercise.id, jsonEncode(updatedExercise.toJson()));
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .collection('workouts')
+          .doc(exercise.id)
+          .set(<String, dynamic>{
+            'name': newExerciseName,
+            'updatedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('EDIT_EXERCISES: Firebase rename exercise failed — $e');
+      _programDays = prevDays;
+      notifyListeners();
+    }
   }
 
-  /// Removes the exercise named [exerciseName] from every program-day entry
-  /// for [dayName]. Caller handles Hive/Firestore deletion.
-  void deleteExerciseOptimistic(String dayName, String exerciseName) {
+  /// Removes [exercise] from every program-day entry for [dayName]. Persists
+  /// to Hive + Firestore and reverts local state if persistence fails.
+  Future<void> deleteExerciseOptimistic(
+    String dayName,
+    brutl.ExerciseModel exercise,
+  ) async {
+    final prevDays = _programDays;
+
     _programDays = _programDays.map((day) {
       if (day.splitName != dayName) return day;
       final updated = day.exercises
-          .where((ex) => ex.name != exerciseName)
+          .where((ex) => ex.name != exercise.name)
           .toList(growable: false);
       return day.copyWith(exercises: updated);
     }).toList();
     notifyListeners();
+
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      final exercisesBox = Hive.box<String>('exercises');
+      await exercisesBox.delete(exercise.id);
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .collection('workouts')
+          .doc(exercise.id)
+          .delete();
+    } catch (e) {
+      debugPrint('EDIT_EXERCISES: Firebase delete exercise failed — $e');
+      _programDays = prevDays;
+      notifyListeners();
+    }
   }
 
   @override

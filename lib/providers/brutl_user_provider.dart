@@ -231,6 +231,28 @@ class BrutlUserProvider extends ChangeNotifier {
     );
   }
 
+  Future<void> updateRepRanges({
+    required int compoundMin,
+    required int compoundMax,
+    required int isolationMin,
+    required int isolationMax,
+  }) {
+    return applyOptimistic(
+      mutate: (u) => u.copyWith(
+        compoundRepMin: compoundMin,
+        compoundRepMax: compoundMax,
+        isolationRepMin: isolationMin,
+        isolationRepMax: isolationMax,
+      ),
+      firestorePatch: <String, dynamic>{
+        'compound_rep_min': compoundMin,
+        'compound_rep_max': compoundMax,
+        'isolation_rep_min': isolationMin,
+        'isolation_rep_max': isolationMax,
+      },
+    );
+  }
+
   Future<void> updateMaintenanceCalories(int kcal) {
     return applyOptimistic(
       mutate: (u) => u.copyWith(maintenanceCalories: kcal),

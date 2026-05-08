@@ -13,6 +13,7 @@ import 'account_settings_screen.dart';
 import 'credentials/credentials_screen.dart';
 import 'personal_stats_screen.dart';
 import 'widgets/settings_widgets.dart';
+import 'workout_settings/exercise_settings_screen.dart';
 
 class MainSettingsScreen extends StatefulWidget {
   const MainSettingsScreen({super.key});
@@ -105,7 +106,11 @@ class _MainSettingsScreenState extends State<MainSettingsScreen> {
                   ),
                   SettingsTileWidget(
                     title: 'Exercise Changes',
-                    onTap: () => _showComingSoon(context, 'Exercise Changes'),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const ExerciseSettingsScreen(),
+                      ),
+                    ),
                   ),
                 ],
               ),

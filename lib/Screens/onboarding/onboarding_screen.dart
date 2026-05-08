@@ -212,7 +212,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       case 'Upper, Lower, Rest, Repeat':
         return 'Upper/Lower';
       case 'Push, Pull, Legs, Upper, Lower':
-        return 'Push, Pull, Legs, Upper, Lower'; // Keep as-is or map to custom
+        return 'Push, Pull, Legs, Upper, Lower';
       case 'Customize Split':
         return 'Customize Split';
       default:

@@ -748,6 +748,77 @@ class WorkoutProvider extends ChangeNotifier {
     return sessions.first;
   }
 
+  // ── Optimistic split/exercise mutation helpers ────────────────────────────
+
+  /// Completely replaces the active split with [newDayNames] and rebuilds
+  /// program days. Caller is responsible for Firestore + Hive writes.
+  void wipeAndReplaceSplit(List<String> newDayNames) {
+    _customSplitDays = List<String>.unmodifiable(newDayNames);
+    _masterTemplate = _customSplitDays;
+    _selectedWorkoutSplit = 'Custom';
+    _programDays = _buildProgramDaysFromTemplate(_masterTemplate);
+    notifyListeners();
+  }
+
+  /// Renames every occurrence of [oldName] to [newName] in the split day
+  /// lists and in the in-memory program days. Caller handles persistence.
+  void renameDayOptimistic(String oldName, String newName) {
+    _customSplitDays = _customSplitDays
+        .map((d) => d == oldName ? newName : d)
+        .toList(growable: false);
+    _masterTemplate = _customSplitDays;
+    _programDays = _programDays
+        .map((d) => d.splitName == oldName ? d.copyWith(splitName: newName) : d)
+        .toList();
+    notifyListeners();
+  }
+
+  /// Removes all exercises from every program-day entry whose split name
+  /// matches [dayName]. Caller handles Hive/Firestore deletion.
+  void clearExercisesFromDayOptimistic(String dayName) {
+    _programDays = _programDays
+        .map(
+          (d) =>
+              d.splitName == dayName ? d.copyWith(exercises: const []) : d,
+        )
+        .toList();
+    notifyListeners();
+  }
+
+  /// Renames [oldExerciseName] to [newExerciseName] across every program-day
+  /// entry for [dayName]. Caller handles Hive/Firestore updates.
+  void renameExerciseOptimistic(
+    String dayName,
+    String oldExerciseName,
+    String newExerciseName,
+  ) {
+    _programDays = _programDays.map((day) {
+      if (day.splitName != dayName) return day;
+      final updated = day.exercises
+          .map(
+            (ex) => ex.name == oldExerciseName
+                ? ex.copyWith(name: newExerciseName)
+                : ex,
+          )
+          .toList(growable: false);
+      return day.copyWith(exercises: updated);
+    }).toList();
+    notifyListeners();
+  }
+
+  /// Removes the exercise named [exerciseName] from every program-day entry
+  /// for [dayName]. Caller handles Hive/Firestore deletion.
+  void deleteExerciseOptimistic(String dayName, String exerciseName) {
+    _programDays = _programDays.map((day) {
+      if (day.splitName != dayName) return day;
+      final updated = day.exercises
+          .where((ex) => ex.name != exerciseName)
+          .toList(growable: false);
+      return day.copyWith(exercises: updated);
+    }).toList();
+    notifyListeners();
+  }
+
   @override
   void dispose() {
     _userStreamSubscription?.cancel();

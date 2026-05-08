@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../models/brutl_models.dart';
 import '../providers/workout_nutrition_provider.dart';
 import '../services/ai_meal_service.dart';
+import 'ask_ai_dialog.dart';
 
 class MealLoggerSheet extends StatelessWidget {
   const MealLoggerSheet({super.key});
@@ -118,7 +119,10 @@ class _MealFlowSheetState extends State<_MealFlowSheet> {
 
   // ── AI scan state ──────────────────────────────────────────────────────────
   bool _isScanning = false;
+  bool _isAskingAi = false;
   int _scanPhase = 0; // 0 = sending, 1 = analysing, 2 = extracting
+
+  bool get _anyBusy => _isScanning || _isAskingAi;
   Timer? _phaseOneTimer;
   Timer? _phaseTwoTimer;
 
@@ -219,6 +223,34 @@ class _MealFlowSheetState extends State<_MealFlowSheet> {
     }
   }
 
+  Future<void> _openAskAi() async {
+    if (_anyBusy) return;
+    setState(() => _isAskingAi = true);
+
+    final result = await showAskAiDialog(context);
+
+    if (!mounted) return;
+    setState(() => _isAskingAi = false);
+
+    if (result == null) return;
+
+    final kcal = result['kcal'] ?? 0;
+    final provider = context.read<WorkoutNutritionProvider>();
+    await provider.updateMealCalories(
+      mealName: widget.mealName,
+      calories: kcal,
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _showMacroInput = true;
+      _calorieController.text = kcal.toString();
+      _carbsController.text = (result['carbs'] ?? 0).toString();
+      _proteinController.text = (result['protein'] ?? 0).toString();
+      _fatsController.text = (result['fat'] ?? 0).toString();
+    });
+  }
+
   Widget _buildScanButton() {
     if (_isScanning) {
       return Container(
@@ -261,7 +293,7 @@ class _MealFlowSheetState extends State<_MealFlowSheet> {
     return SizedBox(
       width: double.infinity,
       child: OutlinedButton.icon(
-        onPressed: _startScan,
+        onPressed: _anyBusy ? null : _startScan,
         icon: const Text('📸', style: TextStyle(fontSize: 18)),
         label: const Text(
           'Scan with AI',
@@ -274,6 +306,47 @@ class _MealFlowSheetState extends State<_MealFlowSheet> {
         style: OutlinedButton.styleFrom(
           foregroundColor: const Color(0xFFFF3D00),
           side: const BorderSide(color: Color(0xFFFF3D00), width: 1.5),
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAskAiButton() {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: _anyBusy ? null : _openAskAi,
+        icon: _isAskingAi
+            ? const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  color: Color(0xFF7C6AF7),
+                  strokeWidth: 2,
+                ),
+              )
+            : const Text('🤖', style: TextStyle(fontSize: 16)),
+        label: const Text(
+          'Ask AI',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.4,
+          ),
+        ),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: const Color(0xFF7C6AF7),
+          disabledForegroundColor: const Color(0xFF7C6AF7).withValues(alpha: 0.4),
+          side: BorderSide(
+            color: _anyBusy
+                ? const Color(0xFF7C6AF7).withValues(alpha: 0.3)
+                : const Color(0xFF7C6AF7),
+            width: 1.5,
+          ),
           padding: const EdgeInsets.symmetric(vertical: 14),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
@@ -322,6 +395,8 @@ class _MealFlowSheetState extends State<_MealFlowSheet> {
 
                 // Moved the Scan Button UP so it is always visible first
                 _buildScanButton(),
+                const SizedBox(height: 10),
+                _buildAskAiButton(),
                 const SizedBox(height: 16),
 
                 if (!_showMacroInput) ...[
@@ -358,7 +433,9 @@ class _MealFlowSheetState extends State<_MealFlowSheet> {
                         backgroundColor: const Color(0xFFFF3D00),
                         foregroundColor: Colors.white,
                       ),
-                      onPressed: () async {
+                      onPressed: _anyBusy
+                          ? null
+                          : () async {
                         final calories = int.tryParse(
                           _calorieController.text.trim(),
                         );
@@ -419,7 +496,9 @@ class _MealFlowSheetState extends State<_MealFlowSheet> {
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                       ),
-                      onPressed: () async {
+                      onPressed: _anyBusy
+                          ? null
+                          : () async {
                         final carbs =
                             int.tryParse(_carbsController.text.trim()) ?? 0;
                         final protein =

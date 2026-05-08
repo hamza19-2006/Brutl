@@ -10,6 +10,7 @@ import '../providers/workout_nutrition_provider.dart';
 import '../providers/workout_provider.dart';
 import '../providers/nutrition_service.dart';
 import '../services/ai_meal_service.dart';
+import '../widgets/ask_ai_dialog.dart'; // ← NEW
 import '../widgets/macro_dashboard_card.dart';
 import '../widgets/workout_card_widget.dart';
 import '../models/brutl_models.dart';
@@ -230,7 +231,6 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     );
   }
 
-  // Opens the meal selection bottom sheet (Breakfast / Lunch / Snack / Dinner)
   Future<void> _openMealSelectionSheet(BuildContext context) async {
     await showModalBottomSheet<void>(
       context: context,
@@ -258,7 +258,9 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   }
 }
 
-// ─── Meal Selection Sheet ─────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// MEAL SELECTION SHEET
+// ═══════════════════════════════════════════════════════════════════════════════
 
 class _MealSelectionSheet extends StatefulWidget {
   const _MealSelectionSheet({
@@ -283,7 +285,6 @@ class _MealSelectionSheetState extends State<_MealSelectionSheet> {
     super.initState();
     _meals = List.from(widget.meals);
 
-    // Keep meals in sync with live stream while sheet is open
     NutritionService.instance.stream.listen((data) {
       if (mounted) setState(() => _meals = data.meals);
     });
@@ -360,7 +361,9 @@ class _MealSelectionSheetState extends State<_MealSelectionSheet> {
   }
 }
 
-// ─── Single Meal Row ──────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// SINGLE MEAL ROW
+// ═══════════════════════════════════════════════════════════════════════════════
 
 class _MealRow extends StatelessWidget {
   const _MealRow({required this.meal, required this.onTap});
@@ -417,7 +420,9 @@ class _MealRow extends StatelessWidget {
   }
 }
 
-// ─── Nutrition Log Sheet (per meal) ──────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// NUTRITION LOG SHEET  (updated with 3-button AI row)
+// ═══════════════════════════════════════════════════════════════════════════════
 
 class _NutritionLogSheet extends StatefulWidget {
   const _NutritionLogSheet({required this.meal});
@@ -430,14 +435,19 @@ class _NutritionLogSheet extends StatefulWidget {
 
 class _NutritionLogSheetState extends State<_NutritionLogSheet> {
   final ImagePicker _imagePicker = ImagePicker();
+
   final TextEditingController _calCtrl = TextEditingController();
   final TextEditingController _carbCtrl = TextEditingController();
   final TextEditingController _proCtrl = TextEditingController();
   final TextEditingController _fatCtrl = TextEditingController();
+
   bool _isSaving = false;
-  bool _isScanning = false;
+  bool _isScanning = false; // camera AI in progress
+  bool _isAskingAi = false; // text-AI dialog open
+
   int _scanPhase = 0;
   String? _calorieError;
+
   Timer? _scanPhaseOneTimer;
   Timer? _scanPhaseTwoTimer;
 
@@ -450,6 +460,8 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
     '📊 Extracting Macros...',
   ];
 
+  bool get _anyBusy => _isSaving || _isScanning || _isAskingAi;
+
   @override
   void dispose() {
     _scanPhaseOneTimer?.cancel();
@@ -460,6 +472,93 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
     _fatCtrl.dispose();
     super.dispose();
   }
+
+  // ─── Camera AI scan ────────────────────────────────────────────────────────
+
+  Future<void> _startAiScan() async {
+    if (_anyBusy) return;
+
+    final XFile? image = await _imagePicker.pickImage(
+      source: ImageSource.camera,
+      imageQuality: 85,
+    );
+    if (image == null || !mounted) return;
+
+    final Uint8List imageBytes = await image.readAsBytes();
+    if (!mounted) return;
+
+    setState(() {
+      _isScanning = true;
+      _scanPhase = 0;
+      _calorieError = null;
+    });
+
+    _scanPhaseOneTimer?.cancel();
+    _scanPhaseTwoTimer?.cancel();
+    _scanPhaseOneTimer = Timer(_scanPhaseOneDuration, () {
+      if (mounted && _isScanning) setState(() => _scanPhase = 1);
+    });
+    _scanPhaseTwoTimer = Timer(_scanPhaseTwoDuration, () {
+      if (mounted && _isScanning) setState(() => _scanPhase = 2);
+    });
+
+    Map<String, int>? result;
+    try {
+      result = await analyzeMeal(imageBytes);
+    } catch (e) {
+      result = null;
+    }
+
+    _scanPhaseOneTimer?.cancel();
+    _scanPhaseTwoTimer?.cancel();
+
+    if (!mounted) return;
+
+    if (result == null) {
+      setState(() => _isScanning = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'AI Analysis Failed: Check API Key or Internet Connection.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isScanning = false;
+      _calCtrl.text = result?['kcal']?.toString() ?? '';
+      _carbCtrl.text = result?['carbs']?.toString() ?? '';
+      _proCtrl.text = result?['protein']?.toString() ?? '';
+      _fatCtrl.text = result?['fat']?.toString() ?? '';
+    });
+  }
+
+  // ─── Text AI (Ask AI dialog) ───────────────────────────────────────────────
+
+  Future<void> _openAskAiDialog() async {
+    if (_anyBusy) return;
+
+    setState(() => _isAskingAi = true);
+
+    final result = await showAskAiDialog(context);
+
+    if (!mounted) return;
+    setState(() => _isAskingAi = false);
+
+    if (result != null) {
+      setState(() {
+        _calCtrl.text = result['kcal']?.toString() ?? '';
+        _carbCtrl.text = result['carbs']?.toString() ?? '';
+        _proCtrl.text = result['protein']?.toString() ?? '';
+        _fatCtrl.text = result['fat']?.toString() ?? '';
+        _calorieError = null;
+      });
+    }
+  }
+
+  // ─── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -480,6 +579,7 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // ── Drag handle ─────────────────────────────────────────────
                 Center(
                   child: Container(
                     width: 44,
@@ -491,8 +591,12 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                _buildScanButton(),
+
+                // ── AI option row ────────────────────────────────────────────
+                _buildAiButtons(),
                 const SizedBox(height: 16),
+
+                // ── Meal title ───────────────────────────────────────────────
                 Text(
                   widget.meal.name,
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
@@ -508,6 +612,8 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
                   ),
                 ),
                 const SizedBox(height: 16),
+
+                // ── Macro fields ─────────────────────────────────────────────
                 _buildField(
                   _calCtrl,
                   'Calories (kcal)',
@@ -521,12 +627,14 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
                 const SizedBox(height: 10),
                 _buildField(_fatCtrl, 'Fats (g)', TextInputType.number),
                 const SizedBox(height: 16),
+
+                // ── Log button ───────────────────────────────────────────────
                 SizedBox(
                   width: double.infinity,
                   child: Opacity(
-                    opacity: (_isSaving || _isScanning) ? 0.55 : 1.0,
+                    opacity: _anyBusy ? 0.55 : 1.0,
                     child: ElevatedButton(
-                      onPressed: (_isSaving || _isScanning) ? null : _handleLog,
+                      onPressed: _anyBusy ? null : _handleLog,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFFFF3D00),
                         foregroundColor: Colors.white,
@@ -553,152 +661,97 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
     );
   }
 
-  Future<void> _startAiScan() async {
-    if (_isSaving || _isScanning) {
-      return;
+  // ─── 3-button AI row ───────────────────────────────────────────────────────
+
+  Widget _buildAiButtons() {
+    // While camera scan runs, show the animated full-width indicator
+    if (_isScanning) {
+      return _buildScanningIndicator();
     }
 
-    final XFile? image = await _imagePicker.pickImage(
-      source: ImageSource.camera,
-      imageQuality: 85,
-    );
-    if (image == null || !mounted) {
-      return;
-    }
-
-    final Uint8List imageBytes = await image.readAsBytes();
-    if (!mounted) {
-      return;
-    }
-
-    setState(() {
-      _isScanning = true;
-      _scanPhase = 0;
-      _calorieError = null;
-    });
-
-    _scanPhaseOneTimer?.cancel();
-    _scanPhaseTwoTimer?.cancel();
-    _scanPhaseOneTimer = Timer(_scanPhaseOneDuration, () {
-      if (mounted && _isScanning) {
-        setState(() => _scanPhase = 1);
-      }
-    });
-    _scanPhaseTwoTimer = Timer(_scanPhaseTwoDuration, () {
-      if (mounted && _isScanning) {
-        setState(() => _scanPhase = 2);
-      }
-    });
-
-    print('--- SENDING IMAGE TO AI ---');
-    Map<String, int>? result;
-    try {
-      result = await analyzeMeal(imageBytes);
-    } catch (e) {
-      print('--- AI CRASH: $e ---');
-      result = null;
-    }
-    print('--- AI RESULT: $result ---');
-
-    _scanPhaseOneTimer?.cancel();
-    _scanPhaseTwoTimer?.cancel();
-
-    if (!mounted) {
-      return;
-    }
-
-    if (result == null) {
-      setState(() => _isScanning = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'AI Analysis Failed: Check API Key or Internet Connection.',
+    return Row(
+      children: [
+        // 📸 Scan with AI
+        Expanded(
+          child: _AiOptionButton(
+            emoji: '📸',
+            label: 'Scan',
+            sublabel: 'Camera AI',
+            isLoading: false,
+            disabled: _anyBusy,
+            onTap: _startAiScan,
+            borderColor: const Color(0xFFFF3D00),
+            accentColor: const Color(0xFFFF3D00),
           ),
         ),
-      );
-      return;
-    }
+        const SizedBox(width: 8),
 
-    setState(() {
-      _isScanning = false;
-      _calCtrl.text = result?['kcal']?.toString() ?? '';
-      _carbCtrl.text = result?['carbs']?.toString() ?? '';
-      _proCtrl.text = result?['protein']?.toString() ?? '';
-      _fatCtrl.text = result?['fat']?.toString() ?? '';
-    });
+        // 🤖 Ask AI
+        Expanded(
+          child: _AiOptionButton(
+            emoji: '🤖',
+            label: 'Ask AI',
+            sublabel: 'Text input',
+            isLoading: _isAskingAi,
+            disabled: _anyBusy && !_isAskingAi,
+            onTap: _openAskAiDialog,
+            borderColor: const Color(0xFF3B82F6),
+            accentColor: const Color(0xFF3B82F6),
+          ),
+        ),
+        const SizedBox(width: 8),
+      ],
+    );
   }
 
-  Widget _buildScanButton() {
-    if (_isScanning) {
-      return SizedBox(
-        width: double.infinity,
-        child: OutlinedButton(
-          onPressed: null,
-          style: OutlinedButton.styleFrom(
-            foregroundColor: const Color(0xFFFF3D00),
-            side: const BorderSide(color: Color(0xFFFF3D00), width: 1.5),
-            backgroundColor: const Color(0xFFFF3D00).withValues(alpha: 0.08),
-            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-          ),
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 250),
-            child: Column(
-              key: ValueKey<int>(_scanPhase),
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2.4,
-                    color: Color(0xFFFF3D00),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  _scanMessages[_scanPhase],
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
+  // ─── Camera scanning animation ─────────────────────────────────────────────
 
+  Widget _buildScanningIndicator() {
     return SizedBox(
       width: double.infinity,
-      child: OutlinedButton.icon(
-        onPressed: _startAiScan,
-        icon: const Text('📸', style: TextStyle(fontSize: 18)),
-        label: const Text(
-          'Scan with AI',
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.3,
-          ),
-        ),
+      child: OutlinedButton(
+        onPressed: null,
         style: OutlinedButton.styleFrom(
           foregroundColor: const Color(0xFFFF3D00),
           side: const BorderSide(color: Color(0xFFFF3D00), width: 1.5),
-          backgroundColor: const Color(0xFFFF3D00).withValues(alpha: 0.04),
-          padding: const EdgeInsets.symmetric(vertical: 14),
+          backgroundColor: const Color(0xFFFF3D00).withValues(alpha: 0.08),
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 250),
+          child: Column(
+            key: ValueKey<int>(_scanPhase),
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.4,
+                  color: Color(0xFFFF3D00),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                _scanMessages[_scanPhase],
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
           ),
         ),
       ),
     );
   }
+
+  // ─── Text field builder ────────────────────────────────────────────────────
 
   Widget _buildField(
     TextEditingController ctrl,
@@ -733,6 +786,8 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
       ),
     );
   }
+
+  // ─── Log handler ───────────────────────────────────────────────────────────
 
   Future<void> _handleLog() async {
     final calorieText = _calCtrl.text.trim();
@@ -774,5 +829,78 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
       setState(() => _isSaving = false);
       Navigator.of(context).pop();
     }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// AI OPTION BUTTON  (reusable pill button for the 3-button row)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+class _AiOptionButton extends StatelessWidget {
+  const _AiOptionButton({
+    required this.emoji,
+    required this.label,
+    required this.sublabel,
+    required this.isLoading,
+    required this.disabled,
+    required this.onTap,
+    required this.borderColor,
+    required this.accentColor,
+  });
+
+  final String emoji;
+  final String label;
+  final String sublabel;
+  final bool isLoading;
+  final bool disabled;
+  final VoidCallback onTap;
+  final Color borderColor;
+  final Color accentColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Opacity(
+      opacity: (disabled && !isLoading) ? 0.45 : 1.0,
+      child: GestureDetector(
+        onTap: disabled ? null : onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
+          decoration: BoxDecoration(
+            color: accentColor.withValues(alpha: 0.07),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: borderColor, width: 1.2),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              isLoading
+                  ? SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        color: accentColor,
+                        strokeWidth: 2,
+                      ),
+                    )
+                  : Text(emoji, style: const TextStyle(fontSize: 20)),
+              const SizedBox(height: 5),
+              Text(
+                label,
+                style: TextStyle(
+                  color: accentColor,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12,
+                ),
+              ),
+              const SizedBox(height: 1),
+              Text(
+                sublabel,
+                style: const TextStyle(color: Color(0xFF666666), fontSize: 9),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

@@ -91,7 +91,7 @@ class _EditUsernameScreenState extends State<EditUsernameScreen> {
       title: 'Username',
       isSaving: _saving,
       saveEnabled: blockedUntil == null,
-      onSave: _save,
+      onSave: blockedUntil == null ? _save : null,
       children: [
         const FieldLabel('Username'),
         TextField(

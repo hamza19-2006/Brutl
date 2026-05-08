@@ -48,9 +48,7 @@ class _EditMacrosScreenState extends State<EditMacrosScreen> {
   void _runSuggestion() {
     final user = context.read<BrutlUserProvider>().user;
     if (user.weight <= 0 || user.height <= 0 || user.age <= 0) {
-      _showError(
-        'Add your Height, Weight and Age in Personal Stats first.',
-      );
+      _showError('Add your Height, Weight and Age in Personal Stats first.');
       return;
     }
 
@@ -108,15 +106,13 @@ class _EditMacrosScreenState extends State<EditMacrosScreen> {
       );
 
       // Sync to local fast paths consumed by Home / Nutrition screens.
-      // ignore: unawaited_futures
       SharedPreferences.getInstance().then((prefs) async {
         await prefs.setInt('calorie_goal', cal);
         await prefs.setInt('carbs_goal', carbs);
         await prefs.setInt('protein_goal', protein);
         await prefs.setInt('fats_goal', fat);
       });
-      // ignore: unawaited_futures
-      workoutProvider.updateUser(dailyCalorieGoal: cal);
+      await workoutProvider.updateUser(dailyCalorieGoal: cal);
 
       if (!mounted) return;
       Navigator.of(context).pop();
@@ -185,9 +181,7 @@ class _EditMacrosScreenState extends State<EditMacrosScreen> {
             ),
             label: Text(
               'Suggest from AI',
-              style: AppTextStyles.headingSmall(
-                color: AppColors.accentPrimary,
-              ),
+              style: AppTextStyles.headingSmall(color: AppColors.accentPrimary),
             ),
             style: OutlinedButton.styleFrom(
               padding: const EdgeInsets.symmetric(
@@ -196,8 +190,9 @@ class _EditMacrosScreenState extends State<EditMacrosScreen> {
               ),
               side: const BorderSide(color: AppColors.accentPrimary),
               shape: RoundedRectangleBorder(
-                borderRadius:
-                    BorderRadius.circular(AppSpacing.borderRadiusMedium),
+                borderRadius: BorderRadius.circular(
+                  AppSpacing.borderRadiusMedium,
+                ),
               ),
             ),
           ),
@@ -275,4 +270,3 @@ class _MacroInputRow extends StatelessWidget {
     );
   }
 }
-

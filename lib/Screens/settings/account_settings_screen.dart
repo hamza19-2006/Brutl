@@ -21,10 +21,10 @@ class AccountSettingsScreen extends StatefulWidget {
 }
 
 class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
-  File? _localPhoto;
+  File? _selectedImage;
   bool _uploading = false;
 
-  Future<void> _pickAndUploadPhoto() async {
+  Future<void> _pickImage() async {
     if (_uploading) return;
 
     final picker = ImagePicker();
@@ -36,25 +36,18 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
     );
     if (picked == null) return;
 
-    final file = File(picked.path);
-
-    // Optimistic local display first.
+    final File file = File(picked.path);
     setState(() {
-      _localPhoto = file;
+      _selectedImage = file;
       _uploading = true;
     });
 
-    final firebaseUser = FirebaseAuth.instance.currentUser;
-    if (firebaseUser == null) {
-      _showError('You must be signed in to update your photo.');
-      setState(() {
-        _localPhoto = null;
-        _uploading = false;
-      });
-      return;
-    }
-
     try {
+      final firebaseUser = FirebaseAuth.instance.currentUser;
+      if (firebaseUser == null) {
+        throw StateError('You must be signed in to update your photo.');
+      }
+
       final storageRef = FirebaseStorage.instance.ref(
         'users/${firebaseUser.uid}/profile.jpg',
       );
@@ -67,9 +60,10 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
       await context.read<BrutlUserProvider>().updatePhotoUrl(url);
     } catch (e) {
       debugPrint('ACCOUNT: photo upload failed — $e');
-      if (!mounted) return;
-      setState(() => _localPhoto = null);
-      _showError('Could not upload photo. Please try again.');
+      if (mounted) {
+        setState(() => _selectedImage = null);
+        _showError('Could not upload photo. Please try again.');
+      }
     } finally {
       if (mounted) setState(() => _uploading = false);
     }
@@ -150,8 +144,8 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
 
   Widget _buildAvatar(String remotePhotoUrl) {
     ImageProvider? imageProvider;
-    if (_localPhoto != null) {
-      imageProvider = FileImage(_localPhoto!);
+    if (_selectedImage != null) {
+      imageProvider = FileImage(_selectedImage!);
     } else if (remotePhotoUrl.isNotEmpty) {
       imageProvider = NetworkImage(remotePhotoUrl);
     }
@@ -195,7 +189,7 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
             shape: const CircleBorder(),
             child: InkWell(
               customBorder: const CircleBorder(),
-              onTap: _pickAndUploadPhoto,
+              onTap: _pickImage,
               child: Container(
                 width: 36,
                 height: 36,
@@ -207,11 +201,7 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
                     width: 2,
                   ),
                 ),
-                child: const Icon(
-                  Icons.edit,
-                  size: 16,
-                  color: Colors.white,
-                ),
+                child: const Icon(Icons.edit, size: 16, color: Colors.white),
               ),
             ),
           ),
@@ -220,4 +210,3 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
     );
   }
 }
-

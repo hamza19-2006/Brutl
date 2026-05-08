@@ -19,7 +19,7 @@ class EditScreenScaffold extends StatelessWidget {
 
   final String title;
   final List<Widget> children;
-  final Future<void> Function() onSave;
+  final Future<void> Function()? onSave;
   final bool isSaving;
   final String saveLabel;
   final bool saveEnabled;
@@ -58,6 +58,8 @@ class EditScreenScaffold extends StatelessWidget {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.accentPrimary,
                     foregroundColor: Colors.white,
+                    disabledBackgroundColor: AppColors.backgroundQuaternary,
+                    disabledForegroundColor: AppColors.textTertiary,
                     elevation: 0,
                     padding: const EdgeInsets.symmetric(
                       vertical: AppSpacing.lg,

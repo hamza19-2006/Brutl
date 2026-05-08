@@ -149,8 +149,8 @@ class BrutlUserProvider extends ChangeNotifier {
     return applyOptimistic(
       mutate: (u) => u.copyWith(photoUrl: url),
       firestorePatch: <String, dynamic>{
-        'photo_url': url,
-        'photoUrl': FieldValue.delete(),
+        'photoUrl': url,
+        'photo_url': FieldValue.delete(),
       },
     );
   }

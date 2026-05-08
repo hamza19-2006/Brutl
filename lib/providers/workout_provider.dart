@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/database_service.dart';
 import '../services/step_service.dart';
+import 'nutrition_service.dart';
 import '../models/brutl_models.dart' as brutl;
 import '../models/user_data_models.dart';
 
@@ -630,6 +631,36 @@ class WorkoutProvider extends ChangeNotifier {
     _user = updatedUser;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_userPrefsKey, _user.toRawJson());
+    notifyListeners();
+  }
+
+  void updateOptimisticMacros(
+    int newKcal,
+    int newCarbs,
+    int newProtein,
+    int newFat,
+  ) {
+    _user = _user.copyWith(dailyCalorieGoal: newKcal);
+
+    unawaited(
+      NutritionService.instance.saveGoals(
+        calorieGoal: newKcal,
+        carbsGoal: newCarbs,
+        proteinGoal: newProtein,
+        fatsGoal: newFat,
+      ),
+    );
+
+    unawaited(
+      SharedPreferences.getInstance().then((prefs) async {
+        await prefs.setInt('calorie_goal', newKcal);
+        await prefs.setInt('carbs_goal', newCarbs);
+        await prefs.setInt('protein_goal', newProtein);
+        await prefs.setInt('fats_goal', newFat);
+        await prefs.setString(_userPrefsKey, _user.toRawJson());
+      }),
+    );
+
     notifyListeners();
   }
 

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
@@ -105,14 +104,9 @@ class _EditMacrosScreenState extends State<EditMacrosScreen> {
         maintenanceCalories: _suggestedMaintenance,
       );
 
-      // Sync to local fast paths consumed by Home / Nutrition screens.
-      SharedPreferences.getInstance().then((prefs) async {
-        await prefs.setInt('calorie_goal', cal);
-        await prefs.setInt('carbs_goal', carbs);
-        await prefs.setInt('protein_goal', protein);
-        await prefs.setInt('fats_goal', fat);
-      });
-      await workoutProvider.updateUser(dailyCalorieGoal: cal);
+      // Optimistically update WorkoutProvider so Home / Workout UI
+      // reflects new calorie/macros immediately without requiring restart.
+      workoutProvider.updateOptimisticMacros(cal, carbs, protein, fat);
 
       if (!mounted) return;
       Navigator.of(context).pop();

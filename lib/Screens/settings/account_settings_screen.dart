@@ -1,7 +1,9 @@
 import 'dart:io';
 
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import '../../config/secrets.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
@@ -48,16 +50,28 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
         throw StateError('You must be signed in to update your photo.');
       }
 
-      final storageRef = FirebaseStorage.instance.ref(
-        'users/${firebaseUser.uid}/profile.jpg',
-      );
-      final task = await storageRef.putFile(
-        file,
-        SettableMetadata(contentType: 'image/jpeg'),
-      );
-      final url = await task.ref.getDownloadURL();
+      final uri = Uri.parse('https://api.imgbb.com/1/upload');
+      final req = http.MultipartRequest('POST', uri);
+      req.fields['key'] = imgBBApiKey;
+      req.files.add(await http.MultipartFile.fromPath('image', file.path));
+
+      final streamed = await req.send();
+      final response = await http.Response.fromStream(streamed);
+      if (response.statusCode != 200) {
+        throw StateError(
+          'Image upload failed with status ${response.statusCode}',
+        );
+      }
+
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = body['data'] as Map<String, dynamic>?;
+      final displayUrl = data != null ? (data['display_url'] as String?) : null;
+      if (displayUrl == null || displayUrl.isEmpty) {
+        throw StateError('ImgBB returned no display_url');
+      }
+
       if (!mounted) return;
-      await context.read<BrutlUserProvider>().updatePhotoUrl(url);
+      await context.read<BrutlUserProvider>().updatePhotoUrl(displayUrl);
     } catch (e) {
       debugPrint('ACCOUNT: photo upload failed — $e');
       if (mounted) {

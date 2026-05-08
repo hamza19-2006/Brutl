@@ -204,6 +204,56 @@ class NutritionService {
     );
   }
 
+  /// Set (replace) meal calories to a specific value and update totals.
+  /// This is used for editing existing meal entries.
+  Future<void> setMealCalories({
+    required String mealName,
+    required int calories,
+    required int carbs,
+    required int protein,
+    required int fats,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    await _checkAndResetIfNewDay(prefs);
+
+    // Get old values to subtract from totals
+    final oldMealCal =
+        prefs.getInt(_mealKey(mealName, 'calories')) ?? 0;
+    final oldMealCarbs =
+        prefs.getInt(_mealKey(mealName, 'carbs')) ?? 0;
+    final oldMealPro =
+        prefs.getInt(_mealKey(mealName, 'protein')) ?? 0;
+    final oldMealFat =
+        prefs.getInt(_mealKey(mealName, 'fats')) ?? 0;
+
+    // Calculate the difference (delta) to apply to totals
+    final calDelta = calories - oldMealCal;
+    final carbsDelta = carbs - oldMealCarbs;
+    final proDelta = protein - oldMealPro;
+    final fatDelta = fats - oldMealFat;
+
+    // Set new meal values
+    await prefs.setInt(_mealKey(mealName, 'calories'), calories.clamp(0, 99999));
+    await prefs.setInt(_mealKey(mealName, 'carbs'), carbs.clamp(0, 99999));
+    await prefs.setInt(_mealKey(mealName, 'protein'), protein.clamp(0, 99999));
+    await prefs.setInt(_mealKey(mealName, 'fats'), fats.clamp(0, 99999));
+
+    // Update totals with delta
+    final totalCal = ((prefs.getInt(_caloriesKey) ?? 0) + calDelta).clamp(0, 99999);
+    final totalCarbs = ((prefs.getInt(_carbsKey) ?? 0) + carbsDelta).clamp(0, 99999);
+    final totalPro = ((prefs.getInt(_proteinKey) ?? 0) + proDelta).clamp(0, 99999);
+    final totalFat = ((prefs.getInt(_fatsKey) ?? 0) + fatDelta).clamp(0, 99999);
+
+    await prefs.setInt(_caloriesKey, totalCal);
+    await prefs.setInt(_carbsKey, totalCarbs);
+    await prefs.setInt(_proteinKey, totalPro);
+    await prefs.setInt(_fatsKey, totalFat);
+
+    // Broadcast the updated state to listeners
+    final data = _buildFromPrefs(prefs);
+    if (!_controller.isClosed) _controller.add(data);
+  }
+
   Future<void> saveGoals({
     required int calorieGoal,
     required int carbsGoal,

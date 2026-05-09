@@ -27,11 +27,14 @@ class ChatProvider extends ChangeNotifier {
 
   StreamSubscription<QuerySnapshot>? _friendsSub;
   StreamSubscription<QuerySnapshot>? _requestsSub;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _unreadChatsSub;
 
   // Optimistic send queue so messages render instantly.
   final List<MessageModel> _optimisticMessages = [];
   List<MessageModel> get optimisticMessages =>
       List.unmodifiable(_optimisticMessages);
+  int _totalUnreadCount = 0;
+  int get totalUnreadCount => _totalUnreadCount;
 
   // -----------------------------------------------------------------------
   // Initialization (call once after login)
@@ -72,6 +75,28 @@ class ChatProvider extends ChangeNotifier {
             return FriendRequestModel.fromJson(data);
           }).toList();
           notifyListeners();
+        });
+  }
+
+  void listenToGlobalUnreadCount() {
+    if (_uid.isEmpty) return;
+    _unreadChatsSub?.cancel();
+    final unreadKey = 'unreadCount_$_uid';
+    _unreadChatsSub = _db
+        .collection('chats')
+        .where('participants', arrayContains: _uid)
+        .where(unreadKey, isGreaterThan: 0)
+        .snapshots()
+        .listen((snap) {
+          var total = 0;
+          for (final doc in snap.docs) {
+            final count = (doc.data()[unreadKey] as num?)?.toInt() ?? 0;
+            total += count;
+          }
+          if (total != _totalUnreadCount) {
+            _totalUnreadCount = total;
+            notifyListeners();
+          }
         });
   }
 
@@ -227,9 +252,14 @@ class ChatProvider extends ChangeNotifier {
     if (_uid.isEmpty || text.trim().isEmpty) return;
 
     final now = DateTime.now();
-    final participants =
-        chatId.split('_').where((uid) => uid.isNotEmpty).toList();
-    final msgRef = _db.collection('chats').doc(chatId).collection('messages').doc();
+    final participants = _participantsFromChatId(chatId);
+    final friendUid = _friendUidFromParticipants(participants);
+    final msgRef = _db
+        .collection('chats')
+        .doc(chatId)
+        .collection('messages')
+        .doc();
+    final chatRef = _db.collection('chats').doc(chatId);
 
     final message = MessageModel(
       id: msgRef.id,
@@ -238,6 +268,7 @@ class ChatProvider extends ChangeNotifier {
       expiresAt: now.add(const Duration(days: 7)),
       type: 'text',
       payload: {'text': text.trim()},
+      status: 'sent',
     );
 
     // Optimistic
@@ -245,12 +276,18 @@ class ChatProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await _db.collection('chats').doc(chatId).set(
-        {'participants': participants},
-        SetOptions(merge: true),
-      );
-
-      await msgRef.set(message.toJson());
+      final batch = _db.batch();
+      batch.set(msgRef, message.toJson());
+      batch.set(chatRef, <String, dynamic>{
+        'participants': participants,
+        'lastMessage': text.trim(),
+        'lastMessageSenderId': _uid,
+        'lastMessageTime': Timestamp.fromDate(now),
+        if (friendUid.isNotEmpty)
+          'unreadCount_$friendUid': FieldValue.increment(1),
+        'isTyping_$_uid': false,
+      }, SetOptions(merge: true));
+      await batch.commit();
 
       _optimisticMessages.removeWhere((m) => m.id == message.id);
       notifyListeners();
@@ -270,9 +307,14 @@ class ChatProvider extends ChangeNotifier {
     if (_uid.isEmpty) return;
 
     final now = DateTime.now();
-    final participants =
-        chatId.split('_').where((uid) => uid.isNotEmpty).toList();
-    final msgRef = _db.collection('chats').doc(chatId).collection('messages').doc();
+    final participants = _participantsFromChatId(chatId);
+    final friendUid = _friendUidFromParticipants(participants);
+    final msgRef = _db
+        .collection('chats')
+        .doc(chatId)
+        .collection('messages')
+        .doc();
+    final chatRef = _db.collection('chats').doc(chatId);
 
     final message = MessageModel(
       id: msgRef.id,
@@ -281,6 +323,7 @@ class ChatProvider extends ChangeNotifier {
       expiresAt: now.add(const Duration(days: 7)),
       type: type,
       payload: payload,
+      status: 'sent',
     );
 
     // Optimistic
@@ -288,12 +331,18 @@ class ChatProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await _db.collection('chats').doc(chatId).set(
-        {'participants': participants},
-        SetOptions(merge: true),
-      );
-
-      await msgRef.set(message.toJson());
+      final batch = _db.batch();
+      batch.set(msgRef, message.toJson());
+      batch.set(chatRef, <String, dynamic>{
+        'participants': participants,
+        'lastMessage': _widgetPreviewText(type, payload),
+        'lastMessageSenderId': _uid,
+        'lastMessageTime': Timestamp.fromDate(now),
+        if (friendUid.isNotEmpty)
+          'unreadCount_$friendUid': FieldValue.increment(1),
+        'isTyping_$_uid': false,
+      }, SetOptions(merge: true));
+      await batch.commit();
 
       _optimisticMessages.removeWhere((m) => m.id == message.id);
       notifyListeners();
@@ -326,9 +375,60 @@ class ChatProvider extends ChangeNotifier {
         .collection('messages')
         .orderBy('timestamp', descending: false)
         .snapshots()
-        .map((snap) => snap.docs
-            .map((d) => MessageModel.fromJson(d.data()))
-            .toList());
+        .map(
+          (snap) =>
+              snap.docs.map((d) => MessageModel.fromJson(d.data())).toList(),
+        );
+  }
+
+  Stream<DocumentSnapshot<Map<String, dynamic>>> chatMetaStream(String chatId) {
+    return _db.collection('chats').doc(chatId).snapshots();
+  }
+
+  Future<void> markChatAsRead(String chatId) async {
+    if (_uid.isEmpty) return;
+    final chatRef = _db.collection('chats').doc(chatId);
+    final unreadKey = 'unreadCount_$_uid';
+    final now = DateTime.now();
+
+    await chatRef.set(<String, dynamic>{unreadKey: 0}, SetOptions(merge: true));
+
+    final unreadMessages = await chatRef
+        .collection('messages')
+        .where('senderId', isNotEqualTo: _uid)
+        .get();
+
+    if (unreadMessages.docs.isEmpty) return;
+
+    WriteBatch? batch;
+    var ops = 0;
+    for (final doc in unreadMessages.docs) {
+      final data = doc.data();
+      if ((data['status'] as String? ?? 'sent') == 'read') continue;
+      batch ??= _db.batch();
+      batch.update(doc.reference, <String, dynamic>{
+        'status': 'read',
+        'readAt': Timestamp.fromDate(now),
+      });
+      ops++;
+      if (ops == 450) {
+        await batch.commit();
+        batch = null;
+        ops = 0;
+      }
+    }
+    if (batch != null && ops > 0) {
+      await batch.commit();
+    }
+  }
+
+  Future<void> setTypingStatus(String chatId, bool isTyping) async {
+    if (_uid.isEmpty) return;
+    final participants = _participantsFromChatId(chatId);
+    await _db.collection('chats').doc(chatId).set(<String, dynamic>{
+      'participants': participants,
+      'isTyping_$_uid': isTyping,
+    }, SetOptions(merge: true));
   }
 
   // -----------------------------------------------------------------------
@@ -347,14 +447,11 @@ class ChatProvider extends ChangeNotifier {
         .limit(15)
         .get();
 
-    return snap.docs
-        .where((d) => d.id != _uid)
-        .map((d) {
-          final data = d.data();
-          data['uid'] = d.id;
-          return data;
-        })
-        .toList();
+    return snap.docs.where((d) => d.id != _uid).map((d) {
+      final data = d.data();
+      data['uid'] = d.id;
+      return data;
+    }).toList();
   }
 
   /// Checks whether a friend request was already sent to [targetUid].
@@ -376,6 +473,32 @@ class ChatProvider extends ChangeNotifier {
   void dispose() {
     _friendsSub?.cancel();
     _requestsSub?.cancel();
+    _unreadChatsSub?.cancel();
     super.dispose();
+  }
+
+  List<String> _participantsFromChatId(String chatId) {
+    final participants = chatId
+        .split('_')
+        .where((uid) => uid.isNotEmpty)
+        .toList();
+    if (!participants.contains(_uid) && _uid.isNotEmpty) {
+      participants.add(_uid);
+    }
+    return participants.toSet().toList();
+  }
+
+  String _friendUidFromParticipants(List<String> participants) {
+    for (final uid in participants) {
+      if (uid != _uid) return uid;
+    }
+    return '';
+  }
+
+  String _widgetPreviewText(String type, Map<String, dynamic> payload) {
+    if (type == 'meal_share') return 'Shared a meal';
+    if (type == 'exercise_share') return 'Shared a workout';
+    if (type == 'text') return (payload['text'] as String? ?? '').trim();
+    return 'Shared an item';
   }
 }

@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../providers/workout_nutrition_provider.dart';
 import '../providers/nutrition_service.dart';
+import '../providers/chat_provider.dart';
 import '../providers/workout_provider.dart';
 import '../screens/calories_history_screen.dart';
 import '../services/calorie_history_service.dart';
@@ -40,6 +41,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     StepService.instance.initializeStepService();
+    context.read<ChatProvider>().listenToGlobalUnreadCount();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       requestStepPermission();
     });
@@ -127,6 +129,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final navLabels = context.select<WorkoutProvider, List<String>>(
       (provider) => provider.homeUi.navigationLabels,
     );
+    final totalUnread = context.select<ChatProvider, int>(
+      (provider) => provider.totalUnreadCount,
+    );
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
@@ -154,7 +159,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         items: List.generate(
           _tabIcons.length,
           (index) => BottomNavigationBarItem(
-            icon: Icon(_tabIcons[index]),
+            icon: index == 3
+                ? Badge(
+                    isLabelVisible: totalUnread > 0,
+                    backgroundColor: const Color(0xFFFF3D00),
+                    label: Text(
+                      totalUnread > 99 ? '99+' : '$totalUnread',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    child: Icon(_tabIcons[index]),
+                  )
+                : Icon(_tabIcons[index]),
             label: navLabels[index],
           ),
         ),

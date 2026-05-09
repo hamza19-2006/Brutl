@@ -14,6 +14,8 @@ class MessageModel {
     required this.expiresAt,
     required this.type,
     required this.payload,
+    this.status = 'sent',
+    this.readAt,
   });
 
   final String id;
@@ -28,6 +30,8 @@ class MessageModel {
   /// For text: {'text': '...'}.
   /// For meal_share / exercise_share: structured maps.
   final Map<String, dynamic> payload;
+  final String status; // sent, delivered, read
+  final DateTime? readAt;
 
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
@@ -37,6 +41,8 @@ class MessageModel {
       'expiresAt': Timestamp.fromDate(expiresAt),
       'type': type,
       'payload': payload,
+      'status': status,
+      'readAt': readAt != null ? Timestamp.fromDate(readAt!) : null,
     };
   }
 
@@ -50,6 +56,8 @@ class MessageModel {
       payload: Map<String, dynamic>.from(
         (json['payload'] as Map<dynamic, dynamic>?) ?? <String, dynamic>{},
       ),
+      status: json['status'] as String? ?? 'sent',
+      readAt: _toNullableDateTime(json['readAt']),
     );
   }
 
@@ -58,6 +66,14 @@ class MessageModel {
     if (value is DateTime) return value;
     if (value is String) return DateTime.tryParse(value) ?? DateTime.now();
     return DateTime.now();
+  }
+
+  static DateTime? _toNullableDateTime(dynamic value) {
+    if (value == null) return null;
+    if (value is Timestamp) return value.toDate();
+    if (value is DateTime) return value;
+    if (value is String) return DateTime.tryParse(value);
+    return null;
   }
 }
 
@@ -84,12 +100,11 @@ class FriendModel {
   final DateTime? addedAt;
 
   /// The name to display in UI: nickname first, then displayName, then @username.
-  String get resolvedName =>
-      nickname.isNotEmpty
-          ? nickname
-          : displayName.isNotEmpty
-          ? displayName
-          : '@$username';
+  String get resolvedName => nickname.isNotEmpty
+      ? nickname
+      : displayName.isNotEmpty
+      ? displayName
+      : '@$username';
 
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
@@ -98,7 +113,9 @@ class FriendModel {
       'displayName': displayName,
       'username': username,
       'photoUrl': photoUrl,
-      'addedAt': addedAt != null ? Timestamp.fromDate(addedAt!) : FieldValue.serverTimestamp(),
+      'addedAt': addedAt != null
+          ? Timestamp.fromDate(addedAt!)
+          : FieldValue.serverTimestamp(),
     };
   }
 

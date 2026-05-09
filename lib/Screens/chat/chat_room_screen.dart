@@ -1,4 +1,6 @@
-import 'package:cached_network_image/cached_network_image.dart';
+import 'dart:async';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -25,16 +27,23 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   final ScrollController _scrollController = ScrollController();
   late final String _chatId;
   late final String _myUid;
+  Timer? _typingDebounce;
+  bool _isTyping = false;
+  bool _isMarkingRead = false;
+  String _lastUnreadSignature = '';
 
   @override
   void initState() {
     super.initState();
     _myUid = FirebaseAuth.instance.currentUser?.uid ?? '';
     _chatId = buildChatId(_myUid, widget.friend.uid);
+    unawaited(context.read<ChatProvider>().markChatAsRead(_chatId));
   }
 
   @override
   void dispose() {
+    _typingDebounce?.cancel();
+    unawaited(context.read<ChatProvider>().setTypingStatus(_chatId, false));
     _controller.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -43,9 +52,54 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   void _send() {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
+    _typingDebounce?.cancel();
+    if (_isTyping) {
+      _isTyping = false;
+      unawaited(context.read<ChatProvider>().setTypingStatus(_chatId, false));
+    }
     context.read<ChatProvider>().sendTextMessage(_chatId, text);
     _controller.clear();
     _scrollToBottom();
+  }
+
+  void _onInputChanged(String value) {
+    if (value.trim().isEmpty) {
+      _typingDebounce?.cancel();
+      if (_isTyping) {
+        _isTyping = false;
+        unawaited(context.read<ChatProvider>().setTypingStatus(_chatId, false));
+      }
+      return;
+    }
+
+    if (!_isTyping) {
+      _isTyping = true;
+      unawaited(context.read<ChatProvider>().setTypingStatus(_chatId, true));
+    }
+
+    _typingDebounce?.cancel();
+    _typingDebounce = Timer(const Duration(seconds: 2), () {
+      if (_isTyping) {
+        _isTyping = false;
+        unawaited(context.read<ChatProvider>().setTypingStatus(_chatId, false));
+      }
+    });
+  }
+
+  void _markAsReadIfNeeded(List<MessageModel> messages) {
+    final unreadIncoming = messages
+        .where((m) => m.senderId != _myUid && m.status != 'read')
+        .toList();
+    if (unreadIncoming.isEmpty) return;
+    final signature = '${unreadIncoming.length}_${unreadIncoming.last.id}';
+    if (_isMarkingRead || signature == _lastUnreadSignature) return;
+    _isMarkingRead = true;
+    _lastUnreadSignature = signature;
+    unawaited(
+      context.read<ChatProvider>().markChatAsRead(_chatId).whenComplete(() {
+        _isMarkingRead = false;
+      }),
+    );
   }
 
   void _scrollToBottom() {
@@ -107,9 +161,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       ),
     );
     if (payload != null && mounted) {
-      context
-          .read<ChatProvider>()
-          .sendWidgetMessage(_chatId, 'meal_share', payload);
+      context.read<ChatProvider>().sendWidgetMessage(
+        _chatId,
+        'meal_share',
+        payload,
+      );
       _scrollToBottom();
     }
   }
@@ -122,9 +178,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       ),
     );
     if (payload != null && mounted) {
-      context
-          .read<ChatProvider>()
-          .sendWidgetMessage(_chatId, 'exercise_share', payload);
+      context.read<ChatProvider>().sendWidgetMessage(
+        _chatId,
+        'exercise_share',
+        payload,
+      );
       _scrollToBottom();
     }
   }
@@ -139,90 +197,115 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         backgroundColor: AppColors.backgroundPrimary,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded,
-              color: AppColors.textPrimary),
+          icon: const Icon(
+            Icons.arrow_back_rounded,
+            color: AppColors.textPrimary,
+          ),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Row(
+        title: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            CircleAvatar(
-              radius: 16,
-              backgroundColor: AppColors.backgroundQuaternary,
-              backgroundImage: widget.friend.photoUrl.isNotEmpty
-                  ? CachedNetworkImageProvider(widget.friend.photoUrl)
-                  : null,
-              child: widget.friend.photoUrl.isEmpty
-                  ? const Icon(Icons.person,
-                      color: AppColors.textTertiary, size: 16)
-                  : null,
-            ),
-            const SizedBox(width: AppSpacing.sm),
-            Flexible(
-              child: Text(
-                widget.friend.resolvedName,
-                style: AppTextStyles.headingMedium(),
-                overflow: TextOverflow.ellipsis,
+            Text(
+              widget.friend.resolvedName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppTextStyles.headingMedium().copyWith(
+                fontWeight: FontWeight.w700,
               ),
+            ),
+            const SizedBox(height: 1),
+            Text(
+              '@${widget.friend.username}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppTextStyles.labelSmall(color: AppColors.textTertiary),
             ),
           ],
         ),
+        centerTitle: true,
       ),
-      body: Column(
-        children: [
-          // Messages
-          Expanded(
-            child: StreamBuilder<List<MessageModel>>(
-              stream: chatProvider.messagesStream(_chatId),
-              builder: (ctx, snap) {
-                final serverMessages = snap.data ?? [];
-                final serverIds = serverMessages.map((m) => m.id).toSet();
-                final optimistic = chatProvider.optimisticMessages
-                    .where((m) => !serverIds.contains(m.id))
-                    .toList();
-                final allMessages = [...serverMessages, ...optimistic];
+      body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+        stream: chatProvider.chatMetaStream(_chatId),
+        builder: (context, chatSnap) {
+          final chatData = chatSnap.data?.data() ?? const <String, dynamic>{};
+          final isFriendTyping =
+              (chatData['isTyping_${widget.friend.uid}'] as bool?) ?? false;
 
-                if (allMessages.isEmpty) {
-                  return Center(
-                    child: Text(
-                      'No messages yet. Say hello!',
-                      style: AppTextStyles.bodyMedium(
-                          color: AppColors.textTertiary),
-                    ),
-                  );
-                }
+          return Column(
+            children: [
+              Expanded(
+                child: StreamBuilder<List<MessageModel>>(
+                  stream: chatProvider.messagesStream(_chatId),
+                  builder: (ctx, snap) {
+                    final serverMessages = snap.data ?? [];
+                    _markAsReadIfNeeded(serverMessages);
+                    final serverIds = serverMessages.map((m) => m.id).toSet();
+                    final optimistic = chatProvider.optimisticMessages
+                        .where((m) => !serverIds.contains(m.id))
+                        .toList();
+                    final allMessages = [...serverMessages, ...optimistic];
 
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (_scrollController.hasClients) {
-                    _scrollController.jumpTo(
-                        _scrollController.position.maxScrollExtent);
-                  }
-                });
+                    if (allMessages.isEmpty) {
+                      return Center(
+                        child: Text(
+                          'No messages yet. Say hello!',
+                          style: AppTextStyles.bodyMedium(
+                            color: AppColors.textTertiary,
+                          ),
+                        ),
+                      );
+                    }
 
-                return ListView.builder(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.lg,
-                    vertical: AppSpacing.sm,
-                  ),
-                  itemCount: allMessages.length,
-                  itemBuilder: (ctx, i) {
-                    final msg = allMessages[i];
-                    final isMe = msg.senderId == _myUid;
-                    return _MessageBubble(message: msg, isMe: isMe);
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (_scrollController.hasClients) {
+                        _scrollController.jumpTo(
+                          _scrollController.position.maxScrollExtent,
+                        );
+                      }
+                    });
+
+                    return ListView.builder(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.lg,
+                        vertical: AppSpacing.sm,
+                      ),
+                      itemCount: allMessages.length,
+                      itemBuilder: (ctx, i) {
+                        final msg = allMessages[i];
+                        final isMe = msg.senderId == _myUid;
+                        return _MessageBubble(message: msg, isMe: isMe);
+                      },
+                    );
                   },
-                );
-              },
-            ),
-          ),
-
-          // Input area
-          _InputBar(
-            controller: _controller,
-            onSend: _send,
-            onAttach: _showAttachmentSheet,
-          ),
-        ],
+                ),
+              ),
+              if (isFriendTyping)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.lg,
+                    0,
+                    AppSpacing.lg,
+                    AppSpacing.xs,
+                  ),
+                  child: Text(
+                    'Typing...',
+                    style: AppTextStyles.labelSmall(
+                      color: AppColors.textTertiary,
+                    ),
+                  ),
+                ),
+              _InputBar(
+                controller: _controller,
+                onSend: _send,
+                onAttach: _showAttachmentSheet,
+                onChanged: _onInputChanged,
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -232,14 +315,22 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 // Message bubble
 // =============================================================================
 
-class _MessageBubble extends StatelessWidget {
+class _MessageBubble extends StatefulWidget {
   const _MessageBubble({required this.message, required this.isMe});
   final MessageModel message;
   final bool isMe;
 
   @override
+  State<_MessageBubble> createState() => _MessageBubbleState();
+}
+
+class _MessageBubbleState extends State<_MessageBubble> {
+  bool _showDetails = false;
+
+  @override
   Widget build(BuildContext context) {
-    final timeStr = DateFormat.jm().format(message.timestamp);
+    final message = widget.message;
+    final isMe = widget.isMe;
     final isTextMessage = message.type == 'text';
 
     Widget content;
@@ -248,16 +339,18 @@ class _MessageBubble extends StatelessWidget {
         content = _MealShareBubble(payload: message.payload, isMe: isMe);
         break;
       case 'exercise_share':
-        content =
-            _ExerciseShareBubble(payload: message.payload, isMe: isMe);
+        content = _ExerciseShareBubble(payload: message.payload, isMe: isMe);
         break;
       default:
-        content = Text(message.payload['text'] as String? ?? '',
-            style: AppTextStyles.bodyMedium(color: AppColors.textPrimary));
+        content = Text(
+          message.payload['text'] as String? ?? '',
+          style: AppTextStyles.bodyMedium(color: AppColors.textPrimary),
+        );
     }
 
-    final bubbleColor =
-        isMe ? AppColors.accentPrimary : const Color(0xFF171A1F);
+    final bubbleColor = isMe
+        ? AppColors.accentPrimary
+        : const Color(0xFF171A1F);
     final bubbleRadius = isMe
         ? const BorderRadius.only(
             topLeft: Radius.circular(16),
@@ -274,39 +367,83 @@ class _MessageBubble extends StatelessWidget {
 
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: AppSpacing.sm),
-        constraints:
-            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.82),
-        padding: isTextMessage ? const EdgeInsets.all(AppSpacing.md) : null,
-        decoration: isTextMessage
-            ? BoxDecoration(
-                color: bubbleColor,
-                border: Border.all(
-                  color:
-                      isMe ? AppColors.accentSecondary : AppColors.borderStrong,
-                ),
-                borderRadius: bubbleRadius,
-              )
-            : null,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            isTextMessage
-                ? content
-                : SizedBox(width: double.infinity, child: content),
-            const SizedBox(height: AppSpacing.xs),
-            Text(
-              timeStr,
-              style: AppTextStyles.labelSmall(
-                color: isTextMessage
-                    ? AppColors.textPrimary.withValues(alpha: 0.78)
-                    : AppColors.textTertiary,
+      child: GestureDetector(
+        onTap: () => setState(() => _showDetails = !_showDetails),
+        child: Container(
+          margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.of(context).size.width * 0.82,
+          ),
+          child: Column(
+            crossAxisAlignment: isMe
+                ? CrossAxisAlignment.end
+                : CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: isTextMessage
+                    ? const EdgeInsets.all(AppSpacing.md)
+                    : null,
+                decoration: isTextMessage
+                    ? BoxDecoration(
+                        color: bubbleColor,
+                        border: Border.all(
+                          color: isMe
+                              ? AppColors.accentSecondary
+                              : AppColors.borderStrong,
+                        ),
+                        borderRadius: bubbleRadius,
+                      )
+                    : null,
+                child: isTextMessage
+                    ? content
+                    : SizedBox(width: double.infinity, child: content),
               ),
-            ),
-          ],
+              AnimatedSize(
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOut,
+                child: _showDetails
+                    ? Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: _MessageDetails(message: message, isMe: isMe),
+                      )
+                    : const SizedBox.shrink(),
+              ),
+            ],
+          ),
         ),
       ),
+    );
+  }
+}
+
+class _MessageDetails extends StatelessWidget {
+  const _MessageDetails({required this.message, required this.isMe});
+
+  final MessageModel message;
+  final bool isMe;
+
+  @override
+  Widget build(BuildContext context) {
+    final sentTime = DateFormat.jm().format(message.timestamp);
+    final seenTime = message.readAt != null
+        ? DateFormat.jm().format(message.readAt!)
+        : null;
+    final detailStyle = AppTextStyles.labelSmall(
+      color: AppColors.textTertiary.withValues(alpha: 0.9),
+    );
+
+    return Column(
+      crossAxisAlignment: isMe
+          ? CrossAxisAlignment.end
+          : CrossAxisAlignment.start,
+      children: [
+        Text(
+          isMe ? 'Sent: $sentTime' : 'Received: $sentTime',
+          style: detailStyle,
+        ),
+        if (isMe && message.status == 'read' && seenTime != null)
+          Text('Seen: $seenTime', style: detailStyle),
+      ],
     );
   }
 }
@@ -343,13 +480,18 @@ class _MealShareBubble extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(Icons.restaurant,
-                  color: AppColors.accentPrimary, size: 18),
+              const Icon(
+                Icons.restaurant,
+                color: AppColors.accentPrimary,
+                size: 18,
+              ),
               const SizedBox(width: AppSpacing.sm),
               Expanded(
                 child: Text(
                   mealName,
-                  style: AppTextStyles.headingSmall(color: AppColors.textPrimary),
+                  style: AppTextStyles.headingSmall(
+                    color: AppColors.textPrimary,
+                  ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -390,8 +532,9 @@ class _MealShareBubble extends StatelessWidget {
               const Spacer(),
               Text(
                 '${calories.toStringAsFixed(calories % 1 == 0 ? 0 : 1)} kcal',
-                style:
-                    AppTextStyles.headingSmall(color: AppColors.accentPrimary),
+                style: AppTextStyles.headingSmall(
+                  color: AppColors.accentPrimary,
+                ),
               ),
             ],
           ),
@@ -432,11 +575,15 @@ class _MacroPill extends StatelessWidget {
             decoration: BoxDecoration(color: color, shape: BoxShape.circle),
           ),
           const SizedBox(width: AppSpacing.xs),
-          Text(label,
-              style: AppTextStyles.labelSmall(color: AppColors.textSecondary)),
+          Text(
+            label,
+            style: AppTextStyles.labelSmall(color: AppColors.textSecondary),
+          ),
           const SizedBox(width: AppSpacing.xs),
-          Text(value,
-              style: AppTextStyles.labelLarge(color: AppColors.textPrimary)),
+          Text(
+            value,
+            style: AppTextStyles.labelLarge(color: AppColors.textPrimary),
+          ),
         ],
       ),
     );
@@ -475,9 +622,8 @@ class _ExerciseShareBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scope = payload['shareScope'] as String? ?? 'day';
-    final title = payload['title'] as String? ??
-        payload['name'] as String? ??
-        'Workout';
+    final title =
+        payload['title'] as String? ?? payload['name'] as String? ?? 'Workout';
     final exercises = (payload['exercises'] as List<dynamic>? ?? [])
         .whereType<Map>()
         .map((e) => Map<String, dynamic>.from(e))
@@ -523,8 +669,9 @@ class _ExerciseShareBubble extends StatelessWidget {
               Expanded(
                 child: Text(
                   title,
-                  style:
-                      AppTextStyles.headingSmall(color: AppColors.textPrimary),
+                  style: AppTextStyles.headingSmall(
+                    color: AppColors.textPrimary,
+                  ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -549,8 +696,9 @@ class _ExerciseShareBubble extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
                 decoration: BoxDecoration(
                   border: Border.all(color: AppColors.borderAccent),
-                  borderRadius:
-                      BorderRadius.circular(AppSpacing.borderRadiusSmall),
+                  borderRadius: BorderRadius.circular(
+                    AppSpacing.borderRadiusSmall,
+                  ),
                 ),
                 child: Center(
                   child: Text(
@@ -600,8 +748,9 @@ class _WeekBody extends StatelessWidget {
                 Expanded(
                   child: Text(
                     day,
-                    style:
-                        AppTextStyles.bodySmall(color: AppColors.textSecondary),
+                    style: AppTextStyles.bodySmall(
+                      color: AppColors.textSecondary,
+                    ),
                   ),
                 ),
               ],
@@ -689,11 +838,13 @@ class _InputBar extends StatelessWidget {
     required this.controller,
     required this.onSend,
     required this.onAttach,
+    required this.onChanged,
   });
 
   final TextEditingController controller;
   final VoidCallback onSend;
   final VoidCallback onAttach;
+  final ValueChanged<String> onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -701,9 +852,7 @@ class _InputBar extends StatelessWidget {
       padding: const EdgeInsets.all(AppSpacing.md),
       decoration: const BoxDecoration(
         color: AppColors.backgroundSecondary,
-        border: Border(
-          top: BorderSide(color: AppColors.borderDefault),
-        ),
+        border: Border(top: BorderSide(color: AppColors.borderDefault)),
       ),
       child: SafeArea(
         top: false,
@@ -712,31 +861,34 @@ class _InputBar extends StatelessWidget {
             // Attachment "+"
             InkWell(
               onTap: onAttach,
-              borderRadius:
-                  BorderRadius.circular(AppSpacing.borderRadiusSmall),
+              borderRadius: BorderRadius.circular(AppSpacing.borderRadiusSmall),
               child: Container(
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
                   color: AppColors.backgroundTertiary,
                   border: Border.all(color: AppColors.borderDefault),
-                  borderRadius:
-                      BorderRadius.circular(AppSpacing.borderRadiusSmall),
+                  borderRadius: BorderRadius.circular(
+                    AppSpacing.borderRadiusSmall,
+                  ),
                 ),
-                child: const Icon(Icons.add_rounded,
-                    color: AppColors.accentPrimary, size: 22),
+                child: const Icon(
+                  Icons.add_rounded,
+                  color: AppColors.accentPrimary,
+                  size: 22,
+                ),
               ),
             ),
             const SizedBox(width: AppSpacing.sm),
             Expanded(
               child: TextField(
                 controller: controller,
-                style:
-                    AppTextStyles.bodyMedium(color: AppColors.textPrimary),
+                style: AppTextStyles.bodyMedium(color: AppColors.textPrimary),
                 decoration: InputDecoration(
                   hintText: 'Type a message...',
                   hintStyle: AppTextStyles.bodyMedium(
-                      color: AppColors.textTertiary),
+                    color: AppColors.textTertiary,
+                  ),
                   filled: true,
                   fillColor: AppColors.backgroundTertiary,
                   contentPadding: const EdgeInsets.symmetric(
@@ -745,41 +897,51 @@ class _InputBar extends StatelessWidget {
                   ),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(
-                        AppSpacing.borderRadiusSmall),
-                    borderSide:
-                        const BorderSide(color: AppColors.borderDefault),
+                      AppSpacing.borderRadiusSmall,
+                    ),
+                    borderSide: const BorderSide(
+                      color: AppColors.borderDefault,
+                    ),
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(
-                        AppSpacing.borderRadiusSmall),
-                    borderSide:
-                        const BorderSide(color: AppColors.borderDefault),
+                      AppSpacing.borderRadiusSmall,
+                    ),
+                    borderSide: const BorderSide(
+                      color: AppColors.borderDefault,
+                    ),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(
-                        AppSpacing.borderRadiusSmall),
-                    borderSide:
-                        const BorderSide(color: AppColors.accentPrimary),
+                      AppSpacing.borderRadiusSmall,
+                    ),
+                    borderSide: const BorderSide(
+                      color: AppColors.accentPrimary,
+                    ),
                   ),
                 ),
                 onSubmitted: (_) => onSend(),
+                onChanged: onChanged,
               ),
             ),
             const SizedBox(width: AppSpacing.sm),
             InkWell(
               onTap: onSend,
-              borderRadius:
-                  BorderRadius.circular(AppSpacing.borderRadiusSmall),
+              borderRadius: BorderRadius.circular(AppSpacing.borderRadiusSmall),
               child: Container(
                 width: 44,
                 height: 44,
                 decoration: BoxDecoration(
                   color: AppColors.accentPrimary,
-                  borderRadius:
-                      BorderRadius.circular(AppSpacing.borderRadiusSmall),
+                  borderRadius: BorderRadius.circular(
+                    AppSpacing.borderRadiusSmall,
+                  ),
                 ),
-                child: const Icon(Icons.send_rounded,
-                    color: AppColors.textPrimary, size: 20),
+                child: const Icon(
+                  Icons.send_rounded,
+                  color: AppColors.textPrimary,
+                  size: 20,
+                ),
               ),
             ),
           ],

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -157,18 +158,23 @@ class _ChatListScreenState extends State<ChatListScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: Text('Cancel',
-                style: AppTextStyles.bodyMedium(color: AppColors.textSecondary)),
+            child: Text(
+              'Cancel',
+              style: AppTextStyles.bodyMedium(color: AppColors.textSecondary),
+            ),
           ),
           TextButton(
             onPressed: () {
-              context
-                  .read<ChatProvider>()
-                  .setLocalNickname(friend.uid, controller.text.trim());
+              context.read<ChatProvider>().setLocalNickname(
+                friend.uid,
+                controller.text.trim(),
+              );
               Navigator.pop(ctx);
             },
-            child: Text('Save',
-                style: AppTextStyles.bodyMedium(color: AppColors.accentPrimary)),
+            child: Text(
+              'Save',
+              style: AppTextStyles.bodyMedium(color: AppColors.accentPrimary),
+            ),
           ),
         ],
       ),
@@ -180,8 +186,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.backgroundSecondary,
-        title: Text('Remove Friend',
-            style: AppTextStyles.headingMedium(color: AppColors.statusError)),
+        title: Text(
+          'Remove Friend',
+          style: AppTextStyles.headingMedium(color: AppColors.statusError),
+        ),
         content: Text(
           'Are you sure you want to remove ${friend.resolvedName}?',
           style: AppTextStyles.bodyMedium(color: AppColors.textSecondary),
@@ -189,16 +197,20 @@ class _ChatListScreenState extends State<ChatListScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: Text('Cancel',
-                style: AppTextStyles.bodyMedium(color: AppColors.textSecondary)),
+            child: Text(
+              'Cancel',
+              style: AppTextStyles.bodyMedium(color: AppColors.textSecondary),
+            ),
           ),
           TextButton(
             onPressed: () {
               context.read<ChatProvider>().removeFriend(friend.uid);
               Navigator.pop(ctx);
             },
-            child: Text('Remove',
-                style: AppTextStyles.bodyMedium(color: AppColors.statusError)),
+            child: Text(
+              'Remove',
+              style: AppTextStyles.bodyMedium(color: AppColors.statusError),
+            ),
           ),
         ],
       ),
@@ -210,8 +222,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.backgroundSecondary,
-        title: Text('Delete Chat History',
-            style: AppTextStyles.headingMedium(color: AppColors.statusError)),
+        title: Text(
+          'Delete Chat History',
+          style: AppTextStyles.headingMedium(color: AppColors.statusError),
+        ),
         content: Text(
           'Clear all messages with ${friend.resolvedName}?',
           style: AppTextStyles.bodyMedium(color: AppColors.textSecondary),
@@ -219,19 +233,22 @@ class _ChatListScreenState extends State<ChatListScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: Text('Cancel',
-                style: AppTextStyles.bodyMedium(color: AppColors.textSecondary)),
+            child: Text(
+              'Cancel',
+              style: AppTextStyles.bodyMedium(color: AppColors.textSecondary),
+            ),
           ),
           TextButton(
             onPressed: () {
-              final myUid =
-                  FirebaseAuth.instance.currentUser?.uid ?? '';
+              final myUid = FirebaseAuth.instance.currentUser?.uid ?? '';
               final chatId = buildChatId(myUid, friend.uid);
               context.read<ChatProvider>().clearChatHistory(chatId);
               Navigator.pop(ctx);
             },
-            child: Text('Delete',
-                style: AppTextStyles.bodyMedium(color: AppColors.statusError)),
+            child: Text(
+              'Delete',
+              style: AppTextStyles.bodyMedium(color: AppColors.statusError),
+            ),
           ),
         ],
       ),
@@ -257,10 +274,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   width: MediaQuery.of(ctx).size.width * 0.5,
                   height: MediaQuery.of(ctx).size.width * 0.5,
                   decoration: BoxDecoration(
-                    border: Border.all(
-                      color: AppColors.borderStrong,
-                      width: 3,
-                    ),
+                    border: Border.all(color: AppColors.borderStrong, width: 3),
                     image: DecorationImage(
                       image: CachedNetworkImageProvider(friend.photoUrl),
                       fit: BoxFit.cover,
@@ -280,8 +294,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
                     color: AppColors.backgroundSecondary,
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.arrow_back,
-                      color: AppColors.textPrimary, size: 20),
+                  child: const Icon(
+                    Icons.arrow_back,
+                    color: AppColors.textPrimary,
+                    size: 20,
+                  ),
                 ),
               ),
             ),
@@ -298,29 +315,64 @@ class _ChatListScreenState extends State<ChatListScreen> {
   @override
   Widget build(BuildContext context) {
     final chatProvider = context.watch<ChatProvider>();
-    final pendingCount = chatProvider.pendingRequestCount;
     final friendsList = chatProvider.friends;
+    final myUid = FirebaseAuth.instance.currentUser?.uid ?? '';
 
     return Scaffold(
       backgroundColor: AppColors.backgroundPrimary,
       appBar: AppBar(
         backgroundColor: AppColors.backgroundPrimary,
         elevation: 0,
-        leading: _BellIcon(
-          count: pendingCount,
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute<void>(
-              builder: (_) => const FriendRequestsScreen(),
-            ),
-          ),
-        ),
+        leading: myUid.isEmpty
+            ? _BellIcon(
+                count: 0,
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => const FriendRequestsScreen(),
+                  ),
+                ),
+              )
+            : StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                stream: FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(myUid)
+                    .collection('friend_requests')
+                    .where('status', isEqualTo: 'pending')
+                    .snapshots(),
+                builder: (context, snapshot) {
+                  int pendingCount;
+                  if (snapshot.hasError) {
+                    debugPrint(
+                      'Friend requests stream error in ChatListScreen: ${snapshot.error}',
+                    );
+                    pendingCount = chatProvider.pendingRequestCount;
+                  } else if (snapshot.connectionState ==
+                      ConnectionState.waiting) {
+                    pendingCount = chatProvider.pendingRequestCount;
+                  } else {
+                    pendingCount = snapshot.data?.docs.length ?? 0;
+                  }
+                  return _BellIcon(
+                    count: pendingCount,
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => const FriendRequestsScreen(),
+                      ),
+                    ),
+                  );
+                },
+              ),
         title: Text('Chat', style: AppTextStyles.headingLarge()),
         centerTitle: true,
         actions: [
           IconButton(
             tooltip: 'Settings',
-            icon: const Icon(Icons.settings_rounded, color: AppColors.textPrimary),
+            icon: const Icon(
+              Icons.settings_rounded,
+              color: AppColors.textPrimary,
+            ),
             onPressed: () => Navigator.push(
               context,
               MaterialPageRoute<void>(
@@ -343,28 +395,33 @@ class _ChatListScreenState extends State<ChatListScreen> {
               onChanged: _onSearchChanged,
               style: AppTextStyles.bodyMedium(color: AppColors.textPrimary),
               decoration: InputDecoration(
-                prefixIcon: const Icon(Icons.search,
-                    color: AppColors.textTertiary),
+                prefixIcon: const Icon(
+                  Icons.search,
+                  color: AppColors.textTertiary,
+                ),
                 hintText: 'Search by username...',
-                hintStyle:
-                    AppTextStyles.bodyMedium(color: AppColors.textTertiary),
+                hintStyle: AppTextStyles.bodyMedium(
+                  color: AppColors.textTertiary,
+                ),
                 filled: true,
                 fillColor: AppColors.backgroundTertiary,
                 border: OutlineInputBorder(
-                  borderRadius:
-                      BorderRadius.circular(AppSpacing.borderRadiusMedium),
+                  borderRadius: BorderRadius.circular(
+                    AppSpacing.borderRadiusMedium,
+                  ),
                   borderSide: const BorderSide(color: AppColors.borderDefault),
                 ),
                 enabledBorder: OutlineInputBorder(
-                  borderRadius:
-                      BorderRadius.circular(AppSpacing.borderRadiusMedium),
+                  borderRadius: BorderRadius.circular(
+                    AppSpacing.borderRadiusMedium,
+                  ),
                   borderSide: const BorderSide(color: AppColors.borderDefault),
                 ),
                 focusedBorder: OutlineInputBorder(
-                  borderRadius:
-                      BorderRadius.circular(AppSpacing.borderRadiusMedium),
-                  borderSide:
-                      const BorderSide(color: AppColors.accentPrimary),
+                  borderRadius: BorderRadius.circular(
+                    AppSpacing.borderRadiusMedium,
+                  ),
+                  borderSide: const BorderSide(color: AppColors.accentPrimary),
                 ),
               ),
             ),
@@ -376,8 +433,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
               results: _searchResults,
               isLoading: _isSearching,
               sentRequests: _sentRequests,
-              existingFriendUids:
-                  friendsList.map((f) => f.uid).toSet(),
+              existingFriendUids: friendsList.map((f) => f.uid).toSet(),
               onAdd: _sendRequest,
             ),
 
@@ -426,8 +482,11 @@ class _BellIcon extends StatelessWidget {
       icon: Stack(
         clipBehavior: Clip.none,
         children: [
-          const Icon(Icons.notifications_rounded,
-              color: AppColors.textPrimary, size: 26),
+          const Icon(
+            Icons.notifications_rounded,
+            color: AppColors.textPrimary,
+            size: 26,
+          ),
           if (count > 0)
             Positioned(
               right: -4,
@@ -438,13 +497,11 @@ class _BellIcon extends StatelessWidget {
                   color: AppColors.statusError,
                   shape: BoxShape.circle,
                 ),
-                constraints:
-                    const BoxConstraints(minWidth: 18, minHeight: 18),
+                constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
                 child: Text(
                   '$count',
                   textAlign: TextAlign.center,
-                  style: AppTextStyles.labelSmall(
-                      color: AppColors.textPrimary),
+                  style: AppTextStyles.labelSmall(color: AppColors.textPrimary),
                 ),
               ),
             ),
@@ -455,11 +512,7 @@ class _BellIcon extends StatelessWidget {
     if (count > 0) {
       bell = bell
           .animate(onPlay: (c) => c.repeat())
-          .shake(
-            duration: 600.ms,
-            hz: 3,
-            rotation: 0.06,
-          )
+          .shake(duration: 600.ms, hz: 3, rotation: 0.06)
           .then(delay: 2000.ms);
     }
 
@@ -483,14 +536,21 @@ class _AiChatTile extends StatelessWidget {
           border: Border.all(color: AppColors.accentPrimary, width: 2),
           borderRadius: BorderRadius.circular(AppSpacing.borderRadiusSmall),
         ),
-        child: const Icon(Icons.smart_toy_rounded,
-            color: AppColors.accentPrimary, size: 26),
+        child: const Icon(
+          Icons.smart_toy_rounded,
+          color: AppColors.accentPrimary,
+          size: 26,
+        ),
       ),
       title: Text('AI Trainer', style: AppTextStyles.headingSmall()),
-      subtitle: Text('Ask me anything about fitness',
-          style: AppTextStyles.bodySmall(color: AppColors.textTertiary)),
-      trailing: const Icon(Icons.chevron_right_rounded,
-          color: AppColors.textTertiary),
+      subtitle: Text(
+        'Ask me anything about fitness',
+        style: AppTextStyles.bodySmall(color: AppColors.textTertiary),
+      ),
+      trailing: const Icon(
+        Icons.chevron_right_rounded,
+        color: AppColors.textTertiary,
+      ),
       onTap: () => Navigator.push(
         context,
         MaterialPageRoute<void>(builder: (_) => const AiChatScreen()),
@@ -540,8 +600,11 @@ class _FriendChatTile extends StatelessWidget {
                       ? CachedNetworkImageProvider(friend.photoUrl)
                       : null,
                   child: friend.photoUrl.isEmpty
-                      ? const Icon(Icons.person,
-                          color: AppColors.textTertiary, size: 24)
+                      ? const Icon(
+                          Icons.person,
+                          color: AppColors.textTertiary,
+                          size: 24,
+                        )
                       : null,
                 ),
               ),
@@ -551,19 +614,25 @@ class _FriendChatTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(friend.resolvedName,
-                      style: AppTextStyles.headingSmall()),
+                  Text(
+                    friend.resolvedName,
+                    style: AppTextStyles.headingSmall(),
+                  ),
                   const SizedBox(height: 2),
                   Text(
                     '@${friend.username}',
-                    style:
-                        AppTextStyles.labelSmall(color: AppColors.textTertiary),
+                    style: AppTextStyles.labelSmall(
+                      color: AppColors.textTertiary,
+                    ),
                   ),
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right_rounded,
-                color: AppColors.textTertiary, size: 20),
+            const Icon(
+              Icons.chevron_right_rounded,
+              color: AppColors.textTertiary,
+              size: 20,
+            ),
           ],
         ),
       ),
@@ -595,16 +664,19 @@ class _SearchResultsList extends StatelessWidget {
     if (isLoading) {
       return const Padding(
         padding: EdgeInsets.all(AppSpacing.lg),
-        child:
-            Center(child: CircularProgressIndicator(color: AppColors.accentPrimary)),
+        child: Center(
+          child: CircularProgressIndicator(color: AppColors.accentPrimary),
+        ),
       );
     }
 
     if (results.isEmpty) {
       return Padding(
         padding: const EdgeInsets.all(AppSpacing.lg),
-        child: Text('No users found',
-            style: AppTextStyles.bodySmall(color: AppColors.textTertiary)),
+        child: Text(
+          'No users found',
+          style: AppTextStyles.bodySmall(color: AppColors.textTertiary),
+        ),
       );
     }
 
@@ -640,28 +712,40 @@ class _SearchResultsList extends StatelessWidget {
                   ? CachedNetworkImageProvider(photoUrl)
                   : null,
               child: photoUrl.isEmpty
-                  ? const Icon(Icons.person,
-                      color: AppColors.textTertiary, size: 20)
+                  ? const Icon(
+                      Icons.person,
+                      color: AppColors.textTertiary,
+                      size: 20,
+                    )
                   : null,
             ),
-            title: Text(displayName,
-                style: AppTextStyles.headingSmall()),
-            subtitle: Text('@$username',
-                style:
-                    AppTextStyles.labelSmall(color: AppColors.textTertiary)),
+            title: Text(displayName, style: AppTextStyles.headingSmall()),
+            subtitle: Text(
+              '@$username',
+              style: AppTextStyles.labelSmall(color: AppColors.textTertiary),
+            ),
             trailing: isFriend
-                ? Text('Friends',
+                ? Text(
+                    'Friends',
                     style: AppTextStyles.labelSmall(
-                        color: AppColors.statusSuccess))
+                      color: AppColors.statusSuccess,
+                    ),
+                  )
                 : isSent
-                    ? Text('Sent',
-                        style: AppTextStyles.labelSmall(
-                            color: AppColors.textTertiary))
-                    : IconButton(
-                        icon: const Icon(Icons.person_add_rounded,
-                            color: AppColors.accentPrimary, size: 22),
-                        onPressed: () => onAdd(uid),
-                      ),
+                ? Text(
+                    'Sent',
+                    style: AppTextStyles.labelSmall(
+                      color: AppColors.textTertiary,
+                    ),
+                  )
+                : IconButton(
+                    icon: const Icon(
+                      Icons.person_add_rounded,
+                      color: AppColors.accentPrimary,
+                      size: 22,
+                    ),
+                    onPressed: () => onAdd(uid),
+                  ),
           );
         },
       ),
@@ -688,8 +772,7 @@ class _ContextMenuItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color =
-        isDestructive ? AppColors.statusError : AppColors.textPrimary;
+    final color = isDestructive ? AppColors.statusError : AppColors.textPrimary;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(AppSpacing.borderRadiusSmall),
@@ -711,8 +794,7 @@ class _ContextMenuItem extends StatelessWidget {
           children: [
             Icon(icon, color: color, size: 22),
             const SizedBox(width: AppSpacing.md),
-            Text(label,
-                style: AppTextStyles.headingSmall(color: color)),
+            Text(label, style: AppTextStyles.headingSmall(color: color)),
           ],
         ),
       ),

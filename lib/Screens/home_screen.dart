@@ -17,7 +17,7 @@ import '../widgets/biometric_card.dart';
 import '../widgets/exercise_highlight_card.dart';
 import '../widgets/header_widget.dart';
 import 'chat/chat_list_screen.dart';
-import 'settings/main_settings_screen.dart';
+
 import 'workout_screen.dart';
 
 class HomeScreen extends StatefulWidget {

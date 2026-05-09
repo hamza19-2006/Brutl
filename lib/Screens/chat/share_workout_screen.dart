@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -10,6 +12,8 @@ import '../../providers/workout_provider.dart';
 class ShareWorkoutScreen extends StatefulWidget {
   const ShareWorkoutScreen({super.key});
 
+  static String normalizeDayName(String value) => value.trim().toLowerCase();
+
   @override
   State<ShareWorkoutScreen> createState() => _ShareWorkoutScreenState();
 }
@@ -17,6 +21,82 @@ class ShareWorkoutScreen extends StatefulWidget {
 class _ShareWorkoutScreenState extends State<ShareWorkoutScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabController;
+  bool _requestedProgramDaysLoad = false;
+
+  void _ensureProgramDaysLoaded(WorkoutProvider provider) {
+    if (_requestedProgramDaysLoad || provider.programDays.isNotEmpty) return;
+    _requestedProgramDaysLoad = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(
+        provider.initialize().catchError((Object error, StackTrace stackTrace) {
+          debugPrint('Failed to initialize WorkoutProvider: $error');
+          debugPrintStack(stackTrace: stackTrace);
+          final messenger = ScaffoldMessenger.maybeOf(context);
+          messenger
+            ?..hideCurrentSnackBar()
+            ..showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Failed to load workout exercises. Please retry.',
+                ),
+              ),
+            );
+        }),
+      );
+    });
+  }
+
+  List<ProgramDayModel> _matchingDays(
+    List<ProgramDayModel> programDays, {
+    required String targetName,
+    required String targetId,
+  }) {
+    final normalizedTargetName = ShareWorkoutScreen.normalizeDayName(
+      targetName,
+    );
+    return programDays
+        .where(
+          (d) =>
+              d.splitName.trim().toLowerCase() == normalizedTargetName ||
+              d.id == targetId,
+        )
+        .toList(growable: false);
+  }
+
+  List<ExerciseModel> _mergedExercisesFromMatches(
+    List<ProgramDayModel> matchedDays, {
+    required List<ExerciseModel> fallbackExercises,
+  }) {
+    if (matchedDays.isEmpty) return fallbackExercises;
+    final mergedExercises = <ExerciseModel>[];
+    for (final day in matchedDays) {
+      mergedExercises.addAll(day.exercises);
+    }
+    return mergedExercises.isEmpty ? fallbackExercises : mergedExercises;
+  }
+
+  void _shareMatchedDay(
+    List<ProgramDayModel> programDays, {
+    required String targetName,
+    required String targetId,
+    required List<ExerciseModel> fallbackExercises,
+  }) {
+    final matchedDays = _matchingDays(
+      programDays,
+      targetName: targetName,
+      targetId: targetId,
+    );
+    if (matchedDays.isEmpty) {
+      _shareDay(targetName, fallbackExercises);
+      return;
+    }
+    final selectedExercises = _mergedExercisesFromMatches(
+      matchedDays,
+      fallbackExercises: fallbackExercises,
+    );
+    _shareDay(matchedDays.first.splitName, selectedExercises);
+  }
 
   @override
   void initState() {
@@ -60,12 +140,14 @@ class _ShareWorkoutScreenState extends State<ShareWorkoutScreen>
       'shareScope': 'day',
       'title': dayName,
       'exercises': exercises
-          .map((ex) => {
-                'exerciseName': ex.name,
-                'sets': ex.sets,
-                'reps': ex.reps,
-                'weight': ex.weightDisplay,
-              })
+          .map(
+            (ex) => {
+              'exerciseName': ex.name,
+              'sets': ex.sets,
+              'reps': ex.reps,
+              'weight': ex.weightDisplay,
+            },
+          )
           .toList(),
     });
   }
@@ -80,12 +162,34 @@ class _ShareWorkoutScreenState extends State<ShareWorkoutScreen>
           'sets': exercise.sets,
           'reps': exercise.reps,
           'weight': exercise.weightDisplay,
-        }
+        },
       ],
     });
   }
 
-  void _showExercisePicker(String dayName, List<ExerciseModel> exercises) {
+  void _showExercisePicker(
+    List<ProgramDayModel> programDays, {
+    required String dayName,
+    required String dayId,
+    required List<ExerciseModel> exercises,
+  }) {
+    final matchedDays = _matchingDays(
+      programDays,
+      targetName: dayName,
+      targetId: dayId,
+    );
+    final selectedDay = matchedDays.isEmpty
+        ? null
+        : matchedDays.firstWhere(
+            (d) => d.exercises.isNotEmpty,
+            orElse: () => matchedDays.first,
+          );
+    final selectedDayName = selectedDay?.splitName ?? dayName;
+    final selectedExercises = _mergedExercisesFromMatches(
+      matchedDays,
+      fallbackExercises: exercises,
+    );
+
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -106,12 +210,15 @@ class _ShareWorkoutScreenState extends State<ShareWorkoutScreen>
               child: Row(
                 children: [
                   Expanded(
-                    child: Text(dayName, style: AppTextStyles.headingLarge()),
+                    child: Text(
+                      selectedDayName,
+                      style: AppTextStyles.headingLarge(),
+                    ),
                   ),
                   TextButton(
                     onPressed: () {
                       Navigator.pop(ctx);
-                      _shareDay(dayName, exercises);
+                      _shareDay(selectedDayName, selectedExercises);
                     },
                     child: Text(
                       'Share Day',
@@ -126,13 +233,12 @@ class _ShareWorkoutScreenState extends State<ShareWorkoutScreen>
             Expanded(
               child: ListView.separated(
                 controller: scrollCtrl,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-                itemCount: exercises.length,
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+                itemCount: selectedExercises.length,
                 separatorBuilder: (_, __) =>
                     const SizedBox(height: AppSpacing.sm),
                 itemBuilder: (ctx, i) {
-                  final ex = exercises[i];
+                  final ex = selectedExercises[i];
                   return _ExerciseTile(
                     exercise: ex,
                     onTap: () {
@@ -153,6 +259,7 @@ class _ShareWorkoutScreenState extends State<ShareWorkoutScreen>
   Widget build(BuildContext context) {
     return Consumer<WorkoutProvider>(
       builder: (context, provider, _) {
+        _ensureProgramDaysLoaded(provider);
         final programDays = provider.programDays;
         final hasData = programDays.any((d) => d.exercises.isNotEmpty);
 
@@ -175,10 +282,12 @@ class _ShareWorkoutScreenState extends State<ShareWorkoutScreen>
               indicatorWeight: 2,
               labelColor: AppColors.accentPrimary,
               unselectedLabelColor: AppColors.textTertiary,
-              labelStyle:
-                  AppTextStyles.labelLarge(color: AppColors.accentPrimary),
-              unselectedLabelStyle:
-                  AppTextStyles.labelLarge(color: AppColors.textTertiary),
+              labelStyle: AppTextStyles.labelLarge(
+                color: AppColors.accentPrimary,
+              ),
+              unselectedLabelStyle: AppTextStyles.labelLarge(
+                color: AppColors.textTertiary,
+              ),
               tabs: const [
                 Tab(text: 'WEEK'),
                 Tab(text: 'DAY'),
@@ -205,11 +314,24 @@ class _ShareWorkoutScreenState extends State<ShareWorkoutScreen>
                     ),
                     _DayTabContent(
                       programDays: programDays,
-                      onShare: _shareDay,
+                      onShare: (targetName, targetId, fallbackExercises) =>
+                          _shareMatchedDay(
+                            programDays,
+                            targetName: targetName,
+                            targetId: targetId,
+                            fallbackExercises: fallbackExercises,
+                          ),
                     ),
                     _ExerciseTabContent(
                       programDays: programDays,
-                      onShowPicker: _showExercisePicker,
+                      onShowPicker: (targetName, targetId, fallbackExercises) {
+                        _showExercisePicker(
+                          programDays,
+                          dayName: targetName,
+                          dayId: targetId,
+                          exercises: fallbackExercises,
+                        );
+                      },
                     ),
                   ],
                 ),
@@ -224,10 +346,7 @@ class _ShareWorkoutScreenState extends State<ShareWorkoutScreen>
 // =============================================================================
 
 class _WeekTabContent extends StatelessWidget {
-  const _WeekTabContent({
-    required this.programDays,
-    required this.onShare,
-  });
+  const _WeekTabContent({required this.programDays, required this.onShare});
 
   final List<ProgramDayModel> programDays;
   final void Function(int weekNumber, List<ProgramDayModel> weekDays) onShare;
@@ -242,16 +361,19 @@ class _WeekTabContent extends StatelessWidget {
       separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.sm),
       itemBuilder: (context, i) {
         final week = weeks[i];
-        final weekDays = programDays
-            .where(
-              (d) =>
-                  d.weekNumber == week &&
-                  d.splitName.toLowerCase() != 'rest',
-            )
-            .toList()
-          ..sort((a, b) => a.dayNumber.compareTo(b.dayNumber));
-        final exerciseCount =
-            weekDays.fold(0, (sum, d) => sum + d.exercises.length);
+        final weekDays =
+            programDays
+                .where(
+                  (d) =>
+                      d.weekNumber == week &&
+                      d.splitName.toLowerCase() != 'rest',
+                )
+                .toList()
+              ..sort((a, b) => a.dayNumber.compareTo(b.dayNumber));
+        final exerciseCount = weekDays.fold(
+          0,
+          (sum, d) => sum + d.exercises.length,
+        );
 
         return _ScopeCard(
           icon: Icons.calendar_month,
@@ -270,13 +392,15 @@ class _WeekTabContent extends StatelessWidget {
 // =============================================================================
 
 class _DayTabContent extends StatelessWidget {
-  const _DayTabContent({
-    required this.programDays,
-    required this.onShare,
-  });
+  const _DayTabContent({required this.programDays, required this.onShare});
 
   final List<ProgramDayModel> programDays;
-  final void Function(String dayName, List<ExerciseModel> exercises) onShare;
+  final void Function(
+    String dayName,
+    String dayId,
+    List<ExerciseModel> exercises,
+  )
+  onShare;
 
   @override
   Widget build(BuildContext context) {
@@ -284,7 +408,10 @@ class _DayTabContent extends StatelessWidget {
     final uniqueDays = <ProgramDayModel>[];
     for (final d in programDays) {
       if (d.splitName.toLowerCase() == 'rest') continue;
-      if (seen.add(d.splitName)) uniqueDays.add(d);
+      final normalizedDayName = ShareWorkoutScreen.normalizeDayName(
+        d.splitName,
+      );
+      if (seen.add(normalizedDayName)) uniqueDays.add(d);
     }
 
     return ListView.separated(
@@ -298,7 +425,7 @@ class _DayTabContent extends StatelessWidget {
           title: day.splitName,
           subtitle:
               '${day.exercises.length} exercise${day.exercises.length == 1 ? '' : 's'}',
-          onTap: () => onShare(day.splitName, day.exercises),
+          onTap: () => onShare(day.splitName, day.id, day.exercises),
         );
       },
     );
@@ -318,8 +445,10 @@ class _ExerciseTabContent extends StatelessWidget {
   final List<ProgramDayModel> programDays;
   final void Function(
     String dayName,
+    String dayId,
     List<ExerciseModel> exercises,
-  ) onShowPicker;
+  )
+  onShowPicker;
 
   @override
   Widget build(BuildContext context) {
@@ -328,7 +457,10 @@ class _ExerciseTabContent extends StatelessWidget {
     for (final d in programDays) {
       if (d.splitName.toLowerCase() == 'rest') continue;
       if (d.exercises.isEmpty) continue;
-      if (seen.add(d.splitName)) uniqueDays.add(d);
+      final normalizedDayName = ShareWorkoutScreen.normalizeDayName(
+        d.splitName,
+      );
+      if (seen.add(normalizedDayName)) uniqueDays.add(d);
     }
 
     if (uniqueDays.isEmpty) {
@@ -351,7 +483,7 @@ class _ExerciseTabContent extends StatelessWidget {
           title: day.splitName,
           subtitle: 'Tap to pick a specific exercise',
           showChevron: true,
-          onTap: () => onShowPicker(day.splitName, day.exercises),
+          onTap: () => onShowPicker(day.splitName, day.id, day.exercises),
         );
       },
     );
@@ -414,8 +546,9 @@ class _ScopeCard extends StatelessWidget {
                   Text(title, style: AppTextStyles.headingSmall()),
                   Text(
                     subtitle,
-                    style:
-                        AppTextStyles.labelSmall(color: AppColors.textTertiary),
+                    style: AppTextStyles.labelSmall(
+                      color: AppColors.textTertiary,
+                    ),
                   ),
                 ],
               ),
@@ -456,18 +589,21 @@ class _ExerciseTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(exercise.name,
-                      style: AppTextStyles.headingSmall()),
+                  Text(exercise.name, style: AppTextStyles.headingSmall()),
                   Text(
                     '${exercise.sets} sets × ${exercise.reps} reps • ${exercise.weightDisplay} ${exercise.weightUnit}',
                     style: AppTextStyles.labelSmall(
-                        color: AppColors.textTertiary),
+                      color: AppColors.textTertiary,
+                    ),
                   ),
                 ],
               ),
             ),
-            const Icon(Icons.send_rounded,
-                color: AppColors.accentPrimary, size: 16),
+            const Icon(
+              Icons.send_rounded,
+              color: AppColors.accentPrimary,
+              size: 16,
+            ),
           ],
         ),
       ),

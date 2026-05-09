@@ -27,15 +27,63 @@ class EditExercisesScreen extends StatefulWidget {
 }
 
 class _EditExercisesScreenState extends State<EditExercisesScreen> {
+  bool _requestedProgramDaysLoad = false;
+
+  void _ensureProgramDaysLoaded(WorkoutProvider provider) {
+    if (_requestedProgramDaysLoad || provider.programDays.isNotEmpty) return;
+    _requestedProgramDaysLoad = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(
+        provider.initialize().catchError((Object error, StackTrace stackTrace) {
+          debugPrint('Failed to initialize WorkoutProvider: $error');
+          debugPrintStack(stackTrace: stackTrace);
+          final messenger = ScaffoldMessenger.maybeOf(context);
+          messenger
+            ?..hideCurrentSnackBar()
+            ..showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Failed to load workout exercises. Please retry.',
+                ),
+              ),
+            );
+        }),
+      );
+    });
+  }
+
   brutl.ProgramDayModel? _findDayForWeek(WorkoutProvider provider) {
     final weekDays = provider.getDaysForWeek(widget.weekIndex);
-    for (final day in weekDays) {
-      if (day.id == widget.dayId) return day;
+    final normalizedTargetName = widget.dayName.trim().toLowerCase();
+    final matchedWeekDays = weekDays
+        .where(
+          (d) =>
+              d.splitName.trim().toLowerCase() == normalizedTargetName ||
+              d.id == widget.dayId,
+        )
+        .toList(growable: false);
+    if (matchedWeekDays.isNotEmpty) {
+      return matchedWeekDays.firstWhere(
+        (d) => d.exercises.isNotEmpty,
+        orElse: () => matchedWeekDays.first,
+      );
     }
-    for (final day in weekDays) {
-      if (day.splitName.trim() == widget.dayName.trim()) return day;
-    }
-    return null;
+
+    final targetWeekNumber = widget.weekIndex + 1;
+    final matchedProgramDays = provider.programDays
+        .where(
+          (d) =>
+              d.weekNumber == targetWeekNumber &&
+              (d.splitName.trim().toLowerCase() == normalizedTargetName ||
+                  d.id == widget.dayId),
+        )
+        .toList(growable: false);
+    if (matchedProgramDays.isEmpty) return null;
+    return matchedProgramDays.firstWhere(
+      (d) => d.exercises.isNotEmpty,
+      orElse: () => matchedProgramDays.first,
+    );
   }
 
   String _activeDayName(WorkoutProvider provider) {
@@ -174,6 +222,7 @@ class _EditExercisesScreenState extends State<EditExercisesScreen> {
   Widget build(BuildContext context) {
     return Consumer<WorkoutProvider>(
       builder: (context, provider, _) {
+        _ensureProgramDaysLoaded(provider);
         final selectedDay = _findDayForWeek(provider);
         final dayName = selectedDay?.splitName ?? widget.dayName;
         final exercises =

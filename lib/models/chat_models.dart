@@ -7,6 +7,10 @@ import 'package:flutter/foundation.dart';
 
 @immutable
 class MessageModel {
+  // Values below this threshold are treated as Unix seconds and multiplied by
+  // 1000. The threshold corresponds to ~March 1973 in Unix milliseconds.
+  static const int _unixMillisecondsThreshold = 100000000000;
+
   const MessageModel({
     required this.id,
     required this.senderId,
@@ -73,6 +77,19 @@ class MessageModel {
     if (value is Timestamp) return value.toDate();
     if (value is DateTime) return value;
     if (value is String) return DateTime.tryParse(value);
+    if (value is num) {
+      final raw = value.toInt();
+      final milliseconds = raw > _unixMillisecondsThreshold ? raw : raw * 1000;
+      return DateTime.fromMillisecondsSinceEpoch(milliseconds);
+    }
+    if (value is Map<dynamic, dynamic>) {
+      final seconds = (value['seconds'] as num?)?.toInt();
+      final nanoseconds = (value['nanoseconds'] as num?)?.toInt() ?? 0;
+      if (seconds != null) {
+        final milliseconds = (seconds * 1000) + (nanoseconds ~/ 1000000);
+        return DateTime.fromMillisecondsSinceEpoch(milliseconds);
+      }
+    }
     return null;
   }
 }

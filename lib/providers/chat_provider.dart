@@ -7,6 +7,10 @@ import 'package:flutter/foundation.dart';
 import '../models/chat_models.dart';
 
 class ChatProvider extends ChangeNotifier {
+  // Firestore batch writes support up to 500 operations.
+  // Use a lower ceiling to leave headroom and avoid accidental overflows.
+  static const int _maxBatchOps = 450;
+
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
@@ -212,18 +216,39 @@ class ChatProvider extends ChangeNotifier {
   Future<void> removeFriend(String friendUid) async {
     if (_uid.isEmpty) return;
 
+    final previousFriends = List<FriendModel>.from(_friends);
+
     // Optimistic
     _friends = _friends.where((f) => f.uid != friendUid).toList();
     notifyListeners();
 
-    final batch = _db.batch();
-    batch.delete(
-      _db.collection('users').doc(_uid).collection('friends').doc(friendUid),
-    );
-    batch.delete(
-      _db.collection('users').doc(friendUid).collection('friends').doc(_uid),
-    );
-    await batch.commit();
+    try {
+      final batch = _db.batch();
+      batch.delete(
+        _db.collection('users').doc(_uid).collection('friends').doc(friendUid),
+      );
+      batch.delete(
+        _db.collection('users').doc(friendUid).collection('friends').doc(_uid),
+      );
+      await batch.commit();
+    } catch (error, stackTrace) {
+      _friends = previousFriends;
+      notifyListeners();
+      debugPrint('Failed to delete friend records for $friendUid: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      rethrow;
+    }
+
+    try {
+      final chatId = buildChatId(_uid, friendUid);
+      await clearChatHistory(chatId);
+    } catch (error, stackTrace) {
+      debugPrint(
+        'Friend removed but chat history clear failed for $friendUid: $error',
+      );
+      debugPrintStack(stackTrace: stackTrace);
+      rethrow;
+    }
   }
 
   Future<void> setLocalNickname(String friendUid, String nickname) async {
@@ -359,12 +384,19 @@ class ChatProvider extends ChangeNotifier {
         .collection('chats')
         .doc(chatId)
         .collection('messages');
-    final snapshot = await messagesRef.get();
-    final batch = _db.batch();
-    for (final doc in snapshot.docs) {
-      batch.delete(doc.reference);
+
+    while (true) {
+      final snapshot = await messagesRef.limit(_maxBatchOps).get();
+      if (snapshot.docs.isEmpty) return;
+
+      final batch = _db.batch();
+      for (final doc in snapshot.docs) {
+        batch.delete(doc.reference);
+      }
+      await batch.commit();
+
+      if (snapshot.docs.length < _maxBatchOps) return;
     }
-    await batch.commit();
   }
 
   /// Returns a real-time stream of messages for the given chatId.
@@ -389,7 +421,6 @@ class ChatProvider extends ChangeNotifier {
     if (_uid.isEmpty) return;
     final chatRef = _db.collection('chats').doc(chatId);
     final unreadKey = 'unreadCount_$_uid';
-    final now = DateTime.now();
 
     await chatRef.set(<String, dynamic>{unreadKey: 0}, SetOptions(merge: true));
 
@@ -408,10 +439,10 @@ class ChatProvider extends ChangeNotifier {
       batch ??= _db.batch();
       batch.update(doc.reference, <String, dynamic>{
         'status': 'read',
-        'readAt': Timestamp.fromDate(now),
+        'readAt': FieldValue.serverTimestamp(),
       });
       ops++;
-      if (ops == 450) {
+      if (ops == _maxBatchOps) {
         await batch.commit();
         batch = null;
         ops = 0;

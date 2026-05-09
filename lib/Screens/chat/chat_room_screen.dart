@@ -425,9 +425,6 @@ class _MessageDetails extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final sentTime = DateFormat.jm().format(message.timestamp);
-    final seenTime = message.readAt != null
-        ? DateFormat.jm().format(message.readAt!)
-        : null;
     final detailStyle = AppTextStyles.labelSmall(
       color: AppColors.textTertiary.withValues(alpha: 0.9),
     );
@@ -441,8 +438,11 @@ class _MessageDetails extends StatelessWidget {
           isMe ? 'Sent: $sentTime' : 'Received: $sentTime',
           style: detailStyle,
         ),
-        if (isMe && message.status == 'read' && seenTime != null)
-          Text('Seen: $seenTime', style: detailStyle),
+        if (isMe && message.status == 'read' && message.readAt != null)
+          Text(
+            'Seen: ${DateFormat.jm().format(message.readAt!)}',
+            style: detailStyle,
+          ),
       ],
     );
   }

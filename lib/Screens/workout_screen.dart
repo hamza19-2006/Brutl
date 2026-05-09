@@ -10,7 +10,7 @@ import '../providers/workout_nutrition_provider.dart';
 import '../providers/workout_provider.dart';
 import '../providers/nutrition_service.dart';
 import '../services/ai_meal_service.dart';
-import '../widgets/ask_ai_dialog.dart'; // ← NEW
+import '../widgets/ask_ai_dialog.dart';
 import '../widgets/macro_dashboard_card.dart';
 import '../widgets/workout_card_widget.dart';
 import '../models/brutl_models.dart';
@@ -47,7 +47,6 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     final data = await NutritionService.instance.loadTodayNutrition();
     if (!mounted) return;
     _applyData(data);
-
     _nutritionSub = NutritionService.instance.stream.listen((data) {
       if (mounted) _applyData(data);
     });
@@ -284,7 +283,6 @@ class _MealSelectionSheetState extends State<_MealSelectionSheet> {
   void initState() {
     super.initState();
     _meals = List.from(widget.meals);
-
     NutritionService.instance.stream.listen((data) {
       if (mounted) setState(() => _meals = data.meals);
     });
@@ -293,7 +291,6 @@ class _MealSelectionSheetState extends State<_MealSelectionSheet> {
   @override
   Widget build(BuildContext context) {
     final total = _meals.fold(0, (sum, m) => sum + m.calories);
-
     return Container(
       decoration: const BoxDecoration(
         color: Color(0xFF111111),
@@ -367,7 +364,6 @@ class _MealSelectionSheetState extends State<_MealSelectionSheet> {
 
 class _MealRow extends StatelessWidget {
   const _MealRow({required this.meal, required this.onTap});
-
   final MealData meal;
   final VoidCallback onTap;
 
@@ -421,12 +417,11 @@ class _MealRow extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// NUTRITION LOG SHEET  (updated with 3-button AI row)
+// NUTRITION LOG SHEET
 // ═══════════════════════════════════════════════════════════════════════════════
 
 class _NutritionLogSheet extends StatefulWidget {
   const _NutritionLogSheet({required this.meal});
-
   final MealData meal;
 
   @override
@@ -442,11 +437,13 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
   final TextEditingController _fatCtrl = TextEditingController();
 
   bool _isSaving = false;
-  bool _isScanning = false; // camera AI in progress
-  bool _isAskingAi = false; // text-AI dialog open
-
+  bool _isScanning = false;
+  bool _isAskingAi = false;
   int _scanPhase = 0;
   String? _calorieError;
+
+  // Holds AI result to show popup before populating fields
+  Map<String, int>? _pendingAiResult;
 
   Timer? _scanPhaseOneTimer;
   Timer? _scanPhaseTwoTimer;
@@ -491,6 +488,7 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
       _isScanning = true;
       _scanPhase = 0;
       _calorieError = null;
+      _pendingAiResult = null;
     });
 
     _scanPhaseOneTimer?.cancel();
@@ -526,20 +524,29 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
       return;
     }
 
+    // Show result popup instead of immediately filling fields
     setState(() {
       _isScanning = false;
-      _calCtrl.text = result?['kcal']?.toString() ?? '';
-      _carbCtrl.text = result?['carbs']?.toString() ?? '';
-      _proCtrl.text = result?['protein']?.toString() ?? '';
-      _fatCtrl.text = result?['fat']?.toString() ?? '';
+      _pendingAiResult = result;
     });
   }
 
-  // ─── Text AI (Ask AI dialog) ───────────────────────────────────────────────
+  // ─── Apply result to input fields ─────────────────────────────────────────
+
+  void _applyResultToFields(Map<String, int> result) {
+    setState(() {
+      _pendingAiResult = null;
+      _calCtrl.text = result['kcal']?.toString() ?? '';
+      _carbCtrl.text = result['carbs']?.toString() ?? '';
+      _proCtrl.text = result['protein']?.toString() ?? '';
+      _fatCtrl.text = result['fat']?.toString() ?? '';
+    });
+  }
+
+  // ─── Ask AI dialog ─────────────────────────────────────────────────────────
 
   Future<void> _openAskAiDialog() async {
     if (_anyBusy) return;
-
     setState(() => _isAskingAi = true);
 
     final result = await showAskAiDialog(context);
@@ -548,13 +555,8 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
     setState(() => _isAskingAi = false);
 
     if (result != null) {
-      setState(() {
-        _calCtrl.text = result['kcal']?.toString() ?? '';
-        _carbCtrl.text = result['carbs']?.toString() ?? '';
-        _proCtrl.text = result['protein']?.toString() ?? '';
-        _fatCtrl.text = result['fat']?.toString() ?? '';
-        _calorieError = null;
-      });
+      // Show same result popup for Ask AI too
+      setState(() => _pendingAiResult = result);
     }
   }
 
@@ -562,6 +564,15 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
 
   @override
   Widget build(BuildContext context) {
+    // If AI result is pending, show the beautiful result popup
+    if (_pendingAiResult != null) {
+      return _AiResultPopup(
+        result: _pendingAiResult!,
+        onAddToMeal: () => _applyResultToFields(_pendingAiResult!),
+        onDismiss: () => setState(() => _pendingAiResult = null),
+      );
+    }
+
     return Container(
       decoration: const BoxDecoration(
         color: Color(0xFF111111),
@@ -579,7 +590,7 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // ── Drag handle ─────────────────────────────────────────────
+                // Drag handle
                 Center(
                   child: Container(
                     width: 44,
@@ -592,11 +603,11 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
                 ),
                 const SizedBox(height: 16),
 
-                // ── AI option row ────────────────────────────────────────────
+                // AI buttons
                 _buildAiButtons(),
                 const SizedBox(height: 16),
 
-                // ── Meal title ───────────────────────────────────────────────
+                // Meal title
                 Text(
                   widget.meal.name,
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
@@ -613,7 +624,7 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
                 ),
                 const SizedBox(height: 16),
 
-                // ── Macro fields ─────────────────────────────────────────────
+                // Input fields
                 _buildField(
                   _calCtrl,
                   'Calories (kcal)',
@@ -628,7 +639,7 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
                 _buildField(_fatCtrl, 'Fats (g)', TextInputType.number),
                 const SizedBox(height: 16),
 
-                // ── Log button ───────────────────────────────────────────────
+                // Log button
                 SizedBox(
                   width: double.infinity,
                   child: Opacity(
@@ -661,17 +672,54 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
     );
   }
 
-  // ─── 3-button AI row ───────────────────────────────────────────────────────
-
   Widget _buildAiButtons() {
-    // While camera scan runs, show the animated full-width indicator
     if (_isScanning) {
-      return _buildScanningIndicator();
+      return SizedBox(
+        width: double.infinity,
+        child: OutlinedButton(
+          onPressed: null,
+          style: OutlinedButton.styleFrom(
+            foregroundColor: const Color(0xFFFF3D00),
+            side: const BorderSide(color: Color(0xFFFF3D00), width: 1.5),
+            backgroundColor: const Color(0xFFFF3D00).withValues(alpha: 0.08),
+            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 250),
+            child: Column(
+              key: ValueKey<int>(_scanPhase),
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.4,
+                    color: Color(0xFFFF3D00),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  _scanMessages[_scanPhase],
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
     }
 
     return Row(
       children: [
-        // 📸 Scan with AI
         Expanded(
           child: _AiOptionButton(
             emoji: '📸',
@@ -685,8 +733,6 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
           ),
         ),
         const SizedBox(width: 8),
-
-        // 🤖 Ask AI
         Expanded(
           child: _AiOptionButton(
             emoji: '🤖',
@@ -699,59 +745,9 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
             accentColor: const Color(0xFF3B82F6),
           ),
         ),
-        const SizedBox(width: 8),
       ],
     );
   }
-
-  // ─── Camera scanning animation ─────────────────────────────────────────────
-
-  Widget _buildScanningIndicator() {
-    return SizedBox(
-      width: double.infinity,
-      child: OutlinedButton(
-        onPressed: null,
-        style: OutlinedButton.styleFrom(
-          foregroundColor: const Color(0xFFFF3D00),
-          side: const BorderSide(color: Color(0xFFFF3D00), width: 1.5),
-          backgroundColor: const Color(0xFFFF3D00).withValues(alpha: 0.08),
-          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 250),
-          child: Column(
-            key: ValueKey<int>(_scanPhase),
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2.4,
-                  color: Color(0xFFFF3D00),
-                ),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                _scanMessages[_scanPhase],
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  // ─── Text field builder ────────────────────────────────────────────────────
 
   Widget _buildField(
     TextEditingController ctrl,
@@ -787,21 +783,17 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
     );
   }
 
-  // ─── Log handler ───────────────────────────────────────────────────────────
-
   Future<void> _handleLog() async {
     final calorieText = _calCtrl.text.trim();
     if (calorieText.isEmpty) {
       setState(() => _calorieError = 'Calories are required');
       return;
     }
-
     final calories = int.tryParse(calorieText);
     if (calories == null || calories < 0) {
       setState(() => _calorieError = 'Please enter a valid positive number');
       return;
     }
-
     setState(() => _calorieError = null);
 
     final carbs = int.tryParse(_carbCtrl.text.trim()) ?? 0;
@@ -833,7 +825,299 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// AI OPTION BUTTON  (reusable pill button for the 3-button row)
+// AI RESULT POPUP — shown after camera scan OR Ask AI returns a result
+// ═══════════════════════════════════════════════════════════════════════════════
+
+class _AiResultPopup extends StatelessWidget {
+  const _AiResultPopup({
+    required this.result,
+    required this.onAddToMeal,
+    required this.onDismiss,
+  });
+
+  final Map<String, int> result;
+  final VoidCallback onAddToMeal;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    final kcal = result['kcal'] ?? 0;
+    final carbs = result['carbs'] ?? 0;
+    final protein = result['protein'] ?? 0;
+    final fat = result['fat'] ?? 0;
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: Color(0xFF111111),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Drag handle
+              Center(
+                child: Container(
+                  width: 44,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2A2A2A),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // Header
+              Row(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFF3D00).withValues(alpha: 0.12),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.auto_awesome_rounded,
+                      color: Color(0xFFFF3D00),
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'AI Analysis Complete',
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 17,
+                              ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Tap "Add to Meal" to fill in the fields',
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: const Color(0xFF888888),
+                                fontSize: 12,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: onDismiss,
+                    child: Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF2A2A2A),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(
+                        Icons.close_rounded,
+                        color: Color(0xFF9A9A9A),
+                        size: 16,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 22),
+
+              // Main result card
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  vertical: 28,
+                  horizontal: 20,
+                ),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      const Color(0xFFFF3D00).withValues(alpha: 0.10),
+                      const Color(0xFF1A1A1A),
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: const Color(0xFFFF3D00).withValues(alpha: 0.28),
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    // Big calorie number
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        const Icon(
+                          Icons.local_fire_department_rounded,
+                          color: Color(0xFFFF3D00),
+                          size: 30,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '$kcal',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 52,
+                            fontWeight: FontWeight.w800,
+                            height: 1.0,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        const Padding(
+                          padding: EdgeInsets.only(bottom: 6),
+                          child: Text(
+                            'kcal',
+                            style: TextStyle(
+                              color: Color(0xFFFF6B00),
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 26),
+
+                    // Macro pills row
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        _ResultMacroPill(
+                          label: 'Carbs',
+                          value: carbs,
+                          color: const Color(0xFF00A3FF),
+                          emoji: '🌾',
+                        ),
+                        _ResultMacroPill(
+                          label: 'Protein',
+                          value: protein,
+                          color: const Color(0xFF00E676),
+                          emoji: '💪',
+                        ),
+                        _ResultMacroPill(
+                          label: 'Fat',
+                          value: fat,
+                          color: const Color(0xFFFFD54F),
+                          emoji: '🥑',
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 20),
+
+              // Add to Meal button
+              SizedBox(
+                width: double.infinity,
+                height: 54,
+                child: ElevatedButton.icon(
+                  onPressed: onAddToMeal,
+                  icon: const Icon(Icons.add_circle_outline_rounded, size: 20),
+                  label: const Text(
+                    'Add to Meal',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF22C55E),
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 8),
+
+              TextButton(
+                onPressed: onDismiss,
+                child: const Text(
+                  'Dismiss',
+                  style: TextStyle(
+                    color: Color(0xFF666666),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ResultMacroPill extends StatelessWidget {
+  const _ResultMacroPill({
+    required this.label,
+    required this.value,
+    required this.color,
+    required this.emoji,
+  });
+
+  final String label;
+  final int value;
+  final Color color;
+  final String emoji;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withValues(alpha: 0.30)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(emoji, style: const TextStyle(fontSize: 20)),
+          const SizedBox(height: 6),
+          Text(
+            '${value}g',
+            style: TextStyle(
+              color: color,
+              fontWeight: FontWeight.w800,
+              fontSize: 20,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Color(0xFF888888),
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// AI OPTION BUTTON
 // ═══════════════════════════════════════════════════════════════════════════════
 
 class _AiOptionButton extends StatelessWidget {

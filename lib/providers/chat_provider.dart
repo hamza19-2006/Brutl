@@ -104,56 +104,67 @@ class ChatProvider extends ChangeNotifier {
   Future<void> acceptFriendRequest(String senderUid) async {
     if (_uid.isEmpty) return;
 
-    // Optimistic: remove from local list immediately
+    final previousRequests = List<FriendRequestModel>.from(_pendingRequests);
+
+    // Optimistic local mutation (UI is only notified after successful commit).
     _pendingRequests = _pendingRequests
         .where((r) => r.senderUid != senderUid)
         .toList();
-    notifyListeners();
 
-    // Fetch sender profile
-    final senderDoc = await _db.collection('users').doc(senderUid).get();
-    final senderData = senderDoc.data() ?? {};
+    try {
+      final senderDoc = await _db.collection('users').doc(senderUid).get();
+      final senderData = senderDoc.data() ?? {};
 
-    final myDoc = await _db.collection('users').doc(_uid).get();
-    final myData = myDoc.data() ?? {};
+      final myDoc = await _db.collection('users').doc(_uid).get();
+      final myData = myDoc.data() ?? {};
 
-    final batch = _db.batch();
+      final batch = _db.batch();
 
-    // Add friend to my list
-    final myFriendRef = _db
-        .collection('users')
-        .doc(_uid)
-        .collection('friends')
-        .doc(senderUid);
-    batch.set(myFriendRef, FriendModel(
-      uid: senderUid,
-      displayName: senderData['display_name'] as String? ?? '',
-      username: senderData['username'] as String? ?? '',
-      photoUrl: senderData['photo_url'] as String? ?? '',
-    ).toJson());
+      final myFriendRef = _db
+          .collection('users')
+          .doc(_uid)
+          .collection('friends')
+          .doc(senderUid);
+      batch.set(
+        myFriendRef,
+        FriendModel(
+          uid: senderUid,
+          displayName: senderData['display_name'] as String? ?? '',
+          username: senderData['username'] as String? ?? '',
+          photoUrl: senderData['photo_url'] as String? ?? '',
+        ).toJson(),
+      );
 
-    // Add me to sender's list
-    final theirFriendRef = _db
-        .collection('users')
-        .doc(senderUid)
-        .collection('friends')
-        .doc(_uid);
-    batch.set(theirFriendRef, FriendModel(
-      uid: _uid,
-      displayName: myData['display_name'] as String? ?? '',
-      username: myData['username'] as String? ?? '',
-      photoUrl: myData['photo_url'] as String? ?? '',
-    ).toJson());
+      final theirFriendRef = _db
+          .collection('users')
+          .doc(senderUid)
+          .collection('friends')
+          .doc(_uid);
+      batch.set(
+        theirFriendRef,
+        FriendModel(
+          uid: _uid,
+          displayName: myData['display_name'] as String? ?? '',
+          username: myData['username'] as String? ?? '',
+          photoUrl: myData['photo_url'] as String? ?? '',
+        ).toJson(),
+      );
 
-    // Delete the pending request
-    final requestRef = _db
-        .collection('users')
-        .doc(_uid)
-        .collection('friend_requests')
-        .doc(senderUid);
-    batch.delete(requestRef);
+      final requestRef = _db
+          .collection('users')
+          .doc(_uid)
+          .collection('friend_requests')
+          .doc(senderUid);
+      batch.delete(requestRef);
 
-    await batch.commit();
+      await batch.commit();
+      notifyListeners();
+    } catch (e, st) {
+      _pendingRequests = previousRequests;
+      notifyListeners();
+      debugPrint('Failed to accept friend request from $senderUid: $e');
+      debugPrintStack(stackTrace: st);
+    }
   }
 
   Future<void> declineFriendRequest(String senderUid) async {
@@ -216,6 +227,8 @@ class ChatProvider extends ChangeNotifier {
     if (_uid.isEmpty || text.trim().isEmpty) return;
 
     final now = DateTime.now();
+    final participants =
+        chatId.split('_').where((uid) => uid.isNotEmpty).toList();
     final msgRef = _db.collection('chats').doc(chatId).collection('messages').doc();
 
     final message = MessageModel(
@@ -231,10 +244,22 @@ class ChatProvider extends ChangeNotifier {
     _optimisticMessages.add(message);
     notifyListeners();
 
-    await msgRef.set(message.toJson());
+    try {
+      await _db.collection('chats').doc(chatId).set(
+        {'participants': participants},
+        SetOptions(merge: true),
+      );
 
-    _optimisticMessages.removeWhere((m) => m.id == message.id);
-    notifyListeners();
+      await msgRef.set(message.toJson());
+
+      _optimisticMessages.removeWhere((m) => m.id == message.id);
+      notifyListeners();
+    } catch (e, st) {
+      _optimisticMessages.removeWhere((m) => m.id == message.id);
+      notifyListeners();
+      debugPrint('Failed to send text message in chat $chatId: $e');
+      debugPrintStack(stackTrace: st);
+    }
   }
 
   Future<void> sendWidgetMessage(
@@ -245,6 +270,8 @@ class ChatProvider extends ChangeNotifier {
     if (_uid.isEmpty) return;
 
     final now = DateTime.now();
+    final participants =
+        chatId.split('_').where((uid) => uid.isNotEmpty).toList();
     final msgRef = _db.collection('chats').doc(chatId).collection('messages').doc();
 
     final message = MessageModel(
@@ -260,10 +287,22 @@ class ChatProvider extends ChangeNotifier {
     _optimisticMessages.add(message);
     notifyListeners();
 
-    await msgRef.set(message.toJson());
+    try {
+      await _db.collection('chats').doc(chatId).set(
+        {'participants': participants},
+        SetOptions(merge: true),
+      );
 
-    _optimisticMessages.removeWhere((m) => m.id == message.id);
-    notifyListeners();
+      await msgRef.set(message.toJson());
+
+      _optimisticMessages.removeWhere((m) => m.id == message.id);
+      notifyListeners();
+    } catch (e, st) {
+      _optimisticMessages.removeWhere((m) => m.id == message.id);
+      notifyListeners();
+      debugPrint('Failed to send widget message in chat $chatId: $e');
+      debugPrintStack(stackTrace: st);
+    }
   }
 
   Future<void> clearChatHistory(String chatId) async {

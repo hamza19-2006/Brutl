@@ -240,6 +240,7 @@ class _MessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final timeStr = DateFormat.jm().format(message.timestamp);
+    final isTextMessage = message.type == 'text';
 
     Widget content;
     switch (message.type) {
@@ -251,38 +252,55 @@ class _MessageBubble extends StatelessWidget {
             _ExerciseShareBubble(payload: message.payload, isMe: isMe);
         break;
       default:
-        content = Text(
-          message.payload['text'] as String? ?? '',
-          style: AppTextStyles.bodyMedium(
-            color: isMe ? AppColors.textPrimary : AppColors.textSecondary,
-          ),
-        );
+        content = Text(message.payload['text'] as String? ?? '',
+            style: AppTextStyles.bodyMedium(color: AppColors.textPrimary));
     }
+
+    final bubbleColor =
+        isMe ? AppColors.accentPrimary : const Color(0xFF171A1F);
+    final bubbleRadius = isMe
+        ? const BorderRadius.only(
+            topLeft: Radius.circular(16),
+            topRight: Radius.circular(16),
+            bottomLeft: Radius.circular(16),
+            bottomRight: Radius.circular(4),
+          )
+        : const BorderRadius.only(
+            topLeft: Radius.circular(16),
+            topRight: Radius.circular(16),
+            bottomLeft: Radius.circular(4),
+            bottomRight: Radius.circular(16),
+          );
 
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
         margin: const EdgeInsets.only(bottom: AppSpacing.sm),
-        padding: const EdgeInsets.all(AppSpacing.md),
         constraints:
-            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
-        decoration: BoxDecoration(
-          color: isMe ? AppColors.accentPrimary : AppColors.backgroundTertiary,
-          border: Border.all(
-            color: isMe ? AppColors.accentPrimary : AppColors.borderDefault,
-          ),
-          borderRadius: BorderRadius.circular(AppSpacing.borderRadiusSmall),
-        ),
+            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.82),
+        padding: isTextMessage ? const EdgeInsets.all(AppSpacing.md) : null,
+        decoration: isTextMessage
+            ? BoxDecoration(
+                color: bubbleColor,
+                border: Border.all(
+                  color:
+                      isMe ? AppColors.accentSecondary : AppColors.borderStrong,
+                ),
+                borderRadius: bubbleRadius,
+              )
+            : null,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            content,
+            isTextMessage
+                ? content
+                : SizedBox(width: double.infinity, child: content),
             const SizedBox(height: AppSpacing.xs),
             Text(
               timeStr,
               style: AppTextStyles.labelSmall(
-                color: isMe
-                    ? AppColors.textPrimary.withOpacity(0.7)
+                color: isTextMessage
+                    ? AppColors.textPrimary.withValues(alpha: 0.78)
                     : AppColors.textTertiary,
               ),
             ),
@@ -310,55 +328,81 @@ class _MealShareBubble extends StatelessWidget {
     final carbs = payload['carbs'] as num? ?? 0;
     final fats = payload['fats'] as num? ?? 0;
 
-    final textColor =
-        isMe ? AppColors.textPrimary : AppColors.textSecondary;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(Icons.restaurant_rounded,
-                color: isMe
-                    ? AppColors.textPrimary
-                    : AppColors.accentPrimary,
-                size: 18),
-            const SizedBox(width: AppSpacing.xs),
-            Flexible(
-              child: Text(mealName,
-                  style: AppTextStyles.headingSmall(color: textColor)),
-            ),
-          ],
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: const Color(0xFF14181D),
+        border: Border.all(
+          color: isMe ? AppColors.borderAccent : AppColors.borderSubtle,
         ),
-        const SizedBox(height: AppSpacing.sm),
-        Container(
-          padding: const EdgeInsets.all(AppSpacing.sm),
-          decoration: BoxDecoration(
-            color: (isMe ? Colors.white : AppColors.backgroundQuaternary)
-                .withOpacity(0.12),
-            borderRadius:
-                BorderRadius.circular(AppSpacing.borderRadiusSmall),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
+        borderRadius: BorderRadius.circular(AppSpacing.borderRadiusMedium),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              _MacroChip(label: 'Cal', value: '$calories', color: textColor),
+              const Icon(Icons.restaurant,
+                  color: AppColors.accentPrimary, size: 18),
               const SizedBox(width: AppSpacing.sm),
-              _MacroChip(label: 'P', value: '${protein}g', color: textColor),
-              const SizedBox(width: AppSpacing.sm),
-              _MacroChip(label: 'C', value: '${carbs}g', color: textColor),
-              const SizedBox(width: AppSpacing.sm),
-              _MacroChip(label: 'F', value: '${fats}g', color: textColor),
+              Expanded(
+                child: Text(
+                  mealName,
+                  style: AppTextStyles.headingSmall(color: AppColors.textPrimary),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
             ],
           ),
-        ),
-      ],
+          const SizedBox(height: AppSpacing.md),
+          Wrap(
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
+            children: [
+              _MacroPill(
+                label: 'Protein',
+                value: '${protein}g',
+                color: AppColors.statusSuccess,
+              ),
+              _MacroPill(
+                label: 'Carbs',
+                value: '${carbs}g',
+                color: AppColors.statusInfo,
+              ),
+              _MacroPill(
+                label: 'Fats',
+                value: '${fats}g',
+                color: AppColors.statusWarning,
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          const Divider(height: 1, color: AppColors.borderSubtle),
+          const SizedBox(height: AppSpacing.sm),
+          Row(
+            children: [
+              Text(
+                'Total Calories',
+                style: AppTextStyles.labelSmall(color: AppColors.textTertiary),
+              ),
+              const Spacer(),
+              Text(
+                '${calories.toStringAsFixed(calories % 1 == 0 ? 0 : 1)} kcal',
+                style:
+                    AppTextStyles.headingSmall(color: AppColors.accentPrimary),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
 
-class _MacroChip extends StatelessWidget {
-  const _MacroChip({
+class _MacroPill extends StatelessWidget {
+  const _MacroPill({
     required this.label,
     required this.value,
     required this.color,
@@ -369,12 +413,32 @@ class _MacroChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Text(value,
-            style: AppTextStyles.headingSmall(color: color)),
-        Text(label, style: AppTextStyles.labelSmall(color: color)),
-      ],
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: 6,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.backgroundQuaternary,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: AppSpacing.xs),
+          Text(label,
+              style: AppTextStyles.labelSmall(color: AppColors.textSecondary)),
+          const SizedBox(width: AppSpacing.xs),
+          Text(value,
+              style: AppTextStyles.labelLarge(color: AppColors.textPrimary)),
+        ],
+      ),
     );
   }
 }
@@ -383,6 +447,26 @@ class _MacroChip extends StatelessWidget {
 // Exercise share bubble
 // =============================================================================
 
+String _formatReps(dynamic reps) {
+  if (reps == null) return '-';
+  if (reps is num || reps is String) return reps.toString();
+
+  if (reps is Map) {
+    final map = Map<String, dynamic>.from(reps);
+    final min = map['min'] ?? map['minReps'] ?? map['from'];
+    final max = map['max'] ?? map['maxReps'] ?? map['to'];
+    if (min != null && max != null) return '$min - $max';
+    return (min ?? max)?.toString() ?? '-';
+  }
+
+  return '-';
+}
+
+String _formatSets(dynamic sets) {
+  if (sets == null) return '-';
+  return sets.toString();
+}
+
 class _ExerciseShareBubble extends StatelessWidget {
   const _ExerciseShareBubble({required this.payload, required this.isMe});
   final Map<String, dynamic> payload;
@@ -390,93 +474,113 @@ class _ExerciseShareBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final name = payload['name'] as String? ?? 'Exercise';
-    final exercises =
-        (payload['exercises'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ??
-            [];
+    final name = payload['name'] as String? ?? 'Workout';
+    final exercises = (payload['exercises'] as List<dynamic>? ?? [])
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
 
-    final textColor =
-        isMe ? AppColors.textPrimary : AppColors.textSecondary;
-    final subtleColor =
-        isMe ? AppColors.textPrimary.withOpacity(0.7) : AppColors.textTertiary;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(Icons.fitness_center_rounded,
-                color: isMe
-                    ? AppColors.textPrimary
-                    : AppColors.accentPrimary,
-                size: 18),
-            const SizedBox(width: AppSpacing.xs),
-            Flexible(
-              child: Text(name,
-                  style: AppTextStyles.headingSmall(color: textColor)),
-            ),
-          ],
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: const Color(0xFF151A20),
+        border: Border.all(
+          color: isMe ? AppColors.borderAccent : AppColors.borderDefault,
         ),
-        const SizedBox(height: AppSpacing.sm),
-        for (final ex in exercises)
-          Padding(
-            padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(AppSpacing.sm),
-              decoration: BoxDecoration(
-                color: (isMe
-                        ? Colors.white
-                        : AppColors.backgroundQuaternary)
-                    .withOpacity(0.12),
-                borderRadius:
-                    BorderRadius.circular(AppSpacing.borderRadiusSmall),
+        borderRadius: BorderRadius.circular(AppSpacing.borderRadiusMedium),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.fitness_center_rounded,
+                  color: AppColors.accentPrimary, size: 18),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  name,
+                  style: AppTextStyles.headingSmall(color: AppColors.textPrimary),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      ex['exerciseName'] as String? ?? '',
-                      style: AppTextStyles.bodySmall(color: textColor),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          for (int i = 0; i < exercises.length; i++) ...[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.only(top: 6),
+                  child: Icon(Icons.circle,
+                      color: AppColors.textTertiary, size: 7),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        exercises[i]['exerciseName'] as String? ?? 'Exercise',
+                        style:
+                            AppTextStyles.bodySmall(color: AppColors.textPrimary),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${_formatSets(exercises[i]['sets'])} Sets • ${_formatReps(exercises[i]['reps'])} Reps',
+                        style: AppTextStyles.labelSmall(
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            if (i != exercises.length - 1) ...[
+              const SizedBox(height: AppSpacing.sm),
+              const Divider(height: 1, color: AppColors.borderSubtle),
+              const SizedBox(height: AppSpacing.sm),
+            ],
+          ],
+          if (exercises.isEmpty)
+            Text(
+              'No exercise details provided',
+              style: AppTextStyles.labelSmall(color: AppColors.textTertiary),
+            ),
+          const SizedBox(height: AppSpacing.md),
+          Material(
+            color: AppColors.backgroundQuaternary,
+            borderRadius: BorderRadius.circular(AppSpacing.borderRadiusSmall),
+            child: InkWell(
+              onTap: () {},
+              borderRadius: BorderRadius.circular(AppSpacing.borderRadiusSmall),
+              splashColor: AppColors.accentGlow,
+              highlightColor: AppColors.accentSoft.withValues(alpha: 0.45),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+                decoration: BoxDecoration(
+                  border: Border.all(color: AppColors.borderAccent),
+                  borderRadius:
+                      BorderRadius.circular(AppSpacing.borderRadiusSmall),
+                ),
+                child: Center(
+                  child: Text(
+                    'Save to My Split',
+                    style: AppTextStyles.labelLarge(
+                      color: AppColors.accentPrimary,
                     ),
                   ),
-                  Text(
-                    '${ex['sets'] ?? '-'}s × ${ex['reps'] ?? '-'}r',
-                    style: AppTextStyles.labelSmall(color: subtleColor),
-                  ),
-                ],
+                ),
               ),
             ),
           ),
-        const SizedBox(height: AppSpacing.xs),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(
-              vertical: AppSpacing.sm, horizontal: AppSpacing.md),
-          decoration: BoxDecoration(
-            color: isMe
-                ? Colors.white.withOpacity(0.15)
-                : AppColors.accentGlow,
-            border: Border.all(
-              color: isMe
-                  ? Colors.white.withOpacity(0.3)
-                  : AppColors.borderAccent,
-            ),
-            borderRadius:
-                BorderRadius.circular(AppSpacing.borderRadiusSmall),
-          ),
-          child: Center(
-            child: Text(
-              'Save to My Plan',
-              style: AppTextStyles.labelLarge(
-                color: isMe
-                    ? AppColors.textPrimary
-                    : AppColors.accentPrimary,
-              ),
-            ),
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

@@ -26,6 +26,7 @@ class ChatListScreen extends StatefulWidget {
 
 class _ChatListScreenState extends State<ChatListScreen> {
   final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
   Timer? _debounce;
   List<Map<String, dynamic>> _searchResults = [];
   bool _isSearching = false;
@@ -39,13 +40,30 @@ class _ChatListScreenState extends State<ChatListScreen> {
     final chatProvider = context.read<ChatProvider>();
     chatProvider.listenToFriends();
     chatProvider.listenToFriendRequests();
+    _searchFocusNode.addListener(() {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
   void dispose() {
+    _searchFocusNode.dispose();
     _searchController.dispose();
     _debounce?.cancel();
     super.dispose();
+  }
+
+  bool get _isSearchUiActive =>
+      _searchController.text.trim().isNotEmpty || _searchFocusNode.hasFocus;
+
+  void _clearSearch() {
+    _debounce?.cancel();
+    _searchController.clear();
+    _searchFocusNode.unfocus();
+    setState(() {
+      _searchResults = [];
+      _isSearching = false;
+    });
   }
 
   void _onSearchChanged(String query) {
@@ -318,149 +336,167 @@ class _ChatListScreenState extends State<ChatListScreen> {
     final friendsList = chatProvider.friends;
     final myUid = FirebaseAuth.instance.currentUser?.uid ?? '';
 
-    return Scaffold(
-      backgroundColor: AppColors.backgroundPrimary,
-      appBar: AppBar(
+    return PopScope<void>(
+      canPop: !_isSearchUiActive,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        _clearSearch();
+      },
+      child: Scaffold(
         backgroundColor: AppColors.backgroundPrimary,
-        elevation: 0,
-        leading: myUid.isEmpty
-            ? _BellIcon(
-                count: 0,
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute<void>(
-                    builder: (_) => const FriendRequestsScreen(),
-                  ),
-                ),
-              )
-            : StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                stream: FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(myUid)
-                    .collection('friend_requests')
-                    .where('status', isEqualTo: 'pending')
-                    .snapshots(),
-                builder: (context, snapshot) {
-                  int pendingCount;
-                  if (snapshot.hasError) {
-                    debugPrint(
-                      'Friend requests stream error in ChatListScreen: ${snapshot.error}',
-                    );
-                    pendingCount = chatProvider.pendingRequestCount;
-                  } else if (snapshot.connectionState ==
-                      ConnectionState.waiting) {
-                    pendingCount = chatProvider.pendingRequestCount;
-                  } else {
-                    pendingCount = snapshot.data?.docs.length ?? 0;
-                  }
-                  return _BellIcon(
-                    count: pendingCount,
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute<void>(
-                        builder: (_) => const FriendRequestsScreen(),
-                      ),
-                    ),
-                  );
-                },
-              ),
-        title: Text('Chat', style: AppTextStyles.headingLarge()),
-        centerTitle: true,
-        actions: [
-          IconButton(
-            tooltip: 'Settings',
-            icon: const Icon(
-              Icons.settings_rounded,
-              color: AppColors.textPrimary,
-            ),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute<void>(
-                builder: (_) => const MainSettingsScreen(),
-              ),
-            ),
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          // Search bar
-          Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.lg,
-              vertical: AppSpacing.sm,
-            ),
-            child: TextField(
-              controller: _searchController,
-              onChanged: _onSearchChanged,
-              style: AppTextStyles.bodyMedium(color: AppColors.textPrimary),
-              decoration: InputDecoration(
-                prefixIcon: const Icon(
-                  Icons.search,
-                  color: AppColors.textTertiary,
-                ),
-                hintText: 'Search by username...',
-                hintStyle: AppTextStyles.bodyMedium(
-                  color: AppColors.textTertiary,
-                ),
-                filled: true,
-                fillColor: AppColors.backgroundTertiary,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(
-                    AppSpacing.borderRadiusMedium,
-                  ),
-                  borderSide: const BorderSide(color: AppColors.borderDefault),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(
-                    AppSpacing.borderRadiusMedium,
-                  ),
-                  borderSide: const BorderSide(color: AppColors.borderDefault),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(
-                    AppSpacing.borderRadiusMedium,
-                  ),
-                  borderSide: const BorderSide(color: AppColors.accentPrimary),
-                ),
-              ),
-            ),
-          ),
-
-          // Search results overlay
-          if (_searchController.text.trim().isNotEmpty)
-            _SearchResultsList(
-              results: _searchResults,
-              isLoading: _isSearching,
-              sentRequests: _sentRequests,
-              existingFriendUids: friendsList.map((f) => f.uid).toSet(),
-              onAdd: _sendRequest,
-            ),
-
-          // Chat list
-          Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.only(top: AppSpacing.sm),
-              itemCount: 1 + friendsList.length, // AI + friends
-              itemBuilder: (ctx, index) {
-                if (index == 0) return _AiChatTile();
-
-                final friend = friendsList[index - 1];
-                return _FriendChatTile(
-                  friend: friend,
+        appBar: AppBar(
+          backgroundColor: AppColors.backgroundPrimary,
+          elevation: 0,
+          leading: myUid.isEmpty
+              ? _BellIcon(
+                  count: 0,
                   onTap: () => Navigator.push(
                     context,
                     MaterialPageRoute<void>(
-                      builder: (_) => ChatRoomScreen(friend: friend),
+                      builder: (_) => const FriendRequestsScreen(),
                     ),
                   ),
-                  onLongPress: () => _showFriendContextMenu(friend),
-                  onAvatarTap: () => _showAvatarPopup(friend),
-                );
-              },
+                )
+              : StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: FirebaseFirestore.instance
+                      .collection('users')
+                      .doc(myUid)
+                      .collection('friend_requests')
+                      .where('status', isEqualTo: 'pending')
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    int pendingCount;
+                    if (snapshot.hasError) {
+                      debugPrint(
+                        'Friend requests stream error in ChatListScreen: ${snapshot.error}',
+                      );
+                      pendingCount = chatProvider.pendingRequestCount;
+                    } else if (snapshot.connectionState ==
+                        ConnectionState.waiting) {
+                      pendingCount = chatProvider.pendingRequestCount;
+                    } else {
+                      pendingCount = snapshot.data?.docs.length ?? 0;
+                    }
+                    return _BellIcon(
+                      count: pendingCount,
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) => const FriendRequestsScreen(),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+          title: Text('Chat', style: AppTextStyles.headingLarge()),
+          centerTitle: true,
+          actions: [
+            IconButton(
+              tooltip: 'Settings',
+              icon: const Icon(
+                Icons.settings_rounded,
+                color: AppColors.textPrimary,
+              ),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => const MainSettingsScreen(),
+                ),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
+        body: Column(
+          children: [
+            // Search bar
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.lg,
+                vertical: AppSpacing.sm,
+              ),
+              child: TextField(
+                controller: _searchController,
+                focusNode: _searchFocusNode,
+                onChanged: _onSearchChanged,
+                style: AppTextStyles.bodyMedium(color: AppColors.textPrimary),
+                decoration: InputDecoration(
+                  prefixIcon: const Icon(
+                    Icons.search,
+                    color: AppColors.textTertiary,
+                  ),
+                  suffixIcon: _isSearchUiActive
+                      ? IconButton(
+                          tooltip: 'Clear search',
+                          onPressed: _clearSearch,
+                          icon: const Icon(
+                            Icons.close_rounded,
+                            color: AppColors.textTertiary,
+                          ),
+                        )
+                      : null,
+                  hintText: 'Search by username...',
+                  hintStyle: AppTextStyles.bodyMedium(
+                    color: AppColors.textTertiary,
+                  ),
+                  filled: true,
+                  fillColor: AppColors.backgroundTertiary,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(
+                      AppSpacing.borderRadiusMedium,
+                    ),
+                    borderSide: const BorderSide(color: AppColors.borderDefault),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(
+                      AppSpacing.borderRadiusMedium,
+                    ),
+                    borderSide: const BorderSide(color: AppColors.borderDefault),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(
+                      AppSpacing.borderRadiusMedium,
+                    ),
+                    borderSide: const BorderSide(color: AppColors.accentPrimary),
+                  ),
+                ),
+              ),
+            ),
+
+            // Search results overlay
+            if (_searchController.text.trim().isNotEmpty)
+              _SearchResultsList(
+                results: _searchResults,
+                isLoading: _isSearching,
+                sentRequests: _sentRequests,
+                existingFriendUids: friendsList.map((f) => f.uid).toSet(),
+                onAdd: _sendRequest,
+              ),
+
+            // Chat list
+            Expanded(
+              child: ListView.builder(
+                padding: const EdgeInsets.only(top: AppSpacing.sm),
+                itemCount: 1 + friendsList.length, // AI + friends
+                itemBuilder: (ctx, index) {
+                  if (index == 0) return _AiChatTile();
+
+                  final friend = friendsList[index - 1];
+                  return _FriendChatTile(
+                    friend: friend,
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => ChatRoomScreen(friend: friend),
+                      ),
+                    ),
+                    onLongPress: () => _showFriendContextMenu(friend),
+                    onAvatarTap: () => _showAvatarPopup(friend),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -692,7 +728,7 @@ class _SearchResultsList extends StatelessWidget {
         shrinkWrap: true,
         padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
         itemCount: results.length,
-        separatorBuilder: (_, __) =>
+        separatorBuilder: (_, index) =>
             const Divider(height: 1, color: AppColors.borderSubtle),
         itemBuilder: (ctx, i) {
           final user = results[i];
@@ -785,7 +821,7 @@ class _ContextMenuItem extends StatelessWidget {
           color: AppColors.backgroundTertiary,
           border: Border.all(
             color: isDestructive
-                ? AppColors.statusError.withOpacity(0.3)
+                ? AppColors.statusError.withValues(alpha: 0.3)
                 : AppColors.borderDefault,
           ),
           borderRadius: BorderRadius.circular(AppSpacing.borderRadiusSmall),

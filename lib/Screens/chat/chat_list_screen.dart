@@ -444,19 +444,25 @@ class _ChatListScreenState extends State<ChatListScreen> {
                     borderRadius: BorderRadius.circular(
                       AppSpacing.borderRadiusMedium,
                     ),
-                    borderSide: const BorderSide(color: AppColors.borderDefault),
+                    borderSide: const BorderSide(
+                      color: AppColors.borderDefault,
+                    ),
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(
                       AppSpacing.borderRadiusMedium,
                     ),
-                    borderSide: const BorderSide(color: AppColors.borderDefault),
+                    borderSide: const BorderSide(
+                      color: AppColors.borderDefault,
+                    ),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(
                       AppSpacing.borderRadiusMedium,
                     ),
-                    borderSide: const BorderSide(color: AppColors.accentPrimary),
+                    borderSide: const BorderSide(
+                      color: AppColors.accentPrimary,
+                    ),
                   ),
                 ),
               ),
@@ -599,7 +605,7 @@ class _AiChatTile extends StatelessWidget {
 // Friend chat tile
 // =============================================================================
 
-class _FriendChatTile extends StatelessWidget {
+class _FriendChatTile extends StatefulWidget {
   const _FriendChatTile({
     required this.friend,
     required this.onTap,
@@ -613,65 +619,141 @@ class _FriendChatTile extends StatelessWidget {
   final VoidCallback onAvatarTap;
 
   @override
+  State<_FriendChatTile> createState() => _FriendChatTileState();
+}
+
+class _FriendChatTileState extends State<_FriendChatTile> {
+  late final Stream<DocumentSnapshot<Map<String, dynamic>>> _chatStream;
+  late final String _myUid;
+
+  @override
+  void initState() {
+    super.initState();
+    _myUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    if (_myUid.isEmpty) {
+      _chatStream =
+          const Stream<DocumentSnapshot<Map<String, dynamic>>>.empty();
+    } else {
+      final chatId = buildChatId(_myUid, widget.friend.uid);
+      _chatStream = FirebaseFirestore.instance
+          .collection('chats')
+          .doc(chatId)
+          .snapshots();
+    }
+  }
+
+  String _unreadLabel(int count) {
+    if (count >= 4) return '4+ new messages';
+    if (count == 1) return '1 new message';
+    return '$count new messages';
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      onLongPress: onLongPress,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.lg,
-          vertical: AppSpacing.md,
-        ),
-        child: Row(
-          children: [
-            // Avatar (tappable separately)
-            GestureDetector(
-              onTap: onAvatarTap,
-              child: Hero(
-                tag: 'avatar_${friend.uid}',
-                child: CircleAvatar(
-                  radius: 24,
-                  backgroundColor: AppColors.backgroundQuaternary,
-                  backgroundImage: friend.photoUrl.isNotEmpty
-                      ? CachedNetworkImageProvider(friend.photoUrl)
-                      : null,
-                  child: friend.photoUrl.isEmpty
-                      ? const Icon(
-                          Icons.person,
-                          color: AppColors.textTertiary,
-                          size: 24,
-                        )
-                      : null,
-                ),
-              ),
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: _chatStream,
+      builder: (context, snapshot) {
+        final chatData = snapshot.data?.data() ?? const <String, dynamic>{};
+        final unreadCount =
+            (chatData['unreadCount_$_myUid'] as num?)?.toInt() ?? 0;
+        final hasUnread = unreadCount > 0;
+
+        final lastMessage = (chatData['lastMessage'] as String?)?.trim() ?? '';
+        final subtitleText = lastMessage.isNotEmpty
+            ? lastMessage
+            : '@${widget.friend.username}';
+
+        return InkWell(
+          onTap: widget.onTap,
+          onLongPress: widget.onLongPress,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.lg,
+              vertical: AppSpacing.md,
             ),
-            const SizedBox(width: AppSpacing.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    friend.resolvedName,
-                    style: AppTextStyles.headingSmall(),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '@${friend.username}',
-                    style: AppTextStyles.labelSmall(
-                      color: AppColors.textTertiary,
+            child: Row(
+              children: [
+                // Avatar (tappable separately)
+                GestureDetector(
+                  onTap: widget.onAvatarTap,
+                  child: Hero(
+                    tag: 'avatar_${widget.friend.uid}',
+                    child: CircleAvatar(
+                      radius: 24,
+                      backgroundColor: AppColors.backgroundQuaternary,
+                      backgroundImage: widget.friend.photoUrl.isNotEmpty
+                          ? CachedNetworkImageProvider(widget.friend.photoUrl)
+                          : null,
+                      child: widget.friend.photoUrl.isEmpty
+                          ? const Icon(
+                              Icons.person,
+                              color: AppColors.textTertiary,
+                              size: 24,
+                            )
+                          : null,
                     ),
                   ),
-                ],
-              ),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.friend.resolvedName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.headingSmall(),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitleText,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style:
+                            AppTextStyles.bodySmall(
+                              color: hasUnread
+                                  ? AppColors.textPrimary
+                                  : AppColors.textTertiary,
+                            ).copyWith(
+                              fontWeight: hasUnread
+                                  ? FontWeight.w700
+                                  : FontWeight.w400,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (hasUnread)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.sm,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppColors.statusError,
+                      borderRadius: BorderRadius.circular(
+                        AppSpacing.borderRadiusFull,
+                      ),
+                    ),
+                    child: Text(
+                      _unreadLabel(unreadCount),
+                      style: AppTextStyles.labelSmall(
+                        color: AppColors.textPrimary,
+                      ).copyWith(fontWeight: FontWeight.w700),
+                    ),
+                  )
+                else
+                  const Icon(
+                    Icons.chevron_right_rounded,
+                    color: AppColors.textTertiary,
+                    size: 20,
+                  ),
+              ],
             ),
-            const Icon(
-              Icons.chevron_right_rounded,
-              color: AppColors.textTertiary,
-              size: 20,
-            ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }

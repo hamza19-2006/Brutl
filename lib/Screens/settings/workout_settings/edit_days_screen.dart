@@ -177,7 +177,7 @@ class _DayRow extends StatelessWidget {
 
   Future<void> _showRenameDialog(BuildContext context) async {
     final controller = TextEditingController(text: day.splitName);
-    final newName = await showDialog<String>(
+    await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.backgroundSecondary,
@@ -194,14 +194,38 @@ class _DayRow extends StatelessWidget {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop(null),
+            onPressed: () => Navigator.of(ctx).pop(),
             child: Text(
               'Cancel',
               style: AppTextStyles.bodyMedium(color: AppColors.textSecondary),
             ),
           ),
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+            onPressed: () {
+              final text = controller.text.trim();
+              Navigator.of(ctx).pop();
+              if (text.isEmpty || text == day.splitName) return;
+              if (!context.mounted) return;
+              unawaited(
+                context.read<WorkoutProvider>().renameDayOptimistic(
+                  weekIndex,
+                  day.splitName,
+                  text,
+                ),
+              );
+              ScaffoldMessenger.of(context)
+                ..hideCurrentSnackBar()
+                ..showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'Day renamed to "$text".',
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                    backgroundColor: AppColors.statusSuccess,
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+            },
             child: Text(
               'Save',
               style: AppTextStyles.headingSmall(color: AppColors.accentPrimary),
@@ -210,31 +234,6 @@ class _DayRow extends StatelessWidget {
         ],
       ),
     );
-    controller.dispose();
-
-    if (newName == null || newName.isEmpty || newName == day.splitName) return;
-    if (!context.mounted) return;
-
-    unawaited(
-      context.read<WorkoutProvider>().renameDayOptimistic(
-        weekIndex,
-        day.splitName,
-        newName,
-      ),
-    );
-
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(
-            'Day renamed to "$newName".',
-            style: const TextStyle(color: Colors.white),
-          ),
-          backgroundColor: AppColors.statusSuccess,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
   }
 
   Future<void> _showClearConfirm(BuildContext context) async {

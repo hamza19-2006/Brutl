@@ -474,11 +474,34 @@ class _ExerciseShareBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final name = payload['name'] as String? ?? 'Workout';
+    final scope = payload['shareScope'] as String? ?? 'day';
+    final title = payload['title'] as String? ??
+        payload['name'] as String? ??
+        'Workout';
     final exercises = (payload['exercises'] as List<dynamic>? ?? [])
         .whereType<Map>()
         .map((e) => Map<String, dynamic>.from(e))
         .toList();
+
+    final IconData headerIcon;
+    final Widget body;
+
+    switch (scope) {
+      case 'week':
+        headerIcon = Icons.calendar_month;
+        final days = (payload['days'] as List<dynamic>? ?? [])
+            .map((e) => e.toString())
+            .toList();
+        body = _WeekBody(days: days);
+      case 'exercise':
+        headerIcon = Icons.sports_gymnastics;
+        final sets = exercises.isNotEmpty ? exercises[0]['sets'] : null;
+        final reps = exercises.isNotEmpty ? exercises[0]['reps'] : null;
+        body = _ExerciseBody(sets: sets, reps: reps);
+      default:
+        headerIcon = Icons.fitness_center_rounded;
+        body = _DayBody(exercises: exercises);
+    }
 
     return Container(
       width: double.infinity,
@@ -495,13 +518,13 @@ class _ExerciseShareBubble extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(Icons.fitness_center_rounded,
-                  color: AppColors.accentPrimary, size: 18),
+              Icon(headerIcon, color: AppColors.accentPrimary, size: 18),
               const SizedBox(width: AppSpacing.sm),
               Expanded(
                 child: Text(
-                  name,
-                  style: AppTextStyles.headingSmall(color: AppColors.textPrimary),
+                  title,
+                  style:
+                      AppTextStyles.headingSmall(color: AppColors.textPrimary),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -509,49 +532,10 @@ class _ExerciseShareBubble extends StatelessWidget {
             ],
           ),
           const SizedBox(height: AppSpacing.md),
-          for (int i = 0; i < exercises.length; i++) ...[
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Padding(
-                  padding: EdgeInsets.only(top: 6),
-                  child: Icon(Icons.circle,
-                      color: AppColors.textTertiary, size: 7),
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        exercises[i]['exerciseName'] as String? ?? 'Exercise',
-                        style:
-                            AppTextStyles.bodySmall(color: AppColors.textPrimary),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '${_formatSets(exercises[i]['sets'])} Sets • ${_formatReps(exercises[i]['reps'])} Reps',
-                        style: AppTextStyles.labelSmall(
-                          color: AppColors.textSecondary,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            if (i != exercises.length - 1) ...[
-              const SizedBox(height: AppSpacing.sm),
-              const Divider(height: 1, color: AppColors.borderSubtle),
-              const SizedBox(height: AppSpacing.sm),
-            ],
-          ],
-          if (exercises.isEmpty)
-            Text(
-              'No exercise details provided',
-              style: AppTextStyles.labelSmall(color: AppColors.textTertiary),
-            ),
+          body,
           const SizedBox(height: AppSpacing.md),
+          const Divider(height: 1, color: AppColors.borderSubtle),
+          const SizedBox(height: AppSpacing.sm),
           Material(
             color: AppColors.backgroundQuaternary,
             borderRadius: BorderRadius.circular(AppSpacing.borderRadiusSmall),
@@ -570,7 +554,7 @@ class _ExerciseShareBubble extends StatelessWidget {
                 ),
                 child: Center(
                   child: Text(
-                    'Save to My Split',
+                    'Save to My Plan',
                     style: AppTextStyles.labelLarge(
                       color: AppColors.accentPrimary,
                     ),
@@ -581,6 +565,117 @@ class _ExerciseShareBubble extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// ─── Week scope body ──────────────────────────────────────────────────────────
+
+class _WeekBody extends StatelessWidget {
+  const _WeekBody({required this.days});
+  final List<String> days;
+
+  @override
+  Widget build(BuildContext context) {
+    if (days.isEmpty) {
+      return Text(
+        'No days in this program',
+        style: AppTextStyles.labelSmall(color: AppColors.textTertiary),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final day in days)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.circle,
+                  color: AppColors.accentPrimary,
+                  size: 5,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    day,
+                    style:
+                        AppTextStyles.bodySmall(color: AppColors.textSecondary),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+// ─── Day scope body ───────────────────────────────────────────────────────────
+
+class _DayBody extends StatelessWidget {
+  const _DayBody({required this.exercises});
+  final List<Map<String, dynamic>> exercises;
+
+  @override
+  Widget build(BuildContext context) {
+    final preview = exercises.take(3).toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '${exercises.length} Exercise${exercises.length == 1 ? '' : 's'}',
+          style: AppTextStyles.bodySmall(color: AppColors.textSecondary),
+        ),
+        if (preview.isNotEmpty) const SizedBox(height: 6),
+        for (final ex in preview)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 2),
+            child: Text(
+              ex['exerciseName'] as String? ?? '',
+              style: AppTextStyles.labelSmall(color: AppColors.textTertiary),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        if (exercises.length > 3)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              '+ ${exercises.length - 3} more',
+              style: AppTextStyles.labelSmall(color: AppColors.textTertiary),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+// ─── Exercise scope body ──────────────────────────────────────────────────────
+
+class _ExerciseBody extends StatelessWidget {
+  const _ExerciseBody({required this.sets, required this.reps});
+  final dynamic sets;
+  final dynamic reps;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: AppSpacing.sm,
+      runSpacing: AppSpacing.sm,
+      children: [
+        _MacroPill(
+          label: 'Sets',
+          value: _formatSets(sets),
+          color: AppColors.accentPrimary,
+        ),
+        _MacroPill(
+          label: 'Reps',
+          value: _formatReps(reps),
+          color: AppColors.statusInfo,
+        ),
+      ],
     );
   }
 }

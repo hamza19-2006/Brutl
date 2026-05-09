@@ -1,12 +1,11 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
-import 'package:hive_flutter/hive_flutter.dart';
+import 'package:provider/provider.dart';
 
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../models/brutl_models.dart';
+import '../../providers/workout_provider.dart';
 
 class ShareWorkoutScreen extends StatefulWidget {
   const ShareWorkoutScreen({super.key});
@@ -15,64 +14,51 @@ class ShareWorkoutScreen extends StatefulWidget {
   State<ShareWorkoutScreen> createState() => _ShareWorkoutScreenState();
 }
 
-class _ShareWorkoutScreenState extends State<ShareWorkoutScreen> {
-  Map<String, List<ExerciseModel>> _splitExercises = {};
-  bool _isLoading = true;
+class _ShareWorkoutScreenState extends State<ShareWorkoutScreen>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabController;
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _tabController = TabController(length: 3, vsync: this);
   }
 
-  Future<void> _load() async {
-    try {
-      final box = Hive.box<String>('exercises');
-      final grouped = <String, List<ExerciseModel>>{};
-
-      for (final key in box.keys) {
-        final raw = box.get(key);
-        if (raw == null) continue;
-        final json = jsonDecode(raw) as Map<String, dynamic>;
-        final exercise = ExerciseModel.fromJson(json);
-        final dayName =
-            exercise.splitName.isNotEmpty ? exercise.splitName : 'Unassigned';
-        grouped.putIfAbsent(dayName, () => []).add(exercise);
-      }
-
-      if (mounted) {
-        setState(() {
-          _splitExercises = grouped;
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) setState(() => _isLoading = false);
-    }
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
-  void _shareWholeWeek() {
+  void _shareWeek(int weekNumber, List<ProgramDayModel> weekDays) {
     final allExercises = <Map<String, dynamic>>[];
-    for (final entry in _splitExercises.entries) {
-      for (final ex in entry.value) {
+    final dayNames = <String>[];
+    for (final day in weekDays) {
+      if (day.splitName.toLowerCase() == 'rest') continue;
+      dayNames.add(day.splitName);
+      for (final ex in day.exercises) {
         allExercises.add({
           'exerciseName': ex.name,
           'sets': ex.sets,
           'reps': ex.reps,
           'weight': ex.weightDisplay,
-          'day': entry.key,
+          'day': day.splitName,
         });
       }
     }
     Navigator.pop<Map<String, dynamic>>(context, {
-      'name': 'Full Week',
+      'shareScope': 'week',
+      'title': 'Week $weekNumber',
+      'weekNumber': weekNumber,
+      'days': dayNames,
       'exercises': allExercises,
     });
   }
 
   void _shareDay(String dayName, List<ExerciseModel> exercises) {
     Navigator.pop<Map<String, dynamic>>(context, {
-      'name': dayName,
+      'shareScope': 'day',
+      'title': dayName,
       'exercises': exercises
           .map((ex) => {
                 'exerciseName': ex.name,
@@ -86,7 +72,8 @@ class _ShareWorkoutScreenState extends State<ShareWorkoutScreen> {
 
   void _shareExercise(ExerciseModel exercise) {
     Navigator.pop<Map<String, dynamic>>(context, {
-      'name': exercise.name,
+      'shareScope': 'exercise',
+      'title': exercise.name,
       'exercises': [
         {
           'exerciseName': exercise.name,
@@ -98,67 +85,15 @@ class _ShareWorkoutScreenState extends State<ShareWorkoutScreen> {
     });
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.backgroundPrimary,
-      appBar: AppBar(
-        backgroundColor: AppColors.backgroundPrimary,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded,
-              color: AppColors.textPrimary),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: Text('Share Workout', style: AppTextStyles.headingLarge()),
-      ),
-      body: _isLoading
-          ? const Center(
-              child: CircularProgressIndicator(
-                  color: AppColors.accentPrimary))
-          : _splitExercises.isEmpty
-              ? Center(
-                  child: Text('No exercises found',
-                      style: AppTextStyles.bodyMedium(
-                          color: AppColors.textTertiary)),
-                )
-              : ListView(
-                  padding: const EdgeInsets.all(AppSpacing.lg),
-                  children: [
-                    // Whole Week
-                    _DayCard(
-                      name: 'Whole Week',
-                      exerciseCount:
-                          _splitExercises.values.fold(0, (s, l) => s + l.length),
-                      isHighlighted: true,
-                      onTap: _shareWholeWeek,
-                    ),
-                    const SizedBox(height: AppSpacing.lg),
-                    Text('By Day',
-                        style: AppTextStyles.headingSmall(
-                            color: AppColors.textTertiary)),
-                    const SizedBox(height: AppSpacing.sm),
-                    for (final entry in _splitExercises.entries) ...[
-                      _DayCard(
-                        name: entry.key,
-                        exerciseCount: entry.value.length,
-                        onTap: () => _showDayDetail(entry.key, entry.value),
-                      ),
-                      const SizedBox(height: AppSpacing.sm),
-                    ],
-                  ],
-                ),
-    );
-  }
-
-  void _showDayDetail(String dayName, List<ExerciseModel> exercises) {
+  void _showExercisePicker(String dayName, List<ExerciseModel> exercises) {
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: AppColors.backgroundSecondary,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
-            top: Radius.circular(AppSpacing.borderRadiusLarge)),
+          top: Radius.circular(AppSpacing.borderRadiusLarge),
+        ),
       ),
       builder: (ctx) => DraggableScrollableSheet(
         expand: false,
@@ -171,17 +106,19 @@ class _ShareWorkoutScreenState extends State<ShareWorkoutScreen> {
               child: Row(
                 children: [
                   Expanded(
-                    child: Text(dayName,
-                        style: AppTextStyles.headingLarge()),
+                    child: Text(dayName, style: AppTextStyles.headingLarge()),
                   ),
                   TextButton(
                     onPressed: () {
                       Navigator.pop(ctx);
                       _shareDay(dayName, exercises);
                     },
-                    child: Text('Share All',
-                        style: AppTextStyles.headingSmall(
-                            color: AppColors.accentPrimary)),
+                    child: Text(
+                      'Share Day',
+                      style: AppTextStyles.headingSmall(
+                        color: AppColors.accentPrimary,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -211,20 +148,236 @@ class _ShareWorkoutScreenState extends State<ShareWorkoutScreen> {
       ),
     );
   }
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<WorkoutProvider>(
+      builder: (context, provider, _) {
+        final programDays = provider.programDays;
+        final hasData = programDays.any((d) => d.exercises.isNotEmpty);
+
+        return Scaffold(
+          backgroundColor: AppColors.backgroundPrimary,
+          appBar: AppBar(
+            backgroundColor: AppColors.backgroundPrimary,
+            elevation: 0,
+            leading: IconButton(
+              icon: const Icon(
+                Icons.arrow_back_rounded,
+                color: AppColors.textPrimary,
+              ),
+              onPressed: () => Navigator.pop(context),
+            ),
+            title: Text('Share Workout', style: AppTextStyles.headingLarge()),
+            bottom: TabBar(
+              controller: _tabController,
+              indicatorColor: AppColors.accentPrimary,
+              indicatorWeight: 2,
+              labelColor: AppColors.accentPrimary,
+              unselectedLabelColor: AppColors.textTertiary,
+              labelStyle:
+                  AppTextStyles.labelLarge(color: AppColors.accentPrimary),
+              unselectedLabelStyle:
+                  AppTextStyles.labelLarge(color: AppColors.textTertiary),
+              tabs: const [
+                Tab(text: 'WEEK'),
+                Tab(text: 'DAY'),
+                Tab(text: 'EXERCISE'),
+              ],
+            ),
+          ),
+          body: !hasData
+              ? Center(
+                  child: Text(
+                    'No exercises found.\nAdd exercises from the workout screen first.',
+                    textAlign: TextAlign.center,
+                    style: AppTextStyles.bodyMedium(
+                      color: AppColors.textTertiary,
+                    ),
+                  ),
+                )
+              : TabBarView(
+                  controller: _tabController,
+                  children: [
+                    _WeekTabContent(
+                      programDays: programDays,
+                      onShare: _shareWeek,
+                    ),
+                    _DayTabContent(
+                      programDays: programDays,
+                      onShare: _shareDay,
+                    ),
+                    _ExerciseTabContent(
+                      programDays: programDays,
+                      onShowPicker: _showExercisePicker,
+                    ),
+                  ],
+                ),
+        );
+      },
+    );
+  }
 }
 
-class _DayCard extends StatelessWidget {
-  const _DayCard({
-    required this.name,
-    required this.exerciseCount,
-    required this.onTap,
-    this.isHighlighted = false,
+// =============================================================================
+// Week tab
+// =============================================================================
+
+class _WeekTabContent extends StatelessWidget {
+  const _WeekTabContent({
+    required this.programDays,
+    required this.onShare,
   });
 
-  final String name;
-  final int exerciseCount;
+  final List<ProgramDayModel> programDays;
+  final void Function(int weekNumber, List<ProgramDayModel> weekDays) onShare;
+
+  @override
+  Widget build(BuildContext context) {
+    final weeks = programDays.map((d) => d.weekNumber).toSet().toList()..sort();
+
+    return ListView.separated(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      itemCount: weeks.length,
+      separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.sm),
+      itemBuilder: (context, i) {
+        final week = weeks[i];
+        final weekDays = programDays
+            .where(
+              (d) =>
+                  d.weekNumber == week &&
+                  d.splitName.toLowerCase() != 'rest',
+            )
+            .toList()
+          ..sort((a, b) => a.dayNumber.compareTo(b.dayNumber));
+        final exerciseCount =
+            weekDays.fold(0, (sum, d) => sum + d.exercises.length);
+
+        return _ScopeCard(
+          icon: Icons.calendar_month,
+          title: 'Week $week',
+          subtitle: '${weekDays.length} days · $exerciseCount exercises',
+          isHighlighted: true,
+          onTap: () => onShare(week, weekDays),
+        );
+      },
+    );
+  }
+}
+
+// =============================================================================
+// Day tab
+// =============================================================================
+
+class _DayTabContent extends StatelessWidget {
+  const _DayTabContent({
+    required this.programDays,
+    required this.onShare,
+  });
+
+  final List<ProgramDayModel> programDays;
+  final void Function(String dayName, List<ExerciseModel> exercises) onShare;
+
+  @override
+  Widget build(BuildContext context) {
+    final seen = <String>{};
+    final uniqueDays = <ProgramDayModel>[];
+    for (final d in programDays) {
+      if (d.splitName.toLowerCase() == 'rest') continue;
+      if (seen.add(d.splitName)) uniqueDays.add(d);
+    }
+
+    return ListView.separated(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      itemCount: uniqueDays.length,
+      separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.sm),
+      itemBuilder: (context, i) {
+        final day = uniqueDays[i];
+        return _ScopeCard(
+          icon: Icons.fitness_center_rounded,
+          title: day.splitName,
+          subtitle:
+              '${day.exercises.length} exercise${day.exercises.length == 1 ? '' : 's'}',
+          onTap: () => onShare(day.splitName, day.exercises),
+        );
+      },
+    );
+  }
+}
+
+// =============================================================================
+// Exercise tab
+// =============================================================================
+
+class _ExerciseTabContent extends StatelessWidget {
+  const _ExerciseTabContent({
+    required this.programDays,
+    required this.onShowPicker,
+  });
+
+  final List<ProgramDayModel> programDays;
+  final void Function(
+    String dayName,
+    List<ExerciseModel> exercises,
+  ) onShowPicker;
+
+  @override
+  Widget build(BuildContext context) {
+    final seen = <String>{};
+    final uniqueDays = <ProgramDayModel>[];
+    for (final d in programDays) {
+      if (d.splitName.toLowerCase() == 'rest') continue;
+      if (d.exercises.isEmpty) continue;
+      if (seen.add(d.splitName)) uniqueDays.add(d);
+    }
+
+    if (uniqueDays.isEmpty) {
+      return Center(
+        child: Text(
+          'No exercises found.',
+          style: AppTextStyles.bodyMedium(color: AppColors.textTertiary),
+        ),
+      );
+    }
+
+    return ListView.separated(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      itemCount: uniqueDays.length,
+      separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.sm),
+      itemBuilder: (context, i) {
+        final day = uniqueDays[i];
+        return _ScopeCard(
+          icon: Icons.sports_gymnastics,
+          title: day.splitName,
+          subtitle: 'Tap to pick a specific exercise',
+          showChevron: true,
+          onTap: () => onShowPicker(day.splitName, day.exercises),
+        );
+      },
+    );
+  }
+}
+
+// =============================================================================
+// Shared scope card
+// =============================================================================
+
+class _ScopeCard extends StatelessWidget {
+  const _ScopeCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.isHighlighted = false,
+    this.showChevron = false,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
   final VoidCallback onTap;
   final bool isHighlighted;
+  final bool showChevron;
 
   @override
   Widget build(BuildContext context) {
@@ -242,30 +395,37 @@ class _DayCard extends StatelessWidget {
                 ? AppColors.accentPrimary
                 : AppColors.borderDefault,
           ),
-          borderRadius:
-              BorderRadius.circular(AppSpacing.borderRadiusMedium),
+          borderRadius: BorderRadius.circular(AppSpacing.borderRadiusMedium),
         ),
         child: Row(
           children: [
-            Icon(Icons.fitness_center_rounded,
-                color: isHighlighted
-                    ? AppColors.accentPrimary
-                    : AppColors.textTertiary,
-                size: 22),
+            Icon(
+              icon,
+              color: isHighlighted
+                  ? AppColors.accentPrimary
+                  : AppColors.textTertiary,
+              size: 22,
+            ),
             const SizedBox(width: AppSpacing.md),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(name, style: AppTextStyles.headingSmall()),
-                  Text('$exerciseCount exercises',
-                      style: AppTextStyles.labelSmall(
-                          color: AppColors.textTertiary)),
+                  Text(title, style: AppTextStyles.headingSmall()),
+                  Text(
+                    subtitle,
+                    style:
+                        AppTextStyles.labelSmall(color: AppColors.textTertiary),
+                  ),
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right_rounded,
-                color: AppColors.textTertiary, size: 20),
+            if (showChevron)
+              const Icon(
+                Icons.chevron_right_rounded,
+                color: AppColors.textTertiary,
+                size: 20,
+              ),
           ],
         ),
       ),

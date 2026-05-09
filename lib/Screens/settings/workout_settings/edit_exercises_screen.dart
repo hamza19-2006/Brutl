@@ -28,11 +28,12 @@ class EditExercisesScreen extends StatefulWidget {
 
 class _EditExercisesScreenState extends State<EditExercisesScreen> {
   brutl.ProgramDayModel? _findDayForWeek(WorkoutProvider provider) {
-    final activeDaysThisWeek = provider.programDays
-        .where((day) => day.weekNumber == widget.weekIndex + 1)
-        .toList(growable: false);
-    for (final day in activeDaysThisWeek) {
+    final weekDays = provider.getDaysForWeek(widget.weekIndex);
+    for (final day in weekDays) {
       if (day.id == widget.dayId) return day;
+    }
+    for (final day in weekDays) {
+      if (day.splitName.trim() == widget.dayName.trim()) return day;
     }
     return null;
   }
@@ -43,7 +44,7 @@ class _EditExercisesScreenState extends State<EditExercisesScreen> {
 
   Future<void> _showRenameDialog(brutl.ExerciseModel exercise) async {
     final controller = TextEditingController(text: exercise.name);
-    final newName = await showDialog<String>(
+    await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.backgroundSecondary,
@@ -60,14 +61,41 @@ class _EditExercisesScreenState extends State<EditExercisesScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop(null),
+            onPressed: () => Navigator.of(ctx).pop(),
             child: Text(
               'Cancel',
               style: AppTextStyles.bodyMedium(color: AppColors.textSecondary),
             ),
           ),
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+            onPressed: () {
+              final newName = controller.text.trim();
+              Navigator.of(ctx).pop();
+              if (newName.isEmpty || newName == exercise.name) return;
+              if (!mounted) return;
+              final workoutProvider = context.read<WorkoutProvider>();
+              final dayName = _activeDayName(workoutProvider);
+              unawaited(
+                workoutProvider.renameExerciseOptimistic(
+                  widget.weekIndex,
+                  dayName,
+                  exercise.name,
+                  newName,
+                ),
+              );
+              ScaffoldMessenger.of(context)
+                ..hideCurrentSnackBar()
+                ..showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'Exercise renamed to "$newName".',
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                    backgroundColor: AppColors.statusSuccess,
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+            },
             child: Text(
               'Save',
               style: AppTextStyles.headingSmall(color: AppColors.accentPrimary),
@@ -76,35 +104,6 @@ class _EditExercisesScreenState extends State<EditExercisesScreen> {
         ],
       ),
     );
-    controller.dispose();
-
-    if (newName == null || newName.isEmpty || newName == exercise.name) return;
-    if (!mounted) return;
-
-    final workoutProvider = context.read<WorkoutProvider>();
-    final dayName = _activeDayName(workoutProvider);
-
-    unawaited(
-      workoutProvider.renameExerciseOptimistic(
-        widget.weekIndex,
-        dayName,
-        exercise.name,
-        newName,
-      ),
-    );
-
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(
-            'Exercise renamed to "$newName".',
-            style: const TextStyle(color: Colors.white),
-          ),
-          backgroundColor: AppColors.statusSuccess,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
   }
 
   Future<void> _showDeleteDialog(brutl.ExerciseModel exercise) async {

@@ -34,7 +34,11 @@ class _EditDaysScreenState extends State<EditDaysScreen> {
               _selectedWeekIndex = maxWeekIndex < 0 ? 0 : maxWeekIndex;
             }
 
-            final days = provider.getDaysForWeek(_selectedWeekIndex);
+            final activeDaysThisWeek =
+                provider.programDays
+                    .where((day) => day.weekNumber == _selectedWeekIndex + 1)
+                    .toList()
+                  ..sort((a, b) => a.dayNumber.compareTo(b.dayNumber));
 
             return Column(
               children: [
@@ -85,7 +89,7 @@ class _EditDaysScreenState extends State<EditDaysScreen> {
                 ),
                 const SizedBox(height: AppSpacing.lg),
                 Expanded(
-                  child: days.isEmpty
+                  child: activeDaysThisWeek.isEmpty
                       ? Center(
                           child: Text(
                             'No workouts configured for this week.',
@@ -97,12 +101,12 @@ class _EditDaysScreenState extends State<EditDaysScreen> {
                             horizontal: AppSpacing.xl,
                             vertical: AppSpacing.lg,
                           ),
-                          itemCount: days.length,
+                          itemCount: activeDaysThisWeek.length,
                           separatorBuilder: (context, index) =>
                               const SizedBox(height: AppSpacing.sm),
                           itemBuilder: (context, index) => _DayRow(
                             weekIndex: _selectedWeekIndex,
-                            day: days[index],
+                            day: activeDaysThisWeek[index],
                           ),
                         ),
                 ),

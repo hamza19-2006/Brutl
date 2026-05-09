@@ -107,6 +107,8 @@ class WorkoutProvider extends ChangeNotifier {
 
   List<brutl.ProgramDayModel> get currentWeekWorkouts =>
       getDaysForWeek(_selectedWeek - 1);
+  List<brutl.ProgramDayModel> get programDays =>
+      List<brutl.ProgramDayModel>.unmodifiable(_programDays);
 
   List<brutl.ProgramDayModel> getDaysForWeek(int weekIndex) {
     final weekNumber = weekIndex + 1;
@@ -114,10 +116,11 @@ class WorkoutProvider extends ChangeNotifier {
       return const <brutl.ProgramDayModel>[];
     }
 
-    final baseDays = _programDays
-        .where((day) => day.weekNumber == weekNumber)
-        .toList(growable: false)
-      ..sort((a, b) => a.dayNumber.compareTo(b.dayNumber));
+    final baseDays =
+        _programDays
+            .where((day) => day.weekNumber == weekNumber)
+            .toList(growable: false)
+          ..sort((a, b) => a.dayNumber.compareTo(b.dayNumber));
 
     if (weekNumber != _selectedWeek) {
       return baseDays;
@@ -145,7 +148,10 @@ class WorkoutProvider extends ChangeNotifier {
     return null;
   }
 
-  List<brutl.ExerciseModel> getExercisesForWeekDay(int weekIndex, String dayId) {
+  List<brutl.ExerciseModel> getExercisesForWeekDay(
+    int weekIndex,
+    String dayId,
+  ) {
     final day = getDayForWeek(weekIndex, dayId);
     if (day == null) {
       return const <brutl.ExerciseModel>[];
@@ -811,8 +817,9 @@ class WorkoutProvider extends ChangeNotifier {
       return;
     }
 
-    final updatedOverrides =
-        Map<String, brutl.ProgramDayModel>.from(_selectedWeekOverrides);
+    final updatedOverrides = Map<String, brutl.ProgramDayModel>.from(
+      _selectedWeekOverrides,
+    );
     for (final dayId in affectedDayIds) {
       final override = updatedOverrides[dayId];
       final currentDay = _findProgramDayById(dayId);
@@ -842,7 +849,8 @@ class WorkoutProvider extends ChangeNotifier {
         continue;
       }
 
-      final payload = day.toJson()..['updatedAt'] = FieldValue.serverTimestamp();
+      final payload = day.toJson()
+        ..['updatedAt'] = FieldValue.serverTimestamp();
       batch.set(
         firestore
             .collection('users')
@@ -869,8 +877,9 @@ class WorkoutProvider extends ChangeNotifier {
     }
 
     final prevDays = List<brutl.ProgramDayModel>.from(_programDays);
-    final prevOverrides =
-        Map<String, brutl.ProgramDayModel>.from(_selectedWeekOverrides);
+    final prevOverrides = Map<String, brutl.ProgramDayModel>.from(
+      _selectedWeekOverrides,
+    );
     final affectedDayIds = <String>{};
 
     _programDays = _programDays
@@ -909,8 +918,9 @@ class WorkoutProvider extends ChangeNotifier {
   ) async {
     final weekNumber = weekIndex + 1;
     final prevDays = List<brutl.ProgramDayModel>.from(_programDays);
-    final prevOverrides =
-        Map<String, brutl.ProgramDayModel>.from(_selectedWeekOverrides);
+    final prevOverrides = Map<String, brutl.ProgramDayModel>.from(
+      _selectedWeekOverrides,
+    );
     final affectedDayIds = <String>{};
 
     _programDays = _programDays
@@ -956,8 +966,9 @@ class WorkoutProvider extends ChangeNotifier {
     }
 
     final prevDays = List<brutl.ProgramDayModel>.from(_programDays);
-    final prevOverrides =
-        Map<String, brutl.ProgramDayModel>.from(_selectedWeekOverrides);
+    final prevOverrides = Map<String, brutl.ProgramDayModel>.from(
+      _selectedWeekOverrides,
+    );
     final affectedDayIds = <String>{};
 
     _programDays = _programDays
@@ -1012,8 +1023,9 @@ class WorkoutProvider extends ChangeNotifier {
   ) async {
     final weekNumber = weekIndex + 1;
     final prevDays = List<brutl.ProgramDayModel>.from(_programDays);
-    final prevOverrides =
-        Map<String, brutl.ProgramDayModel>.from(_selectedWeekOverrides);
+    final prevOverrides = Map<String, brutl.ProgramDayModel>.from(
+      _selectedWeekOverrides,
+    );
     final affectedDayIds = <String>{};
 
     _programDays = _programDays

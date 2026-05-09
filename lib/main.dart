@@ -16,6 +16,7 @@ import 'providers/auth_validation_provider.dart';
 import 'providers/brutl_user_provider.dart';
 import 'providers/health_provider.dart';
 import 'providers/workout_nutrition_provider.dart';
+import 'providers/chat_provider.dart';
 import 'providers/workout_provider.dart';
 
 Future<void> main() async {
@@ -46,6 +47,9 @@ class BrutlAppBootstrap extends StatelessWidget {
         ),
         ChangeNotifierProvider<BrutlUserProvider>(
           create: (_) => BrutlUserProvider(),
+        ),
+        ChangeNotifierProvider<ChatProvider>(
+          create: (_) => ChatProvider(),
         ),
       ],
       child: const AppWarmupGate(),

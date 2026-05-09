@@ -15,6 +15,7 @@ import '../services/step_service.dart';
 import '../widgets/biometric_card.dart';
 import '../widgets/exercise_highlight_card.dart';
 import '../widgets/header_widget.dart';
+import 'chat/chat_list_screen.dart';
 import 'settings/main_settings_screen.dart';
 import 'workout_screen.dart';
 
@@ -404,32 +405,7 @@ class _ChatTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF0A0A0A),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF0A0A0A),
-        elevation: 0,
-        title: Text(
-          label,
-          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                color: Colors.white,
-                fontWeight: FontWeight.w700,
-              ),
-        ),
-        actions: [
-          IconButton(
-            tooltip: 'Settings',
-            icon: const Icon(Icons.settings_rounded, color: Colors.white),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => const MainSettingsScreen(),
-              ),
-            ),
-          ),
-        ],
-      ),
-      body: _SimpleTabSurface(icon: Icons.chat_bubble_rounded, label: label),
-    );
+    return const ChatListScreen();
   }
 }
 

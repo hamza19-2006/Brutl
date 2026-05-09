@@ -21,7 +21,7 @@ class ContactSupportScreen extends StatelessWidget {
     host: 'wa.me',
     path: '923097719166',
     queryParameters: <String, String>{
-      'text': 'Hello Brutl Support, I need help with...'
+      'text': 'Hello Brutl Support, I need help with...',
     },
   );
 
@@ -29,7 +29,6 @@ class ContactSupportScreen extends StatelessWidget {
     return _launchSupportUri(
       context,
       uri: _emailUri,
-      launchMode: LaunchMode.platformDefault,
       errorMessage: 'No email app found to open support request.',
     );
   }
@@ -38,7 +37,7 @@ class ContactSupportScreen extends StatelessWidget {
     return _launchSupportUri(
       context,
       uri: _whatsAppUri,
-      launchMode: LaunchMode.externalApplication,
+      forceExternal: true,
       errorMessage: 'WhatsApp is not available on this device.',
     );
   }
@@ -46,7 +45,7 @@ class ContactSupportScreen extends StatelessWidget {
   Future<void> _launchSupportUri(
     BuildContext context, {
     required Uri uri,
-    required LaunchMode launchMode,
+    bool forceExternal = false,
     required String errorMessage,
   }) async {
     final canOpen = await canLaunchUrl(uri);
@@ -56,7 +55,8 @@ class ContactSupportScreen extends StatelessWidget {
       return;
     }
 
-    final launched = await launchUrl(uri, mode: launchMode);
+    final url = uri;
+    final launched = await launchUrl(url, mode: LaunchMode.externalApplication);
     if (!launched) {
       if (!context.mounted) return;
       _showErrorSnackBar(context, errorMessage);

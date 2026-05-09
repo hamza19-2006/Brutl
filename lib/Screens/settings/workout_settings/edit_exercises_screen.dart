@@ -27,9 +27,18 @@ class EditExercisesScreen extends StatefulWidget {
 }
 
 class _EditExercisesScreenState extends State<EditExercisesScreen> {
+  brutl.ProgramDayModel? _findDayForWeek(WorkoutProvider provider) {
+    final activeDaysThisWeek = provider.programDays
+        .where((day) => day.weekNumber == widget.weekIndex + 1)
+        .toList(growable: false);
+    for (final day in activeDaysThisWeek) {
+      if (day.id == widget.dayId) return day;
+    }
+    return null;
+  }
+
   String _activeDayName(WorkoutProvider provider) {
-    return provider.getDayForWeek(widget.weekIndex, widget.dayId)?.splitName ??
-        widget.dayName;
+    return _findDayForWeek(provider)?.splitName ?? widget.dayName;
   }
 
   Future<void> _showRenameDialog(brutl.ExerciseModel exercise) async {
@@ -166,11 +175,10 @@ class _EditExercisesScreenState extends State<EditExercisesScreen> {
   Widget build(BuildContext context) {
     return Consumer<WorkoutProvider>(
       builder: (context, provider, _) {
-        final dayName = _activeDayName(provider);
-        final exercises = provider.getExercisesForWeekDay(
-          widget.weekIndex,
-          widget.dayId,
-        );
+        final selectedDay = _findDayForWeek(provider);
+        final dayName = selectedDay?.splitName ?? widget.dayName;
+        final exercises =
+            selectedDay?.exercises ?? const <brutl.ExerciseModel>[];
 
         return Scaffold(
           backgroundColor: AppColors.backgroundPrimary,

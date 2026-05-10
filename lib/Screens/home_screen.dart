@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -5,15 +6,29 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 
 import '../config/secrets.dart';
+import '../core/theme/app_colors.dart';
 import '../core/theme/constants/ai_prompts.dart';
+import '../providers/health_provider.dart';
+import '../providers/workout_nutrition_provider.dart';
+import '../providers/workout_provider.dart';
+import '../services/step_service.dart';
+import '../widgets/biometric_card.dart';
+import 'calories_history_screen.dart';
+import 'chat/chat_list_screen.dart';
 import 'home/home_screen_ex_show.dart';
+import 'settings/main_settings_screen.dart';
+import 'steps_history_screen.dart';
+import 'workout_screen.dart';
+
+// ─── AI Coach models (kept here so nothing else needs to import them) ─────────
 
 @immutable
 class AiCoachAttachment {
   const AiCoachAttachment({required this.type, required this.data});
-
   final String type;
   final Map<String, dynamic> data;
 }
@@ -67,13 +82,11 @@ class AiCoachMessage {
     } else {
       parsedTimestamp = DateTime.now();
     }
-
     final rawAttachmentData = data['attachmentData'];
     Map<String, dynamic>? attachmentData;
     if (rawAttachmentData is Map) {
       attachmentData = Map<String, dynamic>.from(rawAttachmentData);
     }
-
     return AiCoachMessage(
       id: (data['id'] as String?)?.trim().isNotEmpty == true
           ? data['id'] as String
@@ -168,28 +181,23 @@ class AiCoachProvider extends ChangeNotifier {
       notifyListeners();
       return;
     }
-
     _error = null;
     _isLoading = true;
     notifyListeners();
-
     try {
       if (!_didRunPrune) {
         await _pruneExpiredMessages();
         _didRunPrune = true;
       }
-
       final querySnapshot = await collection
           .orderBy('timestamp', descending: true)
           .limit(_pageSize)
           .get();
-
       final parsed = querySnapshot.docs
           .map(AiCoachMessage.fromDoc)
           .toList(growable: false)
           .reversed
           .toList(growable: false);
-
       _messages = parsed;
       _oldestLoadedDoc = querySnapshot.docs.isEmpty
           ? null
@@ -216,25 +224,21 @@ class AiCoachProvider extends ChangeNotifier {
     if (collection == null || !_hasMore || _isLoadingMore || _isLoading) {
       return;
     }
-
     final oldestDoc = _oldestLoadedDoc;
     if (oldestDoc == null) {
       _hasMore = false;
       notifyListeners();
       return;
     }
-
     _isLoadingMore = true;
     _error = null;
     notifyListeners();
-
     try {
       final querySnapshot = await collection
           .orderBy('timestamp', descending: true)
           .startAfterDocument(oldestDoc)
           .limit(_pageSize)
           .get();
-
       if (querySnapshot.docs.isEmpty) {
         _hasMore = false;
       } else {
@@ -259,7 +263,6 @@ class AiCoachProvider extends ChangeNotifier {
   Future<void> sendMessage(String text, {AiCoachAttachment? attachment}) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty && attachment == null) return;
-
     final collection = _messagesCollection;
     final uid = _uid;
     if (collection == null || uid == null || uid.isEmpty) {
@@ -267,10 +270,8 @@ class AiCoachProvider extends ChangeNotifier {
       notifyListeners();
       return;
     }
-
     _error = null;
     _isSending = true;
-
     final userDocRef = collection.doc();
     final now = DateTime.now();
     final userMessage = AiCoachMessage(
@@ -281,17 +282,13 @@ class AiCoachProvider extends ChangeNotifier {
       attachmentType: attachment?.type,
       attachmentData: attachment?.data,
     );
-
     _messages = <AiCoachMessage>[..._messages, userMessage];
     notifyListeners();
-
     try {
       await userDocRef.set(_toFirestoreMessageMap(userMessage));
-
       final assistantText = await _generateAssistantReply(
         latestUserMessage: userMessage,
       );
-
       final parsed = _parseAssistantReply(assistantText);
       if (parsed.summaryText.isNotEmpty) {
         final summaryDocument = _summaryDocument;
@@ -302,12 +299,10 @@ class AiCoachProvider extends ChangeNotifier {
           }, SetOptions(merge: true));
         }
       }
-
       final cleanedAssistantText = parsed.userVisibleText;
       if (cleanedAssistantText.trim().isEmpty) {
         throw StateError('Empty assistant response');
       }
-
       final assistantDocRef = collection.doc();
       final assistantMessage = AiCoachMessage(
         id: assistantDocRef.id,
@@ -315,10 +310,8 @@ class AiCoachProvider extends ChangeNotifier {
         content: cleanedAssistantText.trim(),
         timestamp: DateTime.now(),
       );
-
       _messages = <AiCoachMessage>[..._messages, assistantMessage];
       notifyListeners();
-
       await assistantDocRef.set(_toFirestoreMessageMap(assistantMessage));
     } catch (error) {
       _error = 'Could not send your message right now.';
@@ -353,30 +346,21 @@ class AiCoachProvider extends ChangeNotifier {
   Future<void> _pruneExpiredMessages() async {
     final collection = _messagesCollection;
     if (collection == null) return;
-
     final cutoff = Timestamp.fromDate(
       DateTime.now().subtract(const Duration(days: _retentionDays)),
     );
-
     while (true) {
       final staleSnapshot = await collection
           .where('timestamp', isLessThan: cutoff)
           .limit(_pruneBatchSize)
           .get();
-
-      if (staleSnapshot.docs.isEmpty) {
-        break;
-      }
-
+      if (staleSnapshot.docs.isEmpty) break;
       final batch = _firestore.batch();
       for (final doc in staleSnapshot.docs) {
         batch.delete(doc.reference);
       }
       await batch.commit();
-
-      if (staleSnapshot.docs.length < _pruneBatchSize) {
-        break;
-      }
+      if (staleSnapshot.docs.length < _pruneBatchSize) break;
     }
   }
 
@@ -391,12 +375,10 @@ class AiCoachProvider extends ChangeNotifier {
     if (geminiReply != null && geminiReply.trim().isNotEmpty) {
       return geminiReply;
     }
-
     final grokReply = await _generateWithGrok(conversation: conversation);
     if (grokReply != null && grokReply.trim().isNotEmpty) {
       return grokReply;
     }
-
     throw StateError('All AI providers failed');
   }
 
@@ -410,7 +392,6 @@ class AiCoachProvider extends ChangeNotifier {
         'content': AiPrompts.eliteCoachSystemPrompt,
       },
     ];
-
     for (final message in window) {
       final sanitizedRole = message.role == 'user' ? 'user' : 'assistant';
       final body = StringBuffer(message.content.trim());
@@ -425,7 +406,6 @@ class AiCoachProvider extends ChangeNotifier {
         'content': body.toString().trim(),
       });
     }
-
     return conversation;
   }
 
@@ -433,10 +413,7 @@ class AiCoachProvider extends ChangeNotifier {
     required List<Map<String, String>> conversation,
     required AiCoachMessage latestUserMessage,
   }) async {
-    if (geminiApiKeyForAiCoach.trim().isEmpty) {
-      return null;
-    }
-
+    if (geminiApiKeyForAiCoach.trim().isEmpty) return null;
     final transcript = conversation
         .where((entry) => entry['role'] != 'system')
         .map(
@@ -444,14 +421,12 @@ class AiCoachProvider extends ChangeNotifier {
               '${entry['role'] == 'user' ? 'User' : 'Coach'}: ${entry['content']}',
         )
         .join('\n\n');
-
     final attachmentContext =
         latestUserMessage.attachmentType == null ||
             latestUserMessage.attachmentData == null
         ? ''
         : '\n\nAttachment (${latestUserMessage.attachmentType}): '
               '${jsonEncode(latestUserMessage.attachmentData)}';
-
     final body = <String, dynamic>{
       'contents': [
         {
@@ -466,11 +441,9 @@ class AiCoachProvider extends ChangeNotifier {
       ],
       'generationConfig': <String, dynamic>{'temperature': 0.6, 'topP': 0.9},
     };
-
     final uri = Uri.parse(
       'https://generativelanguage.googleapis.com/v1beta/models/$_geminiModel:generateContent?key=$geminiApiKeyForAiCoach',
     );
-
     try {
       final response = await _httpClient
           .post(
@@ -479,12 +452,7 @@ class AiCoachProvider extends ChangeNotifier {
             body: jsonEncode(body),
           )
           .timeout(const Duration(seconds: 25));
-
-      if (response.statusCode != 200) {
-        debugPrint('AI_COACH: Gemini HTTP ${response.statusCode}');
-        return null;
-      }
-
+      if (response.statusCode != 200) return null;
       final decoded = jsonDecode(response.body) as Map<String, dynamic>;
       final candidates = decoded['candidates'];
       if (candidates is! List || candidates.isEmpty) return null;
@@ -506,10 +474,7 @@ class AiCoachProvider extends ChangeNotifier {
   Future<String?> _generateWithGrok({
     required List<Map<String, String>> conversation,
   }) async {
-    if (grokapikey.trim().isEmpty) {
-      return null;
-    }
-
+    if (grokapikey.trim().isEmpty) return null;
     final payloadMessages = conversation
         .map(
           (entry) => <String, String>{
@@ -518,13 +483,11 @@ class AiCoachProvider extends ChangeNotifier {
           },
         )
         .toList(growable: false);
-
     final body = <String, dynamic>{
       'model': _grokModel,
       'messages': payloadMessages,
       'temperature': 0.6,
     };
-
     try {
       final response = await _httpClient
           .post(
@@ -536,12 +499,7 @@ class AiCoachProvider extends ChangeNotifier {
             body: jsonEncode(body),
           )
           .timeout(const Duration(seconds: 25));
-
-      if (response.statusCode != 200) {
-        debugPrint('AI_COACH: Grok HTTP ${response.statusCode}');
-        return null;
-      }
-
+      if (response.statusCode != 200) return null;
       final decoded = jsonDecode(response.body) as Map<String, dynamic>;
       final choices = decoded['choices'];
       if (choices is! List || choices.isEmpty) return null;
@@ -568,19 +526,364 @@ class _AssistantReplyParseResult {
     required this.userVisibleText,
     required this.summaryText,
   });
-
   final String userVisibleText;
   final String summaryText;
 }
 
-class HomeScreen extends StatelessWidget {
+// ─── HomeScreen ──────────────────────────────────────────────────────────────
+
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
   @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  int _selectedIndex = 0;
+
+  @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      backgroundColor: Color(0xFF0A0A0A),
-      body: SafeArea(child: HomeScreenExShow()),
+    return Scaffold(
+      backgroundColor: const Color(0xFF0A0A0A),
+      body: IndexedStack(
+        index: _selectedIndex,
+        children: const [
+          _HomeTab(),
+          WorkoutScreen(showBottomNavigationBar: false),
+          _ShopPlaceholder(),
+          ChatListScreen(),
+        ],
+      ),
+      bottomNavigationBar: _BottomNav(
+        currentIndex: _selectedIndex,
+        onTap: (index) => setState(() => _selectedIndex = index),
+      ),
+    );
+  }
+}
+
+// ─── Bottom Navigation ────────────────────────────────────────────────────────
+
+class _BottomNav extends StatelessWidget {
+  const _BottomNav({required this.currentIndex, required this.onTap});
+
+  final int currentIndex;
+  final ValueChanged<int> onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    const items = [
+      BottomNavigationBarItem(icon: Icon(Icons.home_rounded), label: 'Home'),
+      BottomNavigationBarItem(
+        icon: Icon(Icons.fitness_center_rounded),
+        label: 'Workout',
+      ),
+      BottomNavigationBarItem(
+        icon: Icon(Icons.shopping_bag_rounded),
+        label: 'Shop',
+      ),
+      BottomNavigationBarItem(
+        icon: Icon(Icons.chat_bubble_rounded),
+        label: 'Chat',
+      ),
+    ];
+
+    return BottomNavigationBar(
+      currentIndex: currentIndex,
+      onTap: onTap,
+      type: BottomNavigationBarType.fixed,
+      backgroundColor: const Color(0xFF111111),
+      selectedItemColor: const Color(0xFFFF3D00),
+      unselectedItemColor: const Color(0xFF5A5A5A),
+      selectedFontSize: 10,
+      unselectedFontSize: 10,
+      elevation: 0,
+      items: items,
+    );
+  }
+}
+
+// ─── Home Tab ─────────────────────────────────────────────────────────────────
+
+class _HomeTab extends StatelessWidget {
+  const _HomeTab();
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(child: _HomeHeader()),
+          const SliverToBoxAdapter(child: SizedBox(height: 16)),
+          SliverToBoxAdapter(child: _StatsRow()),
+          const SliverToBoxAdapter(child: SizedBox(height: 20)),
+          SliverToBoxAdapter(child: _SectionLabel('Today\'s Targets')),
+          const SliverToBoxAdapter(child: SizedBox(height: 12)),
+          const SliverPadding(
+            padding: EdgeInsets.symmetric(horizontal: 16),
+            sliver: SliverToBoxAdapter(child: HomeScreenExShow()),
+          ),
+          const SliverToBoxAdapter(child: SizedBox(height: 24)),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Header ───────────────────────────────────────────────────────────────────
+
+class _HomeHeader extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final workoutProvider = context.watch<WorkoutProvider>();
+    final now = DateTime.now();
+
+    final hour = now.hour;
+    final greeting = hour >= 5 && hour < 12
+        ? 'Good Morning'
+        : hour >= 12 && hour < 17
+        ? 'Good Afternoon'
+        : 'Good Evening';
+
+    final todayIndex = now.weekday - 1;
+    final splitDays = workoutProvider.customSplitDays;
+    final inBounds = todayIndex >= 0 && todayIndex < splitDays.length;
+    final todayName = inBounds ? splitDays[todayIndex] : 'Rest Day';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Left: greeting + date
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                StreamBuilder<DocumentSnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('users')
+                      .doc(FirebaseAuth.instance.currentUser?.uid)
+                      .snapshots(),
+                  builder: (context, snap) {
+                    String name = workoutProvider.user.name;
+                    if (snap.hasData && snap.data!.exists) {
+                      final data = snap.data!.data() as Map<String, dynamic>;
+                      final dn =
+                          (data['display_name'] as String?)?.trim() ?? '';
+                      final un = (data['username'] as String?)?.trim() ?? '';
+                      if (dn.isNotEmpty)
+                        name = dn;
+                      else if (un.isNotEmpty)
+                        name = un;
+                    }
+                    return Text(
+                      '$greeting, $name ',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  DateFormat('EEEE, d MMMM y').format(now),
+                  style: const TextStyle(
+                    color: Color(0xFF888888),
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Row(
+                  children: [
+                    const SizedBox(width: 4),
+                    Text(
+                      todayName,
+                      style: const TextStyle(
+                        color: Color(0xFF888888),
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          // Right: brand + calories
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.bolt_rounded,
+                    color: Color(0xFFFF3D00),
+                    size: 28,
+                  ),
+                  const SizedBox(width: 2),
+                  const Text(
+                    'Brutl',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 32,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  GestureDetector(
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const MainSettingsScreen(),
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.settings_rounded,
+                      color: Color(0xFF555555),
+                      size: 20,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              // Live calorie burn from steps
+              StreamBuilder<int>(
+                stream: StepService.instance.todayStepsStream,
+                initialData: StepService.instance.getTodaySteps(),
+                builder: (context, snap) {
+                  final steps = snap.data ?? 0;
+                  final weightKg = workoutProvider.user.weightKg;
+                  final kcal = (steps * (weightKg * 0.0005)).toStringAsFixed(0);
+                  return Text(
+                    'kcal $kcal 🔥',
+                    style: const TextStyle(
+                      color: Color(0xFFD0D0D0),
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Stats Row (Steps + Calories cards) ──────────────────────────────────────
+
+class _StatsRow extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final workoutProvider = context.watch<WorkoutProvider>();
+    final stepProvider = context.watch<StepProvider>();
+    final stepGoal = workoutProvider.user.dailyStepGoal;
+    final steps = stepProvider.currentSteps;
+    final progress = stepGoal > 0
+        ? (steps / stepGoal).clamp(0.0, 1.0).toDouble()
+        : 0.0;
+
+    final calorieGoal = workoutProvider.user.dailyCalorieGoal;
+    final caloriesBurned = stepProvider.caloriesBurned;
+    final calProgress = calorieGoal > 0
+        ? (caloriesBurned / calorieGoal).clamp(0.0, 1.0)
+        : 0.0;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 6,
+            child: StepsCard(
+              currentSteps: steps,
+              goalSteps: stepGoal,
+              progress: progress,
+              stepsLabel: 'Steps',
+              stepsUnitLabel: 'steps today',
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            flex: 4,
+            child: CaloriesCard(
+              caloriesBurned: caloriesBurned,
+              calorieGoal: calorieGoal,
+              progress: calProgress,
+              caloriesLabel: 'Calories',
+              caloriesUnitLabel: 'kcal burned',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const CaloriesHistoryScreen(),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Section Label ────────────────────────────────────────────────────────────
+
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 18,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Shop Placeholder ─────────────────────────────────────────────────────────
+
+class _ShopPlaceholder extends StatelessWidget {
+  const _ShopPlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return const SafeArea(
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.shopping_bag_rounded,
+              color: Color(0xFF333333),
+              size: 64,
+            ),
+            SizedBox(height: 16),
+            Text(
+              'Shop Coming Soon',
+              style: TextStyle(
+                color: Color(0xFF666666),
+                fontSize: 18,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

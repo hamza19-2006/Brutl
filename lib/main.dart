@@ -17,6 +17,7 @@ import 'providers/brutl_user_provider.dart';
 import 'providers/health_provider.dart';
 import 'providers/workout_nutrition_provider.dart';
 import 'providers/chat_provider.dart';
+import 'providers/ai_coach_provider.dart';
 import 'providers/workout_provider.dart';
 
 Future<void> main() async {
@@ -48,8 +49,9 @@ class BrutlAppBootstrap extends StatelessWidget {
         ChangeNotifierProvider<BrutlUserProvider>(
           create: (_) => BrutlUserProvider(),
         ),
-        ChangeNotifierProvider<ChatProvider>(
-          create: (_) => ChatProvider(),
+        ChangeNotifierProvider<ChatProvider>(create: (_) => ChatProvider()),
+        ChangeNotifierProvider<AiCoachProvider>(
+          create: (_) => AiCoachProvider(),
         ),
       ],
       child: const AppWarmupGate(),
@@ -135,9 +137,7 @@ class _AppWarmupGateState extends State<AppWarmupGate>
       // Mark the user online once warmup is finished. Safe to call
       // pre-auth too — setOnlineStatus is a no-op when uid is empty.
       if (mounted) {
-        unawaited(
-          context.read<ChatProvider>().setOnlineStatus(true),
-        );
+        unawaited(context.read<ChatProvider>().setOnlineStatus(true));
       }
     } catch (error) {
       debugPrint('BRUTL_BOOT: Startup warmup failed — $error');

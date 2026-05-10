@@ -64,17 +64,53 @@ class AppWarmupGate extends StatefulWidget {
   State<AppWarmupGate> createState() => _AppWarmupGateState();
 }
 
-class _AppWarmupGateState extends State<AppWarmupGate> {
+class _AppWarmupGateState extends State<AppWarmupGate>
+    with WidgetsBindingObserver {
   bool _didStartWarmup = false;
+  ChatProvider? _chatProviderRef;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    // Best-effort flip to offline as the app is torn down.
+    final providerRef = _chatProviderRef;
+    if (providerRef != null) {
+      unawaited(providerRef.setOnlineStatus(false));
+    }
+    super.dispose();
+  }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _chatProviderRef = context.read<ChatProvider>();
     if (_didStartWarmup) {
       return;
     }
     _didStartWarmup = true;
     unawaited(_warmupServices());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    final providerRef = _chatProviderRef;
+    if (providerRef == null) return;
+    switch (state) {
+      case AppLifecycleState.resumed:
+        unawaited(providerRef.setOnlineStatus(true));
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+      case AppLifecycleState.hidden:
+        unawaited(providerRef.setOnlineStatus(false));
+    }
   }
 
   Future<void> _warmupServices() async {
@@ -94,6 +130,14 @@ class _AppWarmupGateState extends State<AppWarmupGate> {
       if (mounted) {
         // Bind canonical user document for Settings module.
         await context.read<BrutlUserProvider>().bindToCurrentUser();
+      }
+
+      // Mark the user online once warmup is finished. Safe to call
+      // pre-auth too — setOnlineStatus is a no-op when uid is empty.
+      if (mounted) {
+        unawaited(
+          context.read<ChatProvider>().setOnlineStatus(true),
+        );
       }
     } catch (error) {
       debugPrint('BRUTL_BOOT: Startup warmup failed — $error');

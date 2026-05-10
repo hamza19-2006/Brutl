@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
@@ -13,6 +15,7 @@ import '../screens/calories_history_screen.dart';
 import '../services/calorie_history_service.dart';
 import '../services/database_service.dart';
 import '../services/step_service.dart';
+import '../models/user_data_models.dart';
 import '../widgets/biometric_card.dart';
 import '../widgets/exercise_highlight_card.dart';
 import '../widgets/header_widget.dart';
@@ -375,30 +378,10 @@ class _HomeTabState extends State<_HomeTab> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  if (workoutProvider.topVolumeExercises.isEmpty)
-                    Text(
-                      workoutProvider.noWorkoutMessage,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: const Color(0xFF666666),
-                      ),
-                    )
-                  else
-                    ...workoutProvider.topVolumeExercises.map(
-                      (exercise) => Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: ExerciseHighlightCard(
-                          exercise: exercise,
-                          setsLabel: workoutProvider.homeUi.setsLabel,
-                          repsLabel: workoutProvider.homeUi.repsLabel,
-                          weightLabel: workoutProvider.homeUi.weightLabel,
-                          weightUnit: workoutProvider.homeUi.weightUnit,
-                          isHighlighted:
-                              exercise.name ==
-                              workoutProvider.highlightedExerciseName,
-                          onTap: () => widget.onExerciseTap(exercise.name),
-                        ),
-                      ),
-                    ),
+                  _TodayTopVolumeList(
+                    workoutProvider: workoutProvider,
+                    onExerciseTap: widget.onExerciseTap,
+                  ),
                 ],
               ),
             ),
@@ -450,5 +433,135 @@ class _SimpleTabSurface extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// Streams today's day-doc directly from
+/// `users/{uid}/weeks/week_{selectedWeek}/days/day_{todayIndex+1}` and renders
+/// the top-3 exercises by volume. The provider holds NO exercise state.
+class _TodayTopVolumeList extends StatelessWidget {
+  const _TodayTopVolumeList({
+    required this.workoutProvider,
+    required this.onExerciseTap,
+  });
+
+  final WorkoutProvider workoutProvider;
+  final ValueChanged<String> onExerciseTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final splitDays = workoutProvider.activeSplitDays;
+    final todayIndex = DateTime.now().weekday - 1;
+    final hasDayForToday =
+        todayIndex >= 0 && todayIndex < splitDays.length;
+    final todayName = hasDayForToday ? splitDays[todayIndex] : '';
+    final isRest =
+        !hasDayForToday || todayName.trim().toLowerCase() == 'rest';
+
+    if (uid == null || isRest) {
+      return Text(
+        workoutProvider.noWorkoutMessage,
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+          color: const Color(0xFF666666),
+        ),
+      );
+    }
+
+    final docRef = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('weeks')
+        .doc('week_${workoutProvider.selectedWeek}')
+        .collection('days')
+        .doc('day_${todayIndex + 1}');
+
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: docRef.snapshots(),
+      builder: (context, snapshot) {
+        final raw = (snapshot.data?.data()?['exercises'] as List<dynamic>?) ??
+            const <dynamic>[];
+        final parsed = raw
+            .whereType<Map>()
+            .map((e) => _exerciseFromMap(Map<String, dynamic>.from(e)))
+            .toList(growable: false);
+        final sorted = List<ExerciseModel>.from(parsed)
+          ..sort((a, b) => b.totalVolume.compareTo(a.totalVolume));
+        final top = sorted.take(3).toList(growable: false);
+
+        if (top.isEmpty) {
+          return Text(
+            workoutProvider.noWorkoutMessage,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: const Color(0xFF666666),
+            ),
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: top
+              .map(
+                (exercise) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: ExerciseHighlightCard(
+                    exercise: exercise,
+                    setsLabel: workoutProvider.homeUi.setsLabel,
+                    repsLabel: workoutProvider.homeUi.repsLabel,
+                    weightLabel: workoutProvider.homeUi.weightLabel,
+                    weightUnit: workoutProvider.homeUi.weightUnit,
+                    isHighlighted: exercise.name ==
+                        workoutProvider.highlightedExerciseName,
+                    onTap: () => onExerciseTap(exercise.name),
+                  ),
+                ),
+              )
+              .toList(growable: false),
+        );
+      },
+    );
+  }
+
+  ExerciseModel _exerciseFromMap(Map<String, dynamic> m) {
+    final name = m['name']?.toString() ?? 'Exercise';
+    final sets = (m['sets'] is num)
+        ? (m['sets'] as num).toInt()
+        : int.tryParse(m['sets']?.toString() ?? '') ?? 0;
+    final reps = _parseReps(m['reps']);
+    final weight = _parseWeight(m['weight']);
+    return ExerciseModel(
+      name: name,
+      sets: sets,
+      reps: reps,
+      weight: weight,
+      imageUrl: '',
+    );
+  }
+
+  List<int> _parseReps(Object? raw) {
+    if (raw is List) {
+      return raw
+          .map((e) => e is num
+              ? e.toInt()
+              : int.tryParse(e.toString().trim()) ?? 0)
+          .where((v) => v > 0)
+          .toList(growable: false);
+    }
+    if (raw == null) return const <int>[];
+    final parts = raw
+        .toString()
+        .split(RegExp(r'[^0-9]+'))
+        .where((p) => p.isNotEmpty)
+        .map(int.tryParse)
+        .whereType<int>()
+        .toList(growable: false);
+    return parts;
+  }
+
+  double _parseWeight(Object? raw) {
+    if (raw is num) return raw.toDouble();
+    if (raw == null) return 0.0;
+    final cleaned = raw.toString().replaceAll(RegExp(r'[^0-9.]'), '');
+    return double.tryParse(cleaned) ?? 0.0;
   }
 }

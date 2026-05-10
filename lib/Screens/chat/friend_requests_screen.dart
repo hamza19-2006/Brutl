@@ -46,7 +46,7 @@ class FriendRequestsScreen extends StatelessWidget {
           : ListView.separated(
               padding: const EdgeInsets.all(AppSpacing.lg),
               itemCount: requests.length,
-              separatorBuilder: (_, __) =>
+              separatorBuilder: (_, _) =>
                   const SizedBox(height: AppSpacing.sm),
               itemBuilder: (ctx, index) {
                 final request = requests[index];
@@ -146,8 +146,8 @@ class _ActionButton extends StatelessWidget {
         width: 40,
         height: 40,
         decoration: BoxDecoration(
-          color: color.withOpacity(0.15),
-          border: Border.all(color: color.withOpacity(0.4)),
+          color: color.withValues(alpha: 0.15),
+          border: Border.all(color: color.withValues(alpha: 0.4)),
           borderRadius: BorderRadius.circular(AppSpacing.borderRadiusSmall),
         ),
         child: Icon(icon, color: color, size: 22),

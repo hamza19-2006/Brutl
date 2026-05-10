@@ -20,6 +20,11 @@ class MessageModel {
     required this.payload,
     this.status = 'sent',
     this.readAt,
+    this.replyToId,
+    this.replyToSenderId,
+    this.replyToPreview,
+    this.reactions = const <String, List<String>>{},
+    this.isDeleted = false,
   });
 
   final String id;
@@ -37,6 +42,50 @@ class MessageModel {
   final String status; // sent, delivered, read
   final DateTime? readAt;
 
+  // ── Reply metadata ────────────────────────────────────────────────────────
+  /// id of the message this one is replying to (null if not a reply).
+  final String? replyToId;
+  /// senderId of the message being replied to.
+  final String? replyToSenderId;
+  /// short preview text of the message being replied to.
+  final String? replyToPreview;
+
+  // ── Reactions ─────────────────────────────────────────────────────────────
+  /// Map of emoji -> list of UIDs that reacted with it.
+  final Map<String, List<String>> reactions;
+
+  // ── Soft delete ───────────────────────────────────────────────────────────
+  /// When true, render as 'This message was deleted'. Original payload is
+  /// cleared by the provider on delete.
+  final bool isDeleted;
+
+  bool get isReply => replyToId != null && replyToId!.isNotEmpty;
+  bool get hasReactions => reactions.isNotEmpty;
+
+  MessageModel copyWith({
+    String? status,
+    DateTime? readAt,
+    Map<String, List<String>>? reactions,
+    bool? isDeleted,
+    Map<String, dynamic>? payload,
+  }) {
+    return MessageModel(
+      id: id,
+      senderId: senderId,
+      timestamp: timestamp,
+      expiresAt: expiresAt,
+      type: type,
+      payload: payload ?? this.payload,
+      status: status ?? this.status,
+      readAt: readAt ?? this.readAt,
+      replyToId: replyToId,
+      replyToSenderId: replyToSenderId,
+      replyToPreview: replyToPreview,
+      reactions: reactions ?? this.reactions,
+      isDeleted: isDeleted ?? this.isDeleted,
+    );
+  }
+
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
       'id': id,
@@ -47,10 +96,26 @@ class MessageModel {
       'payload': payload,
       'status': status,
       'readAt': readAt != null ? Timestamp.fromDate(readAt!) : null,
+      if (replyToId != null) 'replyToId': replyToId,
+      if (replyToSenderId != null) 'replyToSenderId': replyToSenderId,
+      if (replyToPreview != null) 'replyToPreview': replyToPreview,
+      if (reactions.isNotEmpty) 'reactions': reactions,
+      if (isDeleted) 'isDeleted': true,
     };
   }
 
   factory MessageModel.fromJson(Map<String, dynamic> json) {
+    final rawReactions = json['reactions'];
+    final parsedReactions = <String, List<String>>{};
+    if (rawReactions is Map) {
+      rawReactions.forEach((key, value) {
+        if (value is List) {
+          parsedReactions[key.toString()] =
+              value.map((e) => e.toString()).toList();
+        }
+      });
+    }
+
     return MessageModel(
       id: json['id'] as String? ?? '',
       senderId: json['senderId'] as String? ?? '',
@@ -62,6 +127,11 @@ class MessageModel {
       ),
       status: json['status'] as String? ?? 'sent',
       readAt: _toNullableDateTime(json['readAt']),
+      replyToId: json['replyToId'] as String?,
+      replyToSenderId: json['replyToSenderId'] as String?,
+      replyToPreview: json['replyToPreview'] as String?,
+      reactions: parsedReactions,
+      isDeleted: (json['isDeleted'] as bool?) ?? false,
     );
   }
 
@@ -106,8 +176,11 @@ class FriendModel {
     this.displayName = '',
     this.username = '',
     this.photoUrl = '',
-    DateTime? addedAt,
-  }) : addedAt = addedAt ?? null;
+    this.addedAt,
+    this.isPinned = false,
+    this.isMuted = false,
+    this.isBlocked = false,
+  });
 
   final String uid;
   final String nickname;
@@ -115,6 +188,13 @@ class FriendModel {
   final String username;
   final String photoUrl;
   final DateTime? addedAt;
+
+  /// Pinned chats sort to the top of the chat list.
+  final bool isPinned;
+  /// Muted chats suppress notifications and don't show unread badges.
+  final bool isMuted;
+  /// Blocked friends are hidden from the chat list and cannot send messages.
+  final bool isBlocked;
 
   /// The name to display in UI: nickname first, then displayName, then @username.
   String get resolvedName => nickname.isNotEmpty
@@ -133,6 +213,9 @@ class FriendModel {
       'addedAt': addedAt != null
           ? Timestamp.fromDate(addedAt!)
           : FieldValue.serverTimestamp(),
+      'isPinned': isPinned,
+      'isMuted': isMuted,
+      'isBlocked': isBlocked,
     };
   }
 
@@ -144,10 +227,18 @@ class FriendModel {
       username: json['username'] as String? ?? '',
       photoUrl: json['photoUrl'] as String? ?? '',
       addedAt: MessageModel._toDateTime(json['addedAt']),
+      isPinned: (json['isPinned'] as bool?) ?? false,
+      isMuted: (json['isMuted'] as bool?) ?? false,
+      isBlocked: (json['isBlocked'] as bool?) ?? false,
     );
   }
 
-  FriendModel copyWith({String? nickname}) {
+  FriendModel copyWith({
+    String? nickname,
+    bool? isPinned,
+    bool? isMuted,
+    bool? isBlocked,
+  }) {
     return FriendModel(
       uid: uid,
       nickname: nickname ?? this.nickname,
@@ -155,6 +246,37 @@ class FriendModel {
       username: username,
       photoUrl: photoUrl,
       addedAt: addedAt,
+      isPinned: isPinned ?? this.isPinned,
+      isMuted: isMuted ?? this.isMuted,
+      isBlocked: isBlocked ?? this.isBlocked,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Presence (online / last-seen)
+// ---------------------------------------------------------------------------
+
+@immutable
+class PresenceModel {
+  const PresenceModel({
+    required this.isOnline,
+    required this.lastSeen,
+  });
+
+  final bool isOnline;
+  final DateTime? lastSeen;
+
+  static const PresenceModel offline = PresenceModel(
+    isOnline: false,
+    lastSeen: null,
+  );
+
+  factory PresenceModel.fromJson(Map<String, dynamic>? json) {
+    if (json == null) return PresenceModel.offline;
+    return PresenceModel(
+      isOnline: (json['isOnline'] as bool?) ?? false,
+      lastSeen: MessageModel._toNullableDateTime(json['lastSeen']),
     );
   }
 }

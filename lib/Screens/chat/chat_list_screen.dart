@@ -116,21 +116,39 @@ class _ChatListScreenState extends State<ChatListScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 _ContextMenuItem(
+                  icon: friend.isPinned
+                      ? Icons.push_pin
+                      : Icons.push_pin_outlined,
+                  label: friend.isPinned ? 'Unpin Chat' : 'Pin Chat',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    context
+                        .read<ChatProvider>()
+                        .setPinnedFriend(friend.uid, !friend.isPinned);
+                  },
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                _ContextMenuItem(
+                  icon: friend.isMuted
+                      ? Icons.notifications_off_rounded
+                      : Icons.notifications_active_rounded,
+                  label: friend.isMuted
+                      ? 'Unmute Notifications'
+                      : 'Mute Notifications',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    context
+                        .read<ChatProvider>()
+                        .setMutedFriend(friend.uid, !friend.isMuted);
+                  },
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                _ContextMenuItem(
                   icon: Icons.edit_rounded,
                   label: 'Edit Name',
                   onTap: () {
                     Navigator.pop(ctx);
                     _showEditNicknameDialog(friend);
-                  },
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                _ContextMenuItem(
-                  icon: Icons.person_remove_rounded,
-                  label: 'Remove Friend',
-                  isDestructive: true,
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _showRemoveFriendDialog(friend);
                   },
                 ),
                 const SizedBox(height: AppSpacing.sm),
@@ -143,11 +161,80 @@ class _ChatListScreenState extends State<ChatListScreen> {
                     _showClearChatDialog(friend);
                   },
                 ),
+                const SizedBox(height: AppSpacing.sm),
+                _ContextMenuItem(
+                  icon: Icons.block_rounded,
+                  label: friend.isBlocked
+                      ? 'Unblock User'
+                      : 'Block User',
+                  isDestructive: !friend.isBlocked,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _confirmBlock(friend);
+                  },
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                _ContextMenuItem(
+                  icon: Icons.person_remove_rounded,
+                  label: 'Remove Friend',
+                  isDestructive: true,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _showRemoveFriendDialog(friend);
+                  },
+                ),
               ],
             ),
           ),
         );
       },
+    );
+  }
+
+  void _confirmBlock(FriendModel friend) {
+    final shouldBlock = !friend.isBlocked;
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.backgroundSecondary,
+        title: Text(
+          shouldBlock ? 'Block ${friend.resolvedName}?' : 'Unblock User',
+          style: AppTextStyles.headingMedium(
+            color: shouldBlock ? AppColors.statusError : AppColors.textPrimary,
+          ),
+        ),
+        content: Text(
+          shouldBlock
+              ? 'They will no longer appear in your chat list, and their messages will be hidden.'
+              : 'They will appear in your chat list again.',
+          style: AppTextStyles.bodyMedium(color: AppColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(
+              'Cancel',
+              style: AppTextStyles.bodyMedium(color: AppColors.textSecondary),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              context
+                  .read<ChatProvider>()
+                  .setBlockedFriend(friend.uid, shouldBlock);
+              Navigator.pop(ctx);
+            },
+            child: Text(
+              shouldBlock ? 'Block' : 'Unblock',
+              style: AppTextStyles.bodyMedium(
+                color: shouldBlock
+                    ? AppColors.statusError
+                    : AppColors.accentPrimary,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -333,8 +420,15 @@ class _ChatListScreenState extends State<ChatListScreen> {
   @override
   Widget build(BuildContext context) {
     final chatProvider = context.watch<ChatProvider>();
-    final friendsList = chatProvider.friends;
-    final myUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+
+    // Filter out blocked friends, then sort: pinned first, then by
+    // existing order (Firestore already returns by addedAt desc).
+    final visibleFriends =
+        chatProvider.friends.where((f) => !f.isBlocked).toList();
+    visibleFriends.sort((a, b) {
+      if (a.isPinned == b.isPinned) return 0;
+      return a.isPinned ? -1 : 1;
+    });
 
     return PopScope<void>(
       canPop: !_isSearchUiActive,
@@ -347,47 +441,15 @@ class _ChatListScreenState extends State<ChatListScreen> {
         appBar: AppBar(
           backgroundColor: AppColors.backgroundPrimary,
           elevation: 0,
-          leading: myUid.isEmpty
-              ? _BellIcon(
-                  count: 0,
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute<void>(
-                      builder: (_) => const FriendRequestsScreen(),
-                    ),
-                  ),
-                )
-              : StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                  stream: FirebaseFirestore.instance
-                      .collection('users')
-                      .doc(myUid)
-                      .collection('friend_requests')
-                      .where('status', isEqualTo: 'pending')
-                      .snapshots(),
-                  builder: (context, snapshot) {
-                    int pendingCount;
-                    if (snapshot.hasError) {
-                      debugPrint(
-                        'Friend requests stream error in ChatListScreen: ${snapshot.error}',
-                      );
-                      pendingCount = chatProvider.pendingRequestCount;
-                    } else if (snapshot.connectionState ==
-                        ConnectionState.waiting) {
-                      pendingCount = chatProvider.pendingRequestCount;
-                    } else {
-                      pendingCount = snapshot.data?.docs.length ?? 0;
-                    }
-                    return _BellIcon(
-                      count: pendingCount,
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute<void>(
-                          builder: (_) => const FriendRequestsScreen(),
-                        ),
-                      ),
-                    );
-                  },
-                ),
+          leading: _BellIcon(
+            count: chatProvider.pendingRequestCount,
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute<void>(
+                builder: (_) => const FriendRequestsScreen(),
+              ),
+            ),
+          ),
           title: Text('Chat', style: AppTextStyles.headingLarge()),
           centerTitle: true,
           actions: [
@@ -474,7 +536,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 results: _searchResults,
                 isLoading: _isSearching,
                 sentRequests: _sentRequests,
-                existingFriendUids: friendsList.map((f) => f.uid).toSet(),
+                existingFriendUids:
+                    visibleFriends.map((f) => f.uid).toSet(),
                 onAdd: _sendRequest,
               ),
 
@@ -482,11 +545,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
             Expanded(
               child: ListView.builder(
                 padding: const EdgeInsets.only(top: AppSpacing.sm),
-                itemCount: 1 + friendsList.length, // AI + friends
+                itemCount: 1 + visibleFriends.length, // AI + friends
                 itemBuilder: (ctx, index) {
                   if (index == 0) return _AiChatTile();
 
-                  final friend = friendsList[index - 1];
+                  final friend = visibleFriends[index - 1];
                   return _FriendChatTile(
                     friend: friend,
                     onTap: () => Navigator.push(
@@ -643,8 +706,8 @@ class _FriendChatTileState extends State<_FriendChatTile> {
   }
 
   String _unreadLabel(int count) {
-    if (count >= 4) return '4+ new messages';
     if (count == 1) return '1 new message';
+    if (count > 99) return '99+ new messages';
     return '$count new messages';
   }
 
@@ -656,7 +719,10 @@ class _FriendChatTileState extends State<_FriendChatTile> {
         final chatData = snapshot.data?.data() ?? const <String, dynamic>{};
         final unreadCount =
             (chatData['unreadCount_$_myUid'] as num?)?.toInt() ?? 0;
+        // Muted chats keep tracking unread internally but don't surface a
+        // badge – the unread state still bolds the preview text.
         final hasUnread = unreadCount > 0;
+        final showBadge = hasUnread && !widget.friend.isMuted;
 
         final lastMessage = (chatData['lastMessage'] as String?)?.trim() ?? '';
         final subtitleText = lastMessage.isNotEmpty
@@ -699,11 +765,33 @@ class _FriendChatTileState extends State<_FriendChatTile> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        widget.friend.resolvedName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppTextStyles.headingSmall(),
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              widget.friend.resolvedName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppTextStyles.headingSmall(),
+                            ),
+                          ),
+                          if (widget.friend.isPinned) ...[
+                            const SizedBox(width: 6),
+                            const Icon(
+                              Icons.push_pin,
+                              size: 14,
+                              color: AppColors.accentPrimary,
+                            ),
+                          ],
+                          if (widget.friend.isMuted) ...[
+                            const SizedBox(width: 6),
+                            const Icon(
+                              Icons.notifications_off_rounded,
+                              size: 14,
+                              color: AppColors.textTertiary,
+                            ),
+                          ],
+                        ],
                       ),
                       const SizedBox(height: 2),
                       Text(
@@ -712,11 +800,11 @@ class _FriendChatTileState extends State<_FriendChatTile> {
                         overflow: TextOverflow.ellipsis,
                         style:
                             AppTextStyles.bodySmall(
-                              color: hasUnread
+                              color: showBadge
                                   ? AppColors.textPrimary
                                   : AppColors.textTertiary,
                             ).copyWith(
-                              fontWeight: hasUnread
+                              fontWeight: showBadge
                                   ? FontWeight.w700
                                   : FontWeight.w400,
                             ),
@@ -724,7 +812,7 @@ class _FriendChatTileState extends State<_FriendChatTile> {
                     ],
                   ),
                 ),
-                if (hasUnread)
+                if (showBadge)
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: AppSpacing.sm,

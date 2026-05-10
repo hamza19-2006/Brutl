@@ -396,6 +396,28 @@ class _FirestoreEditExercisesScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: AppColors.backgroundPrimary,
       appBar: buildSettingsAppBar(context, '$dayName Exercises'),
+      floatingActionButton: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+        stream: docRef.snapshots(),
+        builder: (context, snapshot) {
+          final rawExercises =
+              (snapshot.data?.data()?['exercises'] as List<dynamic>?) ??
+                  const [];
+          final exercises = rawExercises
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList();
+          return FloatingActionButton.extended(
+            onPressed: () => _showAddDialog(context, docRef, exercises),
+            backgroundColor: AppColors.accentPrimary,
+            foregroundColor: Colors.white,
+            icon: const Icon(Icons.add),
+            label: Text(
+              'Add Exercise',
+              style: AppTextStyles.labelLarge(color: Colors.white),
+            ),
+          );
+        },
+      ),
       body: SafeArea(
         child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
           stream: docRef.snapshots(),
@@ -419,7 +441,8 @@ class _FirestoreEditExercisesScreen extends StatelessWidget {
             if (exercises.isEmpty) {
               return Center(
                 child: Text(
-                  'No exercises for this day.',
+                  'No exercises for this day.\nTap "Add Exercise" to create one.',
+                  textAlign: TextAlign.center,
                   style: AppTextStyles.bodyMedium(),
                 ),
               );
@@ -502,6 +525,138 @@ class _FirestoreEditExercisesScreen extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _showAddDialog(
+    BuildContext context,
+    DocumentReference<Map<String, dynamic>> docRef,
+    List<Map<String, dynamic>> exercises,
+  ) async {
+    final nameCtrl = TextEditingController();
+    final setsCtrl = TextEditingController(text: '3');
+    final repsCtrl = TextEditingController(text: '8-12');
+    final weightCtrl = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.backgroundSecondary,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppSpacing.borderRadiusLarge),
+          side: const BorderSide(color: AppColors.borderStrong),
+        ),
+        title: Text('Add Exercise', style: AppTextStyles.headingMedium()),
+        content: SingleChildScrollView(
+          child: Form(
+            key: formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  controller: nameCtrl,
+                  autofocus: true,
+                  textCapitalization: TextCapitalization.words,
+                  decoration: const InputDecoration(
+                    hintText: 'Exercise name',
+                    labelText: 'Name',
+                  ),
+                  validator: (v) =>
+                      (v == null || v.trim().isEmpty) ? 'Required' : null,
+                ),
+                const SizedBox(height: AppSpacing.md),
+                TextFormField(
+                  controller: setsCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    hintText: 'e.g. 3',
+                    labelText: 'Sets',
+                  ),
+                  validator: (v) {
+                    final n = int.tryParse((v ?? '').trim());
+                    if (n == null || n <= 0) return 'Enter a positive number';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: AppSpacing.md),
+                TextFormField(
+                  controller: repsCtrl,
+                  decoration: const InputDecoration(
+                    hintText: 'e.g. 8-12 or 10',
+                    labelText: 'Reps',
+                  ),
+                  validator: (v) =>
+                      (v == null || v.trim().isEmpty) ? 'Required' : null,
+                ),
+                const SizedBox(height: AppSpacing.md),
+                TextFormField(
+                  controller: weightCtrl,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    hintText: 'Optional',
+                    labelText: 'Weight (kg)',
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text(
+              'Cancel',
+              style: AppTextStyles.bodyMedium(color: AppColors.textSecondary),
+            ),
+          ),
+          TextButton(
+            onPressed: () async {
+              if (!(formKey.currentState?.validate() ?? false)) return;
+              final newExercise = <String, dynamic>{
+                'id': 'ex_${DateTime.now().microsecondsSinceEpoch}',
+                'name': nameCtrl.text.trim(),
+                'sets': int.tryParse(setsCtrl.text.trim()) ?? 3,
+                'reps': repsCtrl.text.trim(),
+                'weight': weightCtrl.text.trim(),
+                'weightUnit': 'Kg',
+                'categoryType': 'isolation',
+                'splitName': dayName,
+                'isSynced': true,
+              };
+              final updated = <Map<String, dynamic>>[...exercises, newExercise];
+              Navigator.of(ctx).pop();
+              await docRef.set(<String, dynamic>{
+                'exercises': updated,
+                'updatedAt': FieldValue.serverTimestamp(),
+              }, SetOptions(merge: true));
+              if (context.mounted) {
+                ScaffoldMessenger.of(context)
+                  ..hideCurrentSnackBar()
+                  ..showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        '"${newExercise['name']}" added.',
+                      ),
+                      backgroundColor: AppColors.statusSuccess,
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+              }
+            },
+            child: Text(
+              'Add',
+              style: AppTextStyles.headingSmall(color: AppColors.accentPrimary),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    nameCtrl.dispose();
+    setsCtrl.dispose();
+    repsCtrl.dispose();
+    weightCtrl.dispose();
   }
 
   Future<void> _showRenameDialog(

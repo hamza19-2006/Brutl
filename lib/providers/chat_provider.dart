@@ -279,7 +279,11 @@ class ChatProvider extends ChangeNotifier {
   // Messaging
   // -----------------------------------------------------------------------
 
-  Future<void> sendTextMessage(String chatId, String text) async {
+  Future<void> sendTextMessage(
+    String chatId,
+    String text, {
+    MessageModel? replyTo,
+  }) async {
     if (_uid.isEmpty || text.trim().isEmpty) return;
 
     final now = DateTime.now();
@@ -300,6 +304,9 @@ class ChatProvider extends ChangeNotifier {
       type: 'text',
       payload: {'text': text.trim()},
       status: 'sent',
+      replyToId: replyTo?.id,
+      replyToSenderId: replyTo?.senderId,
+      replyToPreview: replyTo == null ? null : _previewForMessage(replyTo),
     );
 
     // Optimistic
@@ -507,6 +514,363 @@ class ChatProvider extends ChangeNotifier {
   }
 
   // -----------------------------------------------------------------------
+  // Fitness USP shares (PR / Streak / Challenge)
+  // -----------------------------------------------------------------------
+
+  /// Sends a Personal Record bubble. The optional [previousBest] enables a
+  /// "+15 kg from last PR" delta inside the bubble.
+  Future<void> sendPRMessage(
+    String chatId, {
+    required String exerciseName,
+    required double weight,
+    required String unit,
+    required int reps,
+    double? previousBest,
+  }) async {
+    await sendWidgetMessage(chatId, 'pr_share', <String, dynamic>{
+      'exerciseName': exerciseName,
+      'weight': weight,
+      'unit': unit,
+      'reps': reps,
+      if (previousBest != null) 'previousBest': previousBest,
+      'achievedAt': Timestamp.fromDate(DateTime.now()),
+    });
+  }
+
+  /// Sends a streak bubble (workout, calorie or generic streak).
+  Future<void> sendStreakMessage(
+    String chatId, {
+    required int streakDays,
+    required String streakType, // 'workout' | 'calories' | 'general'
+    String? note,
+  }) async {
+    await sendWidgetMessage(chatId, 'streak_share', <String, dynamic>{
+      'streakDays': streakDays,
+      'streakType': streakType,
+      if (note != null && note.isNotEmpty) 'note': note,
+      'sharedAt': Timestamp.fromDate(DateTime.now()),
+    });
+  }
+
+  /// Creates a challenge document under
+  /// `chats/{chatId}/challenges/{challengeId}` and posts a referencing bubble
+  /// in the chat. Both participants can later update their own progress via
+  /// [incrementChallengeProgress].
+  Future<void> startChallenge(
+    String chatId,
+    String friendUid, {
+    required String title,
+    required String type, // 'workout' | 'calories' | 'steps' | 'consistency'
+    required int durationDays,
+    required int targetValue,
+  }) async {
+    if (_uid.isEmpty || friendUid.isEmpty) return;
+
+    final challengeRef = _db
+        .collection('chats')
+        .doc(chatId)
+        .collection('challenges')
+        .doc();
+    final now = DateTime.now();
+    final endDate = now.add(Duration(days: durationDays));
+    final participants = _participantsFromChatId(chatId);
+
+    final challengeDoc = <String, dynamic>{
+      'title': title,
+      'type': type,
+      'durationDays': durationDays,
+      'targetValue': targetValue,
+      'startDate': Timestamp.fromDate(now),
+      'endDate': Timestamp.fromDate(endDate),
+      'participants': participants,
+      'createdBy': _uid,
+      'status': 'active',
+      'progress': <String, dynamic>{
+        _uid: <String, dynamic>{
+          'currentValue': 0,
+          'lastUpdated': null,
+        },
+        friendUid: <String, dynamic>{
+          'currentValue': 0,
+          'lastUpdated': null,
+        },
+      },
+    };
+
+    try {
+      await challengeRef.set(challengeDoc);
+    } catch (error, stackTrace) {
+      debugPrint('Failed to create challenge doc: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      return;
+    }
+
+    // The chat bubble references the challenge by id so the bubble can
+    // subscribe to live progress updates.
+    await sendWidgetMessage(chatId, 'challenge', <String, dynamic>{
+      'challengeId': challengeRef.id,
+      'title': title,
+      'type': type,
+      'durationDays': durationDays,
+      'targetValue': targetValue,
+      'startDate': Timestamp.fromDate(now),
+      'endDate': Timestamp.fromDate(endDate),
+      'createdBy': _uid,
+    });
+  }
+
+  /// Real-time stream for a single challenge document.
+  Stream<DocumentSnapshot<Map<String, dynamic>>> challengeStream(
+    String chatId,
+    String challengeId,
+  ) {
+    return _db
+        .collection('chats')
+        .doc(chatId)
+        .collection('challenges')
+        .doc(challengeId)
+        .snapshots();
+  }
+
+  /// Increments the current user's progress on a challenge by [delta].
+  /// Negative deltas are allowed for corrections. The status field flips to
+  /// `completed` automatically when both participants reach the target.
+  Future<void> incrementChallengeProgress(
+    String chatId,
+    String challengeId,
+    int delta,
+  ) async {
+    if (_uid.isEmpty || delta == 0) return;
+    final ref = _db
+        .collection('chats')
+        .doc(chatId)
+        .collection('challenges')
+        .doc(challengeId);
+
+    try {
+      await _db.runTransaction<void>((tx) async {
+        final snap = await tx.get(ref);
+        if (!snap.exists) return;
+        final data = snap.data() ?? const <String, dynamic>{};
+
+        final progressRaw =
+            (data['progress'] as Map<dynamic, dynamic>?) ?? const {};
+        final progress = <String, dynamic>{};
+        progressRaw.forEach((key, value) {
+          progress[key.toString()] = Map<String, dynamic>.from(
+            (value as Map<dynamic, dynamic>?) ?? const {},
+          );
+        });
+
+        final myProgress = Map<String, dynamic>.from(
+          (progress[_uid] as Map<String, dynamic>?) ??
+              <String, dynamic>{'currentValue': 0},
+        );
+        final current = (myProgress['currentValue'] as num?)?.toInt() ?? 0;
+        final next = (current + delta).clamp(0, 1 << 30);
+        myProgress['currentValue'] = next;
+        myProgress['lastUpdated'] = FieldValue.serverTimestamp();
+        progress[_uid] = myProgress;
+
+        // Auto-complete when both participants hit the target.
+        final target = (data['targetValue'] as num?)?.toInt() ?? 0;
+        var allComplete = target > 0;
+        for (final entry in progress.entries) {
+          final v =
+              (entry.value as Map<String, dynamic>)['currentValue'] as num?;
+          if ((v?.toInt() ?? 0) < target) {
+            allComplete = false;
+            break;
+          }
+        }
+
+        tx.update(ref, <String, dynamic>{
+          'progress': progress,
+          if (allComplete) 'status': 'completed',
+        });
+      });
+    } catch (error, stackTrace) {
+      debugPrint('Failed to update challenge progress: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Reactions / Delete
+  // -----------------------------------------------------------------------
+
+  /// Toggles a single emoji reaction on a message. If the current user has
+  /// already reacted with that emoji, it is removed; otherwise it is added
+  /// (replacing any other emoji from this user on the same message so each
+  /// user only ever has one active reaction per message).
+  Future<void> toggleReaction(
+    String chatId,
+    String messageId,
+    String emoji,
+  ) async {
+    if (_uid.isEmpty || emoji.isEmpty) return;
+    final msgRef = _db
+        .collection('chats')
+        .doc(chatId)
+        .collection('messages')
+        .doc(messageId);
+
+    try {
+      await _db.runTransaction<void>((tx) async {
+        final snap = await tx.get(msgRef);
+        if (!snap.exists) return;
+        final data = snap.data() ?? const <String, dynamic>{};
+        final raw = (data['reactions'] as Map<dynamic, dynamic>?) ?? const {};
+
+        final current = <String, List<String>>{};
+        raw.forEach((key, value) {
+          if (value is List) {
+            current[key.toString()] =
+                value.map((e) => e.toString()).toList();
+          }
+        });
+
+        // Remove this UID from every emoji first (one reaction per user).
+        for (final key in current.keys.toList()) {
+          current[key] = current[key]!.where((u) => u != _uid).toList();
+          if (current[key]!.isEmpty) current.remove(key);
+        }
+
+        // Was the user already on this emoji? `current` no longer has them, so
+        // we determine 'toggle off' by comparing against the original list.
+        final originalList = (raw[emoji] as List?)
+                ?.map((e) => e.toString())
+                .toList() ??
+            const <String>[];
+        final wasReacted = originalList.contains(_uid);
+
+        if (!wasReacted) {
+          current[emoji] = [...(current[emoji] ?? const <String>[]), _uid];
+        }
+
+        tx.update(msgRef, <String, dynamic>{'reactions': current});
+      });
+    } catch (error, stackTrace) {
+      debugPrint('Failed to toggle reaction on $messageId: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
+  }
+
+  /// Soft-deletes a message authored by the current user. The bubble will
+  /// render as 'This message was deleted' and the chat preview is cleared.
+  Future<void> deleteMessage(String chatId, MessageModel message) async {
+    if (_uid.isEmpty || message.senderId != _uid) return;
+    final msgRef = _db
+        .collection('chats')
+        .doc(chatId)
+        .collection('messages')
+        .doc(message.id);
+    final chatRef = _db.collection('chats').doc(chatId);
+
+    try {
+      final batch = _db.batch();
+      batch.update(msgRef, <String, dynamic>{
+        'isDeleted': true,
+        'payload': <String, dynamic>{'text': ''},
+      });
+      // If this was the latest preview, replace it.
+      batch.set(chatRef, <String, dynamic>{
+        'lastMessage': 'Message deleted',
+      }, SetOptions(merge: true));
+      await batch.commit();
+    } catch (error, stackTrace) {
+      debugPrint('Failed to delete message ${message.id}: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Pin / Mute / Block
+  // -----------------------------------------------------------------------
+
+  Future<void> _setFriendFlag(
+    String friendUid,
+    String field,
+    bool value,
+  ) async {
+    if (_uid.isEmpty || friendUid.isEmpty) return;
+
+    // Optimistic local update.
+    _friends = _friends.map((f) {
+      if (f.uid != friendUid) return f;
+      switch (field) {
+        case 'isPinned':
+          return f.copyWith(isPinned: value);
+        case 'isMuted':
+          return f.copyWith(isMuted: value);
+        case 'isBlocked':
+          return f.copyWith(isBlocked: value);
+      }
+      return f;
+    }).toList();
+    notifyListeners();
+
+    try {
+      await _db
+          .collection('users')
+          .doc(_uid)
+          .collection('friends')
+          .doc(friendUid)
+          .set(<String, dynamic>{field: value}, SetOptions(merge: true));
+    } catch (error, stackTrace) {
+      debugPrint('Failed to update $field on friend $friendUid: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
+  }
+
+  Future<void> setPinnedFriend(String friendUid, bool isPinned) =>
+      _setFriendFlag(friendUid, 'isPinned', isPinned);
+
+  Future<void> setMutedFriend(String friendUid, bool isMuted) =>
+      _setFriendFlag(friendUid, 'isMuted', isMuted);
+
+  Future<void> setBlockedFriend(String friendUid, bool isBlocked) =>
+      _setFriendFlag(friendUid, 'isBlocked', isBlocked);
+
+  // -----------------------------------------------------------------------
+  // Presence (online / last-seen)
+  // -----------------------------------------------------------------------
+
+  /// Updates the current user's presence document. Called from the app
+  /// lifecycle observer in `main.dart` so it reflects foreground/background
+  /// transitions.
+  Future<void> setOnlineStatus(bool isOnline) async {
+    if (_uid.isEmpty) return;
+    try {
+      await _db.collection('users').doc(_uid).set(<String, dynamic>{
+        'presence': <String, dynamic>{
+          'isOnline': isOnline,
+          'lastSeen': FieldValue.serverTimestamp(),
+        },
+      }, SetOptions(merge: true));
+    } catch (error, stackTrace) {
+      debugPrint('Failed to update presence for $_uid: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
+  }
+
+  /// Streams a friend's presence (online flag + last-seen timestamp).
+  Stream<PresenceModel> presenceStream(String uid) {
+    if (uid.isEmpty) return Stream<PresenceModel>.value(PresenceModel.offline);
+    return _db.collection('users').doc(uid).snapshots().map((snap) {
+      final data = snap.data();
+      final raw = data == null ? null : data['presence'];
+      if (raw is Map<String, dynamic>) return PresenceModel.fromJson(raw);
+      if (raw is Map) {
+        return PresenceModel.fromJson(
+          Map<String, dynamic>.from(raw),
+        );
+      }
+      return PresenceModel.offline;
+    });
+  }
+
+  // -----------------------------------------------------------------------
   // User search (for friend discovery)
   // -----------------------------------------------------------------------
 
@@ -571,9 +935,54 @@ class ChatProvider extends ChangeNotifier {
   }
 
   String _widgetPreviewText(String type, Map<String, dynamic> payload) {
-    if (type == 'meal_share') return 'Shared a meal';
-    if (type == 'exercise_share') return 'Shared a workout';
+    if (type == 'meal_share') return '🍽 Shared a meal';
+    if (type == 'exercise_share') return '💪 Shared a workout';
+    if (type == 'pr_share') {
+      final exercise = payload['exerciseName'] as String? ?? 'PR';
+      final weight = payload['weight'];
+      final unit = payload['unit'] as String? ?? 'kg';
+      return '🏆 New PR: $exercise ${weight ?? ''}$unit';
+    }
+    if (type == 'streak_share') {
+      final days = payload['streakDays'] ?? 0;
+      return '🔥 $days-day streak';
+    }
+    if (type == 'challenge') {
+      final title = payload['title'] as String? ?? 'Challenge';
+      return '⚡ Challenge: $title';
+    }
     if (type == 'text') return (payload['text'] as String? ?? '').trim();
     return 'Shared an item';
+  }
+
+  /// Short, single-line preview used inside reply chips.
+  String _previewForMessage(MessageModel message) {
+    if (message.isDeleted) return 'Message deleted';
+    switch (message.type) {
+      case 'meal_share':
+        final name = message.payload['mealName'] as String? ?? 'a meal';
+        return '🍽 Meal: $name';
+      case 'exercise_share':
+        final title =
+            message.payload['title'] as String? ??
+                message.payload['name'] as String? ??
+                'a workout';
+        return '💪 Workout: $title';
+      case 'pr_share':
+        final exercise = message.payload['exerciseName'] as String? ?? 'PR';
+        final weight = message.payload['weight'];
+        final unit = message.payload['unit'] as String? ?? 'kg';
+        return '🏆 PR: $exercise ${weight ?? ''}$unit';
+      case 'streak_share':
+        final days = message.payload['streakDays'] ?? 0;
+        return '🔥 $days-day streak';
+      case 'challenge':
+        final title = message.payload['title'] as String? ?? 'Challenge';
+        return '⚡ Challenge: $title';
+      default:
+        final text = (message.payload['text'] as String? ?? '').trim();
+        if (text.length <= 80) return text;
+        return '${text.substring(0, 80)}…';
+    }
   }
 }

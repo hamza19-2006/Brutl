@@ -3,11 +3,8 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
-import 'package:hive_flutter/hive_flutter.dart';
-import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/brutl_models.dart' as brutl;
 import '../models/user_data_models.dart';
 import '../services/database_service.dart';
 import '../services/step_service.dart';
@@ -69,10 +66,6 @@ class WorkoutProvider extends ChangeNotifier {
     weightUnit: 'kg',
   );
 
-  // Computed (NOT stored canonical exercise data) — derived from the local
-  // exercises Hive box that is itself a synced cache of Firestore.
-  List<ExerciseModel> _topVolumeExercises = const <ExerciseModel>[];
-  String? _lastSessionDayName;
   String? _highlightedExerciseName;
 
   int _currentDailySteps = 0;
@@ -82,7 +75,6 @@ class WorkoutProvider extends ChangeNotifier {
 
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>?
       _userStreamSubscription;
-  StreamSubscription<BoxEvent>? _exercisesBoxSubscription;
 
   // ── Public getters ─────────────────────────────────────────────────────────
 
@@ -93,7 +85,6 @@ class WorkoutProvider extends ChangeNotifier {
   double get currentDailyCaloriesBurned => _currentDailyCaloriesBurned;
 
   String? get highlightedExerciseName => _highlightedExerciseName;
-  List<ExerciseModel> get topVolumeExercises => _topVolumeExercises;
 
   int get selectedWeek => _selectedWeek;
   int get totalProgramWeeks => _totalProgramWeeks;
@@ -109,22 +100,14 @@ class WorkoutProvider extends ChangeNotifier {
     return List<String>.unmodifiable(_masterTemplate);
   }
 
-  // Backward-compat: orphaned EditExercisesScreen still references this.
-  // Always empty — exercises live in Firestore, not in this provider.
-  List<brutl.ProgramDayModel> get programDays =>
-      const <brutl.ProgramDayModel>[];
-
   // ── Home strings ───────────────────────────────────────────────────────────
 
   String get lastWorkoutTitle => _homeUi.lastWorkoutTitle;
   String get noWorkoutMessage => _homeUi.noWorkoutMessage;
 
-  String get lastWorkoutSubtitle {
-    final dayName =
-        _lastSessionDayName ?? DateFormat('EEEE').format(DateTime.now());
-    return '${_homeUi.lastWorkoutSubtitlePrefix} $dayName '
-        '${_homeUi.lastWorkoutSubtitleSuffix}';
-  }
+  String get lastWorkoutSubtitle =>
+      '${_homeUi.lastWorkoutSubtitlePrefix} $todayWorkoutName '
+      '${_homeUi.lastWorkoutSubtitleSuffix}';
 
   String get todayWorkoutName {
     final todayIndex = DateTime.now().weekday - 1;
@@ -154,18 +137,6 @@ class WorkoutProvider extends ChangeNotifier {
     _currentDailySteps = stepService.getTodaySteps();
     _currentDailyCaloriesBurned =
         stepService.calculateCalories(_currentDailySteps);
-
-    // Sync the local exercises Hive cache from Firestore so the home
-    // last-workout widget has data immediately, even offline.
-    final dbService = DatabaseService();
-    await dbService.syncExercisesFromFirestore();
-    await refreshLastWorkoutInsights();
-
-    // Refresh home insights whenever the local exercises box changes.
-    final exercisesBox = Hive.box<String>('exercises');
-    _exercisesBoxSubscription = exercisesBox.watch().listen((_) {
-      unawaited(refreshLastWorkoutInsights());
-    });
 
     final firebaseUser = FirebaseAuth.instance.currentUser;
     if (firebaseUser != null) {
@@ -378,51 +349,6 @@ class WorkoutProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ── Home: last-workout insights ────────────────────────────────────────────
-
-  Future<void> refreshLastWorkoutInsights() async {
-    final todayName = todayWorkoutName;
-    if (todayName.isEmpty || todayName.toLowerCase() == 'rest') {
-      _topVolumeExercises = const <ExerciseModel>[];
-      _lastSessionDayName = null;
-      notifyListeners();
-      return;
-    }
-
-    final brutlExercises = DatabaseService().getExercisesForSplit(todayName);
-    _lastSessionDayName = todayName;
-    _topVolumeExercises = _topByVolume(brutlExercises, limit: 3);
-    notifyListeners();
-  }
-
-  List<ExerciseModel> _topByVolume(
-    List<brutl.ExerciseModel> exercises, {
-    int limit = 3,
-  }) {
-    final converted = exercises.map(_toUiExercise).toList(growable: false);
-    final sorted = List<ExerciseModel>.from(converted)
-      ..sort((a, b) => _volume(b).compareTo(_volume(a)));
-    return sorted.take(limit).toList(growable: false);
-  }
-
-  ExerciseModel _toUiExercise(brutl.ExerciseModel e) {
-    final cleanedWeight = e.weight.replaceAll(RegExp(r'[^0-9.]'), '');
-    final parsedWeight = double.tryParse(cleanedWeight) ?? 0.0;
-    return ExerciseModel(
-      name: e.name,
-      sets: e.sets,
-      reps: e.repValues,
-      weight: parsedWeight,
-      imageUrl: '',
-    );
-  }
-
-  double _volume(ExerciseModel e) {
-    if (e.reps.isEmpty) return 0;
-    final avgReps = e.reps.reduce((a, b) => a + b) / e.reps.length;
-    return e.weight * e.sets * avgReps;
-  }
-
   // ── User mutations ─────────────────────────────────────────────────────────
 
   void setHighlightedExercise(String? exerciseName) {
@@ -488,41 +414,6 @@ class WorkoutProvider extends ChangeNotifier {
     updateOptimisticMacros(newKcal, newCarbs, newProtein, newFats);
   }
 
-  // ── Backward-compatibility stubs ───────────────────────────────────────────
-  //
-  // The legacy `EditExercisesScreen` (now orphaned, replaced by the
-  // Firestore-backed flow inside `edit_days_screen.dart`) still references
-  // these. Stubs return empty / no-op so the app compiles even if that
-  // screen lingers in the tree. Real exercise mutations now happen
-  // directly against Firestore from each screen.
-
-  List<brutl.ProgramDayModel> getDaysForWeek(int weekIndex) =>
-      const <brutl.ProgramDayModel>[];
-
-  Future<void> renameDayOptimistic(
-    int weekIndex,
-    String oldName,
-    String newName,
-  ) async {}
-
-  Future<void> clearExercisesFromDayOptimistic(
-    int weekIndex,
-    String dayName,
-  ) async {}
-
-  Future<void> renameExerciseOptimistic(
-    int weekIndex,
-    String dayName,
-    String oldExerciseName,
-    String newExerciseName,
-  ) async {}
-
-  Future<void> deleteExerciseOptimistic(
-    int weekIndex,
-    String dayName,
-    String exerciseName,
-  ) async {}
-
   // ── Helpers ────────────────────────────────────────────────────────────────
 
   double _toKg(double weight, String unit) =>
@@ -542,7 +433,6 @@ class WorkoutProvider extends ChangeNotifier {
   @override
   void dispose() {
     _userStreamSubscription?.cancel();
-    _exercisesBoxSubscription?.cancel();
     super.dispose();
   }
 }

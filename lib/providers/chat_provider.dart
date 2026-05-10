@@ -224,9 +224,22 @@ class ChatProvider extends ChangeNotifier {
 
     final chatId = buildChatId(_uid, friendUid);
 
+    // Step 1: Best-effort chat history cleanup.
+    // A failure here (e.g. transient permission-denied on a single message)
+    // must NOT hold the friendship record hostage. We log and continue.
     try {
       await clearChatHistory(chatId);
+    } catch (error, stackTrace) {
+      debugPrint(
+        'clearChatHistory failed during removeFriend($friendUid); '
+        'continuing with friend doc deletion: $error',
+      );
+      debugPrintStack(stackTrace: stackTrace);
+    }
 
+    // Step 2: Authoritative deletion of the friendship docs on both sides.
+    // Only failures here cause a UI rollback.
+    try {
       final batch = _db.batch();
       batch.delete(
         _db.collection('users').doc(_uid).collection('friends').doc(friendUid),
@@ -238,9 +251,7 @@ class ChatProvider extends ChangeNotifier {
     } catch (error, stackTrace) {
       _friends = previousFriends;
       notifyListeners();
-      debugPrint(
-        'Failed to remove friend $friendUid with cascade delete: $error',
-      );
+      debugPrint('Failed to delete friend docs for $friendUid: $error');
       debugPrintStack(stackTrace: stackTrace);
       rethrow;
     }
@@ -380,8 +391,12 @@ class ChatProvider extends ChangeNotifier {
         .doc(chatId)
         .collection('messages');
 
+    // Page through all messages in chunks of `_maxBatchOps` so we never
+    // exceed Firestore's 500-op WriteBatch limit, even on long chats.
     while (true) {
       final snapshot = await messagesRef.limit(_maxBatchOps).get();
+
+      // Nothing left to delete -> exit cleanly.
       if (snapshot.docs.isEmpty) return;
 
       final batch = _db.batch();
@@ -390,6 +405,7 @@ class ChatProvider extends ChangeNotifier {
       }
       await batch.commit();
 
+      // Last partial page processed -> done.
       if (snapshot.docs.length < _maxBatchOps) return;
     }
   }
@@ -417,12 +433,30 @@ class ChatProvider extends ChangeNotifier {
     final chatRef = _db.collection('chats').doc(chatId);
     final unreadKey = 'unreadCount_$_uid';
 
-    await chatRef.set(<String, dynamic>{unreadKey: 0}, SetOptions(merge: true));
+    // Reset our own unread counter on the parent chat doc.
+    try {
+      await chatRef.set(
+        <String, dynamic>{unreadKey: 0},
+        SetOptions(merge: true),
+      );
+    } catch (error, stackTrace) {
+      debugPrint('Failed to reset unread count on chat $chatId: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
 
-    final unreadMessages = await chatRef
-        .collection('messages')
-        .where('senderId', isNotEqualTo: _uid)
-        .get();
+    // Fetch every message in this chat that was sent by the OTHER user so we
+    // can flip its status -> 'read' and stamp `readAt`.
+    final QuerySnapshot<Map<String, dynamic>> unreadMessages;
+    try {
+      unreadMessages = await chatRef
+          .collection('messages')
+          .where('senderId', isNotEqualTo: _uid)
+          .get();
+    } catch (error, stackTrace) {
+      debugPrint('Failed to fetch unread messages in chat $chatId: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      return;
+    }
 
     if (unreadMessages.docs.isEmpty) return;
 
@@ -430,6 +464,7 @@ class ChatProvider extends ChangeNotifier {
     var ops = 0;
     for (final doc in unreadMessages.docs) {
       final data = doc.data();
+      // Skip already-read messages so we do not produce no-op writes.
       if ((data['status'] as String? ?? 'sent') == 'read') continue;
       batch ??= _db.batch();
       batch.update(doc.reference, <String, dynamic>{
@@ -438,13 +473,27 @@ class ChatProvider extends ChangeNotifier {
       });
       ops++;
       if (ops == _maxBatchOps) {
-        await batch.commit();
+        try {
+          await batch.commit();
+        } catch (error, stackTrace) {
+          debugPrint(
+            'Failed to commit read-receipt batch for chat $chatId: $error',
+          );
+          debugPrintStack(stackTrace: stackTrace);
+        }
         batch = null;
         ops = 0;
       }
     }
     if (batch != null && ops > 0) {
-      await batch.commit();
+      try {
+        await batch.commit();
+      } catch (error, stackTrace) {
+        debugPrint(
+          'Failed to commit final read-receipt batch for chat $chatId: $error',
+        );
+        debugPrintStack(stackTrace: stackTrace);
+      }
     }
   }
 

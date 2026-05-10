@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -8,30 +7,32 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/brutl_models.dart' as brutl;
+import '../models/user_data_models.dart';
 import '../services/database_service.dart';
 import '../services/step_service.dart';
 import 'nutrition_service.dart';
-import '../models/brutl_models.dart' as brutl;
-import '../models/user_data_models.dart';
 
+/// Brutl `WorkoutProvider`
+/// -------------------------------------------------------------------------
+/// Exercises NEVER live in this provider. They live ONLY in Firestore at:
+///
+///   users/{uid}/weeks/week_{n}/days/day_{n}    fields: exercises, updatedAt
+///
+/// This provider only owns:
+///   * The user dashboard meta (name, step / calorie goals, weight, etc.)
+///   * The selected week (1..N) and total program weeks
+///   * The split day-name list (e.g. ['Push', 'Pull', 'Legs'])
+///   * UI state (highlighted exercise, last-workout insights for Home)
+///
+/// All exercise reads/writes are performed by the screens that need them
+/// directly against Firestore using `merge: true` + `updatedAt`.
 class WorkoutProvider extends ChangeNotifier {
   static const String _userPrefsKey = 'brutl_user_model';
-  static const String _workoutPlanPrefsKey = 'brutl_workout_plan_model';
-  static const String _workoutHistoryBoxName = 'brutl_workout_history';
+  static const String _splitPrefsKey = 'brutl_workout_split';
   static const String _defaultWorkoutSplit = 'Upper/Lower';
-  static const Map<String, List<String>> _splitTemplates =
-      <String, List<String>>{
-        'Upper/Lower': <String>['Upper A', 'Lower A', 'Upper B', 'Lower B'],
-        'Push/Pull/Legs': <String>[
-          'Push',
-          'Pull',
-          'Legs',
-          'Push',
-          'Pull',
-          'Legs',
-        ],
-        'Bro Split': <String>['Chest', 'Back', 'Legs', 'Shoulders', 'Arms'],
-      };
+
+  // ── State ──────────────────────────────────────────────────────────────────
 
   UserModel _user = const UserModel(
     id: 'local-athlete',
@@ -40,17 +41,12 @@ class WorkoutProvider extends ChangeNotifier {
     weightKg: 70.0,
   );
 
-  // Program-Style state
   int _selectedWeek = 1;
   final int _totalProgramWeeks = 4;
   String _selectedWorkoutSplit = _defaultWorkoutSplit;
   List<String> _masterTemplate = const <String>[];
   List<String> _customSplitDays = const <String>[];
-  Map<String, brutl.ProgramDayModel> _selectedWeekOverrides =
-      <String, brutl.ProgramDayModel>{};
-  List<brutl.ProgramDayModel> _programDays = <brutl.ProgramDayModel>[];
 
-  WorkoutPlanModel _workoutPlan = WorkoutPlanModel.defaultPlan();
   final HomeUiModel _homeUi = const HomeUiModel(
     brandName: 'Brutl',
     daySuffix: 'Day',
@@ -72,32 +68,40 @@ class WorkoutProvider extends ChangeNotifier {
     weightLabel: 'Weight',
     weightUnit: 'kg',
   );
+
+  // Computed (NOT stored canonical exercise data) — derived from the local
+  // exercises Hive box that is itself a synced cache of Firestore.
   List<ExerciseModel> _topVolumeExercises = const <ExerciseModel>[];
   String? _lastSessionDayName;
   String? _highlightedExerciseName;
+
   int _currentDailySteps = 0;
   double _currentDailyCaloriesBurned = 0;
   bool _isLoading = true;
   bool _isInitialized = false;
-  Box<dynamic>? _workoutHistoryBox;
 
-  StreamSubscription<DocumentSnapshot>? _userStreamSubscription;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>?
+      _userStreamSubscription;
   StreamSubscription<BoxEvent>? _exercisesBoxSubscription;
 
+  // ── Public getters ─────────────────────────────────────────────────────────
+
   UserModel get user => _user;
-  WorkoutPlanModel get workoutPlan => _workoutPlan;
-  List<ExerciseModel> get topVolumeExercises => _topVolumeExercises;
-  bool get isLoading => _isLoading;
-  String? get highlightedExerciseName => _highlightedExerciseName;
   HomeUiModel get homeUi => _homeUi;
+  bool get isLoading => _isLoading;
   int get currentDailySteps => _currentDailySteps;
   double get currentDailyCaloriesBurned => _currentDailyCaloriesBurned;
+
+  String? get highlightedExerciseName => _highlightedExerciseName;
+  List<ExerciseModel> get topVolumeExercises => _topVolumeExercises;
 
   int get selectedWeek => _selectedWeek;
   int get totalProgramWeeks => _totalProgramWeeks;
   String get selectedWorkoutSplit => _selectedWorkoutSplit;
+
   List<String> get customSplitDays =>
       List<String>.unmodifiable(_customSplitDays);
+
   List<String> get activeSplitDays {
     if (_customSplitDays.isNotEmpty) {
       return List<String>.unmodifiable(_customSplitDays);
@@ -105,67 +109,12 @@ class WorkoutProvider extends ChangeNotifier {
     return List<String>.unmodifiable(_masterTemplate);
   }
 
-  List<brutl.ProgramDayModel> get currentWeekWorkouts =>
-      getDaysForWeek(_selectedWeek - 1);
+  // Backward-compat: orphaned EditExercisesScreen still references this.
+  // Always empty — exercises live in Firestore, not in this provider.
   List<brutl.ProgramDayModel> get programDays =>
-      List<brutl.ProgramDayModel>.unmodifiable(_programDays);
+      const <brutl.ProgramDayModel>[];
 
-  List<brutl.ProgramDayModel> getDaysForWeek(int weekIndex) {
-    final weekNumber = weekIndex + 1;
-    if (weekNumber < 1 || weekNumber > _totalProgramWeeks) {
-      return const <brutl.ProgramDayModel>[];
-    }
-
-    final baseDays =
-        _programDays
-            .where((day) => day.weekNumber == weekNumber)
-            .toList(growable: false)
-          ..sort((a, b) => a.dayNumber.compareTo(b.dayNumber));
-
-    if (weekNumber != _selectedWeek) {
-      return baseDays;
-    }
-
-    return baseDays
-        .map((baseDay) {
-          final override = _selectedWeekOverrides[baseDay.id];
-          if (override == null) return baseDay;
-          return baseDay.copyWith(
-            splitName: override.splitName,
-            exercises: override.exercises,
-          );
-        })
-        .toList(growable: false);
-  }
-
-  brutl.ProgramDayModel? getDayForWeek(int weekIndex, String dayId) {
-    final weekDays = getDaysForWeek(weekIndex);
-    for (final day in weekDays) {
-      if (day.id == dayId) {
-        return day;
-      }
-    }
-    return null;
-  }
-
-  List<brutl.ExerciseModel> getExercisesForWeekDay(
-    int weekIndex,
-    String dayId,
-  ) {
-    final day = getDayForWeek(weekIndex, dayId);
-    if (day == null) {
-      return const <brutl.ExerciseModel>[];
-    }
-    return List<brutl.ExerciseModel>.unmodifiable(day.exercises);
-  }
-
-  void selectWeek(int week) {
-    if (_selectedWeek != week) {
-      _selectedWeek = week;
-      unawaited(_loadWeekOverridesForSelectedWeek());
-      notifyListeners();
-    }
-  }
+  // ── Home strings ───────────────────────────────────────────────────────────
 
   String get lastWorkoutTitle => _homeUi.lastWorkoutTitle;
   String get noWorkoutMessage => _homeUi.noWorkoutMessage;
@@ -173,40 +122,26 @@ class WorkoutProvider extends ChangeNotifier {
   String get lastWorkoutSubtitle {
     final dayName =
         _lastSessionDayName ?? DateFormat('EEEE').format(DateTime.now());
-    return '${_homeUi.lastWorkoutSubtitlePrefix} $dayName ${_homeUi.lastWorkoutSubtitleSuffix}';
-  }
-
-  String workoutNameForWeekday(int weekday) =>
-      _workoutPlan.workoutForWeekday(weekday);
-
-  double _toKg(double weight, String unit) {
-    return unit.toLowerCase() == 'lbs' ? weight * 0.45359237 : weight;
+    return '${_homeUi.lastWorkoutSubtitlePrefix} $dayName '
+        '${_homeUi.lastWorkoutSubtitleSuffix}';
   }
 
   String get todayWorkoutName {
     final todayIndex = DateTime.now().weekday - 1;
-
     if (todayIndex >= 0 && todayIndex < _customSplitDays.length) {
       return _customSplitDays[todayIndex];
     }
-    if (_customSplitDays.isNotEmpty) {
-      return 'Rest';
-    }
-
+    if (_customSplitDays.isNotEmpty) return 'Rest';
     if (todayIndex >= 0 && todayIndex < _masterTemplate.length) {
       return _masterTemplate[todayIndex];
     }
-    if (_masterTemplate.isNotEmpty) {
-      return 'Rest';
-    }
-
-    return workoutNameForWeekday(todayIndex + 1);
+    return 'Rest';
   }
 
+  // ── Initialization ─────────────────────────────────────────────────────────
+
   Future<void> initialize() async {
-    if (_isInitialized) {
-      return;
-    }
+    if (_isInitialized) return;
 
     _isLoading = true;
     notifyListeners();
@@ -214,33 +149,24 @@ class WorkoutProvider extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await _loadUser(prefs);
     await _loadWorkoutSplit(prefs);
-    await _loadWorkoutPlan(prefs);
-    _workoutHistoryBox = await Hive.openBox<dynamic>(_workoutHistoryBoxName);
 
-    // Seed dashboard stats from local pedometer cache until Firestore stream arrives.
     final stepService = StepService.instance;
     _currentDailySteps = stepService.getTodaySteps();
-    _currentDailyCaloriesBurned = stepService.calculateCalories(
-      _currentDailySteps,
-    );
+    _currentDailyCaloriesBurned =
+        stepService.calculateCalories(_currentDailySteps);
 
-    // Sync exercises from server so reinstalling doesn't lose data
+    // Sync the local exercises Hive cache from Firestore so the home
+    // last-workout widget has data immediately, even offline.
     final dbService = DatabaseService();
     await dbService.syncExercisesFromFirestore();
-
     await refreshLastWorkoutInsights();
 
-    // Initial load of program days
-    refreshProgramDays();
-    await _loadWeekOverridesForSelectedWeek();
-
-    // Auto-refresh program days if exercises box changes
+    // Refresh home insights whenever the local exercises box changes.
     final exercisesBox = Hive.box<String>('exercises');
-    _exercisesBoxSubscription = exercisesBox.watch().listen((event) {
-      refreshProgramDays();
+    _exercisesBoxSubscription = exercisesBox.watch().listen((_) {
+      unawaited(refreshLastWorkoutInsights());
     });
 
-    // Subscribe to Firestore for live user data (step goal, display name, calorie goal)
     final firebaseUser = FirebaseAuth.instance.currentUser;
     if (firebaseUser != null) {
       _userStreamSubscription = FirebaseFirestore.instance
@@ -249,100 +175,12 @@ class WorkoutProvider extends ChangeNotifier {
           .snapshots()
           .listen(
             (snapshot) {
-              if (snapshot.exists && snapshot.data() != null) {
-                final data = snapshot.data()!;
-                final displayName =
-                    (data['display_name'] as String?) ??
-                    (data['displayName'] as String?) ??
-                    _user.name;
-                final stepGoal =
-                    (data['step_goal'] as num?)?.toInt() ??
-                    (data['dailyStepGoal'] as num?)?.toInt() ??
-                    (data['stepGoal'] as num?)?.toInt() ??
-                    (data['daily_steps'] as num?)?.toInt() ??
-                    _user.dailyStepGoal;
-                final calorieGoal =
-                    (data['target_calories'] as num?)?.toInt() ??
-                    (data['targetCalories'] as num?)?.toInt() ??
-                    _user.dailyCalorieGoal;
-                final rawWeight =
-                    (data['weight'] as num?)?.toDouble() ?? _user.weightKg;
-                final weightUnit =
-                    (data['weight_unit'] as String?) ??
-                    (data['weightUnit'] as String?) ??
-                    'kg';
-                final weightKg = _toKg(rawWeight, weightUnit);
-                final remoteCurrentSteps =
-                    (data['currentSteps'] as num?)?.toInt() ??
-                    ((data.containsKey('step_goal') ||
-                            data.containsKey('daily_steps') ||
-                            data.containsKey('dailyStepGoal') ||
-                            data.containsKey('stepGoal'))
-                        ? (data['daily_steps'] as num?)?.toInt() ??
-                              (data['dailySteps'] as num?)?.toInt()
-                        : null) ??
-                    _currentDailySteps;
-                final remoteCalories =
-                    (data['dailyCaloriesBurned'] as num?)?.toDouble() ??
-                    StepService.instance.calculateCalories(remoteCurrentSteps);
-                final remoteSplit =
-                    (data['workout_split_template'] as String?) ??
-                    (data['workoutSplitTemplate'] as String?) ??
-                    (data['workoutSplit'] as String?) ??
-                    (data['split'] as String?) ??
-                    _selectedWorkoutSplit;
-
-                // Extract custom split days from Firestore
-                final customSplitDays = <String>[];
-                final rawCustomSplitDays =
-                    (data['custom_split_days'] as List<dynamic>?) ??
-                    (data['customSplitDays'] as List<dynamic>?);
-                if (rawCustomSplitDays != null) {
-                  customSplitDays.addAll(
-                    rawCustomSplitDays.map((e) => e.toString()),
-                  );
-                }
-                final remoteMasterTemplate =
-                    ((data['workout_master_template'] as List<dynamic>?) ??
-                            (data['workoutMasterTemplate'] as List<dynamic>?))
-                        ?.map((item) => item.toString().trim())
-                        .where((item) => item.isNotEmpty)
-                        .toList(growable: false) ??
-                    const <String>[];
-
-                _user = _user.copyWith(
-                  name: displayName.isNotEmpty ? displayName : _user.name,
-                  dailyStepGoal: stepGoal,
-                  dailyCalorieGoal: calorieGoal,
-                  weightKg: weightKg,
-                );
-                _currentDailySteps = remoteCurrentSteps < 0
-                    ? 0
-                    : remoteCurrentSteps;
-                _currentDailyCaloriesBurned = remoteCalories
-                    .clamp(0, 5000)
-                    .toDouble();
-                if (customSplitDays.isNotEmpty) {
-                  _customSplitDays = customSplitDays;
-                  _masterTemplate = customSplitDays;
-                } else if (remoteMasterTemplate.isNotEmpty) {
-                  _masterTemplate = remoteMasterTemplate;
-                  _customSplitDays = remoteMasterTemplate;
-                }
-
-                if (_masterTemplate.isNotEmpty) {
-                  _selectedWorkoutSplit = remoteSplit;
-                  _programDays = _buildProgramDaysFromTemplate(_masterTemplate);
-                } else {
-                  _setWorkoutSplit(remoteSplit, persist: false);
-                }
-                unawaited(prefs.setString(_userPrefsKey, _user.toRawJson()));
-                notifyListeners();
-              }
+              if (!snapshot.exists || snapshot.data() == null) return;
+              _applyFirestoreUserData(snapshot.data()!, prefs);
+              notifyListeners();
             },
             onError: (Object error) {
               debugPrint('WORKOUT_PROVIDER: Firestore stream error — $error');
-              // Stream will automatically retry on transient errors
             },
           );
     }
@@ -352,6 +190,8 @@ class WorkoutProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Force-reload the user metadata + split day list. Called by login and
+  /// onboarding flows so the Home screen never paints stale defaults.
   Future<void> loadUserData() async {
     final prefs = await SharedPreferences.getInstance();
     await _loadUser(prefs);
@@ -359,34 +199,97 @@ class WorkoutProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ── Firestore user-doc syncing ─────────────────────────────────────────────
+
+  void _applyFirestoreUserData(
+    Map<String, dynamic> data,
+    SharedPreferences prefs,
+  ) {
+    final displayName = (data['display_name'] as String?) ??
+        (data['displayName'] as String?) ??
+        _user.name;
+    final stepGoal = (data['step_goal'] as num?)?.toInt() ??
+        (data['dailyStepGoal'] as num?)?.toInt() ??
+        (data['stepGoal'] as num?)?.toInt() ??
+        (data['daily_steps'] as num?)?.toInt() ??
+        _user.dailyStepGoal;
+    final calorieGoal = (data['target_calories'] as num?)?.toInt() ??
+        (data['targetCalories'] as num?)?.toInt() ??
+        _user.dailyCalorieGoal;
+    final rawWeight =
+        (data['weight'] as num?)?.toDouble() ?? _user.weightKg;
+    final weightUnit = (data['weight_unit'] as String?) ??
+        (data['weightUnit'] as String?) ??
+        'kg';
+    final weightKg = _toKg(rawWeight, weightUnit);
+
+    final remoteCurrentSteps =
+        (data['currentSteps'] as num?)?.toInt() ?? _currentDailySteps;
+    final remoteCalories =
+        (data['dailyCaloriesBurned'] as num?)?.toDouble() ??
+            StepService.instance.calculateCalories(remoteCurrentSteps);
+
+    final remoteSplit = (data['workout_split_template'] as String?) ??
+        (data['workoutSplitTemplate'] as String?) ??
+        (data['workoutSplit'] as String?) ??
+        (data['split'] as String?) ??
+        _selectedWorkoutSplit;
+
+    final customDays = _stringList(
+          data['custom_split_days'] ?? data['customSplitDays'],
+        ) ??
+        const <String>[];
+    final masterDays = _stringList(
+          data['workout_master_template'] ?? data['workoutMasterTemplate'],
+        ) ??
+        const <String>[];
+
+    _user = _user.copyWith(
+      name: displayName.isNotEmpty ? displayName : _user.name,
+      dailyStepGoal: stepGoal,
+      dailyCalorieGoal: calorieGoal,
+      weightKg: weightKg,
+    );
+    _currentDailySteps = remoteCurrentSteps < 0 ? 0 : remoteCurrentSteps;
+    _currentDailyCaloriesBurned = remoteCalories.clamp(0, 5000).toDouble();
+    _selectedWorkoutSplit = remoteSplit;
+
+    if (customDays.isNotEmpty) {
+      _customSplitDays = customDays;
+      _masterTemplate = customDays;
+    } else if (masterDays.isNotEmpty) {
+      _customSplitDays = masterDays;
+      _masterTemplate = masterDays;
+    }
+
+    unawaited(prefs.setString(_userPrefsKey, _user.toRawJson()));
+  }
+
   Future<void> _loadUser(SharedPreferences prefs) async {
     final firebaseUser = FirebaseAuth.instance.currentUser;
     if (firebaseUser != null) {
-      final remoteUser = await DatabaseService().fetchUserProfile(
-        firebaseUser.uid,
-      );
+      final remoteUser =
+          await DatabaseService().fetchUserProfile(firebaseUser.uid);
       if (remoteUser != null) {
         _user = UserModel(
           id: remoteUser.uid,
           name: remoteUser.displayName.isNotEmpty
               ? remoteUser.displayName
               : (remoteUser.username.isNotEmpty
-                    ? remoteUser.username
-                    : 'Brutl'),
+                  ? remoteUser.username
+                  : 'Brutl'),
           dailyStepGoal: remoteUser.dailySteps,
           dailyCalorieGoal: remoteUser.targetCalories,
           weightKg: _toKg(remoteUser.weight, remoteUser.weightUnit),
         );
         if (remoteUser.customSplitDays.isNotEmpty) {
-          _customSplitDays = List<String>.from(
+          _customSplitDays = List<String>.unmodifiable(
             remoteUser.customSplitDays,
-            growable: false,
           );
           _masterTemplate = _customSplitDays;
           if (remoteUser.workoutSplitTemplate.trim().isNotEmpty) {
             _selectedWorkoutSplit = remoteUser.workoutSplitTemplate;
           }
-          _programDays = _buildProgramDaysFromTemplate(_masterTemplate);
         }
         await prefs.setString(_userPrefsKey, _user.toRawJson());
         return;
@@ -408,22 +311,6 @@ class WorkoutProvider extends ChangeNotifier {
     await prefs.setString(_userPrefsKey, _user.toRawJson());
   }
 
-  Future<void> _loadWorkoutPlan(SharedPreferences prefs) async {
-    final rawPlan = prefs.getString(_workoutPlanPrefsKey);
-    if (rawPlan != null) {
-      _workoutPlan = WorkoutPlanModel.fromJson(
-        jsonDecode(rawPlan) as Map<String, dynamic>,
-      );
-      return;
-    }
-
-    _workoutPlan = WorkoutPlanModel.defaultPlan();
-    await prefs.setString(
-      _workoutPlanPrefsKey,
-      jsonEncode(_workoutPlan.toJson()),
-    );
-  }
-
   Future<void> _loadWorkoutSplit(SharedPreferences prefs) async {
     final firebaseUser = FirebaseAuth.instance.currentUser;
     if (firebaseUser != null) {
@@ -434,225 +321,113 @@ class WorkoutProvider extends ChangeNotifier {
             .get();
         if (snapshot.exists && snapshot.data() != null) {
           final data = snapshot.data()!;
-          final remoteTemplate =
-              ((data['workout_master_template'] as List<dynamic>?) ??
-                      (data['workoutMasterTemplate'] as List<dynamic>?))
-                  ?.map((item) => item.toString())
-                  .where((item) => item.trim().isNotEmpty)
-                  .toList(growable: false);
-          final remoteCustomSplitDays =
-              ((data['custom_split_days'] as List<dynamic>?) ??
-                      (data['customSplitDays'] as List<dynamic>?))
-                  ?.map((item) => item.toString())
-                  .where((item) => item.trim().isNotEmpty)
-                  .toList(growable: false);
-          if (remoteCustomSplitDays != null &&
-              remoteCustomSplitDays.isNotEmpty) {
-            _customSplitDays = remoteCustomSplitDays;
-            _masterTemplate = remoteCustomSplitDays;
-            _selectedWorkoutSplit =
-                (data['workout_split_template'] as String?) ??
-                (data['workoutSplitTemplate'] as String?) ??
-                _selectedWorkoutSplit;
-            _programDays = _buildProgramDaysFromTemplate(_masterTemplate);
-            await prefs.setString('brutl_workout_split', _selectedWorkoutSplit);
-            return;
-          }
-          if (remoteTemplate != null && remoteTemplate.isNotEmpty) {
-            _masterTemplate = remoteTemplate;
-            _customSplitDays = remoteTemplate;
-            _selectedWorkoutSplit =
-                (data['workout_split_template'] as String?) ??
-                (data['workoutSplitTemplate'] as String?) ??
-                _defaultWorkoutSplit;
-            _programDays = _buildProgramDaysFromTemplate(_masterTemplate);
-            await prefs.setString('brutl_workout_split', _selectedWorkoutSplit);
-            return;
-          }
-          final remoteSplit =
+
+          final customDays = _stringList(
+                data['custom_split_days'] ?? data['customSplitDays'],
+              ) ??
+              const <String>[];
+          final masterDays = _stringList(
+                data['workout_master_template'] ??
+                    data['workoutMasterTemplate'],
+              ) ??
+              const <String>[];
+
+          _selectedWorkoutSplit =
               (data['workout_split_template'] as String?) ??
-              (data['workoutSplitTemplate'] as String?) ??
-              (data['workoutSplit'] as String?) ??
-              (data['split'] as String?) ??
-              _defaultWorkoutSplit;
-          _setWorkoutSplit(remoteSplit, persist: false);
-          await prefs.setString('brutl_workout_split', _selectedWorkoutSplit);
+                  (data['workoutSplitTemplate'] as String?) ??
+                  _defaultWorkoutSplit;
+
+          if (customDays.isNotEmpty) {
+            _customSplitDays = customDays;
+            _masterTemplate = customDays;
+          } else if (masterDays.isNotEmpty) {
+            _customSplitDays = masterDays;
+            _masterTemplate = masterDays;
+          }
+
+          await prefs.setString(_splitPrefsKey, _selectedWorkoutSplit);
           return;
         }
       } catch (error) {
-        debugPrint('WORKOUT_PROVIDER: Failed to load workout split — $error');
-      }
-    }
-
-    final cachedSplit = prefs.getString('brutl_workout_split');
-    _setWorkoutSplit(cachedSplit ?? _defaultWorkoutSplit, persist: false);
-  }
-
-  void refreshProgramDays() {
-    final dbService = DatabaseService();
-    final updatedDays = _programDays.map((day) {
-      final isRestDay = day.splitName.toLowerCase() == 'rest';
-      return day.copyWith(
-        exercises: isRestDay
-            ? const []
-            : dbService.getExercisesForSplit(day.splitName),
-      );
-    }).toList();
-
-    _programDays = updatedDays;
-    notifyListeners();
-  }
-
-  void _setWorkoutSplit(String split, {required bool persist}) {
-    final normalizedSplit = split.trim().isEmpty ? _defaultWorkoutSplit : split;
-    if (_selectedWorkoutSplit == normalizedSplit && _programDays.isNotEmpty) {
-      return;
-    }
-    _selectedWorkoutSplit = normalizedSplit;
-    final mappedTemplate = _splitTemplates[_selectedWorkoutSplit];
-    _masterTemplate =
-        (mappedTemplate ??
-                (_customSplitDays.isNotEmpty
-                    ? _customSplitDays
-                    : _splitTemplates[_defaultWorkoutSplit]!))
-            .toList(growable: false);
-    if (mappedTemplate != null || _customSplitDays.isEmpty) {
-      _customSplitDays = _masterTemplate;
-    }
-    _programDays = _buildProgramDaysFromTemplate(_masterTemplate);
-    if (persist) {
-      unawaited(_persistSelectedSplit(_selectedWorkoutSplit));
-      unawaited(_persistMasterTemplate(_masterTemplate));
-    }
-  }
-
-  List<brutl.ProgramDayModel> _buildProgramDaysFromTemplate(List<String> days) {
-    final generated = <brutl.ProgramDayModel>[];
-    for (var week = 1; week <= _totalProgramWeeks; week++) {
-      for (var index = 0; index < days.length; index++) {
-        generated.add(
-          brutl.ProgramDayModel(
-            id: 'week${week}_day${index + 1}',
-            weekNumber: week,
-            dayNumber: index + 1,
-            splitName: days[index],
-            exercises: const [],
-          ),
+        debugPrint(
+          'WORKOUT_PROVIDER: Failed to load workout split — $error',
         );
       }
     }
-    return generated;
+
+    _selectedWorkoutSplit =
+        prefs.getString(_splitPrefsKey) ?? _defaultWorkoutSplit;
   }
 
-  Future<void> _persistSelectedSplit(String split) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('brutl_workout_split', split);
+  // ── Week selection ─────────────────────────────────────────────────────────
+
+  void selectWeek(int week) {
+    if (_selectedWeek == week) return;
+    _selectedWeek = week;
+    notifyListeners();
   }
 
-  Future<void> _persistMasterTemplate(List<String> template) async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-    await FirebaseFirestore.instance.collection('users').doc(uid).set({
-      'workout_split_template': _selectedWorkoutSplit,
-      'workout_master_template': template,
-      'custom_split_days': template,
-      'workoutMasterTemplate': FieldValue.delete(),
-      'customSplitDays': FieldValue.delete(),
-      'workoutSplitTemplate': FieldValue.delete(),
-      'workoutSplit': FieldValue.delete(),
-      'split': FieldValue.delete(),
-    }, SetOptions(merge: true));
+  // ── Split mutation (used by SplitChangeScreen) ─────────────────────────────
+
+  /// Replaces the active split with [newDayNames]. Writing to Firestore is
+  /// the caller's responsibility — this method only updates in-memory state.
+  void wipeAndReplaceSplit(List<String> newDayNames) {
+    _customSplitDays = List<String>.unmodifiable(newDayNames);
+    _masterTemplate = _customSplitDays;
+    _selectedWorkoutSplit = 'Custom';
+    notifyListeners();
   }
 
-  Future<void> _loadWeekOverridesForSelectedWeek() async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) {
-      _selectedWeekOverrides = <String, brutl.ProgramDayModel>{};
-      notifyListeners();
-      return;
-    }
-
-    try {
-      final snapshot = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .collection('workout_day_logs')
-          .where('weekNumber', isEqualTo: _selectedWeek)
-          .get();
-
-      final overrides = <String, brutl.ProgramDayModel>{};
-      for (final doc in snapshot.docs) {
-        final data = doc.data();
-        final programDay = brutl.ProgramDayModel.fromJson(data);
-        overrides[programDay.id] = programDay;
-      }
-      _selectedWeekOverrides = overrides;
-      notifyListeners();
-    } catch (error) {
-      debugPrint('WORKOUT_PROVIDER: Failed loading week overrides — $error');
-    }
-  }
+  // ── Home: last-workout insights ────────────────────────────────────────────
 
   Future<void> refreshLastWorkoutInsights() async {
-    final session = _findLastMatchingWeekdaySession(DateTime.now().weekday);
-    if (session == null) {
+    final todayName = todayWorkoutName;
+    if (todayName.isEmpty || todayName.toLowerCase() == 'rest') {
       _topVolumeExercises = const <ExerciseModel>[];
       _lastSessionDayName = null;
       notifyListeners();
       return;
     }
 
-    final sessionDate = DateTime.tryParse(session['date'].toString());
-    _lastSessionDayName = sessionDate == null
-        ? DateFormat('EEEE').format(DateTime.now())
-        : DateFormat('EEEE').format(sessionDate);
-
-    final exercises = _parseExercises(session['exercises']);
-    _topVolumeExercises = topExercisesByVolume(exercises, limit: 3);
+    final brutlExercises = DatabaseService().getExercisesForSplit(todayName);
+    _lastSessionDayName = todayName;
+    _topVolumeExercises = _topByVolume(brutlExercises, limit: 3);
     notifyListeners();
   }
 
-  Future<void> saveWorkoutSession({
-    required DateTime date,
-    required List<ExerciseModel> exercises,
-  }) async {
-    final box = _workoutHistoryBox;
-    if (box == null || !box.isOpen) {
-      throw StateError('Workout history storage is not available.');
-    }
-
-    final sessionPayload = <String, dynamic>{
-      'date': date.toIso8601String(),
-      'weekday': date.weekday,
-      'exercises': exercises.map((exercise) => exercise.toJson()).toList(),
-    };
-
-    final key = 'session_${date.toIso8601String()}';
-    await box.put(key, sessionPayload);
-    await _persistDailyLogIfAvailable(date, exercises);
-    await refreshLastWorkoutInsights();
+  List<ExerciseModel> _topByVolume(
+    List<brutl.ExerciseModel> exercises, {
+    int limit = 3,
+  }) {
+    final converted = exercises.map(_toUiExercise).toList(growable: false);
+    final sorted = List<ExerciseModel>.from(converted)
+      ..sort((a, b) => _volume(b).compareTo(_volume(a)));
+    return sorted.take(limit).toList(growable: false);
   }
 
-  Future<void> _persistDailyLogIfAvailable(
-    DateTime date,
-    List<ExerciseModel> exercises,
-  ) async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-    final selectedDay = currentWeekWorkouts.where(
-      (day) => day.dayNumber == date.weekday,
+  ExerciseModel _toUiExercise(brutl.ExerciseModel e) {
+    final cleanedWeight = e.weight.replaceAll(RegExp(r'[^0-9.]'), '');
+    final parsedWeight = double.tryParse(cleanedWeight) ?? 0.0;
+    return ExerciseModel(
+      name: e.name,
+      sets: e.sets,
+      reps: e.repValues,
+      weight: parsedWeight,
+      imageUrl: '',
     );
-    if (selectedDay.isEmpty) return;
-    final day = selectedDay.first;
-    final payload = day.toJson()
-      ..['exercises'] = exercises.map((exercise) => exercise.toJson()).toList();
+  }
 
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .collection('workout_day_logs')
-        .doc(day.id)
-        .set(payload, SetOptions(merge: true));
+  double _volume(ExerciseModel e) {
+    if (e.reps.isEmpty) return 0;
+    final avgReps = e.reps.reduce((a, b) => a + b) / e.reps.length;
+    return e.weight * e.sets * avgReps;
+  }
+
+  // ── User mutations ─────────────────────────────────────────────────────────
+
+  void setHighlightedExercise(String? exerciseName) {
+    _highlightedExerciseName = exerciseName;
+    notifyListeners();
   }
 
   Future<void> updateUser({
@@ -660,24 +435,19 @@ class WorkoutProvider extends ChangeNotifier {
     int? dailyStepGoal,
     int? dailyCalorieGoal,
   }) async {
-    final updatedUser = _user.copyWith(
+    _user = _user.copyWith(
       name: name,
       dailyStepGoal: dailyStepGoal,
       dailyCalorieGoal: dailyCalorieGoal,
     );
-
-    _user = updatedUser;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_userPrefsKey, _user.toRawJson());
     notifyListeners();
   }
 
-  /// BUG 1 FIX: Synchronously updates the local calorie/macro targets in
-  /// WorkoutProvider so the Home and Workout screens repaint immediately
-  /// without waiting for a Firestore stream event or app restart.
-  ///
-  /// Also persists the new goals to SharedPreferences and NutritionService
-  /// so the CaloriesCard and macro dashboard stay in sync.
+  /// Synchronously updates local calorie/macro targets so Home and Workout
+  /// screens repaint immediately, then fans out to NutritionService and
+  /// SharedPreferences without blocking the UI.
   void updateOptimisticMacros(
     int newKcal,
     int newCarbs,
@@ -708,362 +478,66 @@ class WorkoutProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Forces immediate macro-goal propagation to local state and persistence.
-  ///
-  /// Use from settings flows right after macro updates are saved so Home/Workout
-  /// visuals refresh instantly instead of waiting for remote stream updates.
+  /// Public alias used by the settings macros flow.
   void forceUpdateMacros(
     int newKcal,
     int newCarbs,
     int newProtein,
     int newFats,
   ) {
-    // Public settings-facing API that delegates to the shared optimistic
-    // macro-sync implementation in updateOptimisticMacros.
     updateOptimisticMacros(newKcal, newCarbs, newProtein, newFats);
   }
 
-  void setHighlightedExercise(String? exerciseName) {
-    _highlightedExerciseName = exerciseName;
-    notifyListeners();
-  }
+  // ── Backward-compatibility stubs ───────────────────────────────────────────
+  //
+  // The legacy `EditExercisesScreen` (now orphaned, replaced by the
+  // Firestore-backed flow inside `edit_days_screen.dart`) still references
+  // these. Stubs return empty / no-op so the app compiles even if that
+  // screen lingers in the tree. Real exercise mutations now happen
+  // directly against Firestore from each screen.
 
-  List<ExerciseModel> topExercisesByVolume(
-    List<ExerciseModel> exercises, {
-    int limit = 3,
-  }) {
-    final sorted = List<ExerciseModel>.from(exercises)
-      ..sort(
-        (a, b) =>
-            calculateExerciseVolume(b).compareTo(calculateExerciseVolume(a)),
-      );
-
-    return sorted.take(limit).toList(growable: false);
-  }
-
-  double calculateExerciseVolume(ExerciseModel exercise) {
-    return exercise.weight * exercise.sets * exercise.averageReps;
-  }
-
-  List<ExerciseModel> _parseExercises(dynamic rawExercises) {
-    if (rawExercises is! List<dynamic>) {
-      return const <ExerciseModel>[];
-    }
-
-    return rawExercises
-        .whereType<Map<dynamic, dynamic>>()
-        .map(
-          (exercise) =>
-              ExerciseModel.fromJson(Map<String, dynamic>.from(exercise)),
-        )
-        .toList(growable: false);
-  }
-
-  Map<String, dynamic>? _findLastMatchingWeekdaySession(int weekday) {
-    final box = _workoutHistoryBox;
-    if (box == null || !box.isOpen) {
-      return null;
-    }
-
-    final sessions = box.values
-        .whereType<Map<dynamic, dynamic>>()
-        .map((entry) => Map<String, dynamic>.from(entry))
-        .where((session) => (session['weekday'] as num?)?.toInt() == weekday)
-        .toList(growable: false);
-
-    if (sessions.isEmpty) {
-      return null;
-    }
-
-    sessions.sort((a, b) {
-      final left =
-          DateTime.tryParse(a['date'].toString()) ??
-          DateTime.fromMillisecondsSinceEpoch(0);
-      final right =
-          DateTime.tryParse(b['date'].toString()) ??
-          DateTime.fromMillisecondsSinceEpoch(0);
-      return right.compareTo(left);
-    });
-
-    return sessions.first;
-  }
-
-  // ── Optimistic split/exercise mutation helpers ────────────────────────────
-
-  /// Completely replaces the active split with [newDayNames] and rebuilds
-  /// program days. Caller is responsible for Firestore + Hive writes.
-  void wipeAndReplaceSplit(List<String> newDayNames) {
-    _customSplitDays = List<String>.unmodifiable(newDayNames);
-    _masterTemplate = _customSplitDays;
-    _selectedWorkoutSplit = 'Custom';
-    _programDays = _buildProgramDaysFromTemplate(_masterTemplate);
-    notifyListeners();
-  }
-
-  brutl.ProgramDayModel? _findProgramDayById(String dayId) {
-    for (final day in _programDays) {
-      if (day.id == dayId) {
-        return day;
-      }
-    }
-    return null;
-  }
-
-  void _syncSelectedWeekOverridesForAffectedDays(
-    int weekNumber,
-    Set<String> affectedDayIds,
-  ) {
-    if (weekNumber != _selectedWeek || affectedDayIds.isEmpty) {
-      return;
-    }
-
-    final updatedOverrides = Map<String, brutl.ProgramDayModel>.from(
-      _selectedWeekOverrides,
-    );
-    for (final dayId in affectedDayIds) {
-      final override = updatedOverrides[dayId];
-      final currentDay = _findProgramDayById(dayId);
-      if (override == null || currentDay == null) {
-        continue;
-      }
-      updatedOverrides[dayId] = override.copyWith(
-        splitName: currentDay.splitName,
-        exercises: currentDay.exercises,
-      );
-    }
-
-    _selectedWeekOverrides = updatedOverrides;
-  }
-
-  Future<void> _persistWorkoutDayLogsForIds(
-    String uid,
-    Set<String> dayIds,
-  ) async {
-    if (dayIds.isEmpty) return;
-
-    final firestore = FirebaseFirestore.instance;
-    final batch = firestore.batch();
-    for (final dayId in dayIds) {
-      final day = _findProgramDayById(dayId);
-      if (day == null) {
-        continue;
-      }
-
-      final payload = day.toJson()
-        ..['updatedAt'] = FieldValue.serverTimestamp();
-      batch.set(
-        firestore
-            .collection('users')
-            .doc(uid)
-            .collection('workout_day_logs')
-            .doc(day.id),
-        payload,
-        SetOptions(merge: true),
-      );
-    }
-
-    await batch.commit();
-  }
+  List<brutl.ProgramDayModel> getDaysForWeek(int weekIndex) =>
+      const <brutl.ProgramDayModel>[];
 
   Future<void> renameDayOptimistic(
     int weekIndex,
     String oldName,
     String newName,
-  ) async {
-    final trimmedNewName = newName.trim();
-    final weekNumber = weekIndex + 1;
-    if (trimmedNewName.isEmpty || trimmedNewName == oldName) {
-      return;
-    }
-
-    final prevDays = List<brutl.ProgramDayModel>.from(_programDays);
-    final prevOverrides = Map<String, brutl.ProgramDayModel>.from(
-      _selectedWeekOverrides,
-    );
-    final affectedDayIds = <String>{};
-
-    _programDays = _programDays
-        .map((day) {
-          if (day.weekNumber != weekNumber || day.splitName != oldName) {
-            return day;
-          }
-
-          affectedDayIds.add(day.id);
-          return day.copyWith(splitName: trimmedNewName);
-        })
-        .toList(growable: false);
-
-    if (affectedDayIds.isEmpty) {
-      return;
-    }
-
-    _syncSelectedWeekOverridesForAffectedDays(weekNumber, affectedDayIds);
-    notifyListeners();
-
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-    try {
-      await _persistWorkoutDayLogsForIds(uid, affectedDayIds);
-    } catch (e) {
-      debugPrint('EDIT_DAYS: Firebase rename day failed — $e');
-      _programDays = prevDays;
-      _selectedWeekOverrides = prevOverrides;
-      notifyListeners();
-    }
-  }
+  ) async {}
 
   Future<void> clearExercisesFromDayOptimistic(
     int weekIndex,
     String dayName,
-  ) async {
-    final weekNumber = weekIndex + 1;
-    final prevDays = List<brutl.ProgramDayModel>.from(_programDays);
-    final prevOverrides = Map<String, brutl.ProgramDayModel>.from(
-      _selectedWeekOverrides,
-    );
-    final affectedDayIds = <String>{};
-
-    _programDays = _programDays
-        .map((day) {
-          if (day.weekNumber != weekNumber || day.splitName != dayName) {
-            return day;
-          }
-
-          affectedDayIds.add(day.id);
-          return day.copyWith(exercises: const <brutl.ExerciseModel>[]);
-        })
-        .toList(growable: false);
-
-    if (affectedDayIds.isEmpty) {
-      return;
-    }
-
-    _syncSelectedWeekOverridesForAffectedDays(weekNumber, affectedDayIds);
-    notifyListeners();
-
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-    try {
-      await _persistWorkoutDayLogsForIds(uid, affectedDayIds);
-    } catch (e) {
-      debugPrint('EDIT_DAYS: Firebase clear day failed — $e');
-      _programDays = prevDays;
-      _selectedWeekOverrides = prevOverrides;
-      notifyListeners();
-    }
-  }
+  ) async {}
 
   Future<void> renameExerciseOptimistic(
     int weekIndex,
     String dayName,
     String oldExerciseName,
     String newExerciseName,
-  ) async {
-    final trimmedNewName = newExerciseName.trim();
-    final weekNumber = weekIndex + 1;
-    if (trimmedNewName.isEmpty || trimmedNewName == oldExerciseName) {
-      return;
-    }
-
-    final prevDays = List<brutl.ProgramDayModel>.from(_programDays);
-    final prevOverrides = Map<String, brutl.ProgramDayModel>.from(
-      _selectedWeekOverrides,
-    );
-    final affectedDayIds = <String>{};
-
-    _programDays = _programDays
-        .map((day) {
-          if (day.weekNumber != weekNumber || day.splitName != dayName) {
-            return day;
-          }
-
-          var didRename = false;
-          final updatedExercises = day.exercises
-              .map((exercise) {
-                if (exercise.name != oldExerciseName) {
-                  return exercise;
-                }
-                didRename = true;
-                return exercise.copyWith(name: trimmedNewName);
-              })
-              .toList(growable: false);
-
-          if (!didRename) {
-            return day;
-          }
-
-          affectedDayIds.add(day.id);
-          return day.copyWith(exercises: updatedExercises);
-        })
-        .toList(growable: false);
-
-    if (affectedDayIds.isEmpty) {
-      return;
-    }
-
-    _syncSelectedWeekOverridesForAffectedDays(weekNumber, affectedDayIds);
-    notifyListeners();
-
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-    try {
-      await _persistWorkoutDayLogsForIds(uid, affectedDayIds);
-    } catch (e) {
-      debugPrint('EDIT_EXERCISES: Firebase rename exercise failed — $e');
-      _programDays = prevDays;
-      _selectedWeekOverrides = prevOverrides;
-      notifyListeners();
-    }
-  }
+  ) async {}
 
   Future<void> deleteExerciseOptimistic(
     int weekIndex,
     String dayName,
     String exerciseName,
-  ) async {
-    final weekNumber = weekIndex + 1;
-    final prevDays = List<brutl.ProgramDayModel>.from(_programDays);
-    final prevOverrides = Map<String, brutl.ProgramDayModel>.from(
-      _selectedWeekOverrides,
-    );
-    final affectedDayIds = <String>{};
+  ) async {}
 
-    _programDays = _programDays
-        .map((day) {
-          if (day.weekNumber != weekNumber || day.splitName != dayName) {
-            return day;
-          }
+  // ── Helpers ────────────────────────────────────────────────────────────────
 
-          final updatedExercises = day.exercises
-              .where((exercise) => exercise.name != exerciseName)
-              .toList(growable: false);
-          if (updatedExercises.length == day.exercises.length) {
-            return day;
-          }
+  double _toKg(double weight, String unit) =>
+      unit.toLowerCase() == 'lbs' ? weight * 0.45359237 : weight;
 
-          affectedDayIds.add(day.id);
-          return day.copyWith(exercises: updatedExercises);
-        })
+  List<String>? _stringList(Object? raw) {
+    if (raw is! List) return null;
+    final result = raw
+        .map((e) => e.toString().trim())
+        .where((e) => e.isNotEmpty)
         .toList(growable: false);
-
-    if (affectedDayIds.isEmpty) {
-      return;
-    }
-
-    _syncSelectedWeekOverridesForAffectedDays(weekNumber, affectedDayIds);
-    notifyListeners();
-
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-    try {
-      await _persistWorkoutDayLogsForIds(uid, affectedDayIds);
-    } catch (e) {
-      debugPrint('EDIT_EXERCISES: Firebase delete exercise failed — $e');
-      _programDays = prevDays;
-      _selectedWeekOverrides = prevOverrides;
-      notifyListeners();
-    }
+    return result.isEmpty ? const <String>[] : result;
   }
+
+  // ── Cleanup ────────────────────────────────────────────────────────────────
 
   @override
   void dispose() {

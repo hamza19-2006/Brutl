@@ -1,18 +1,17 @@
 import 'dart:async';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_text_styles.dart';
-import '../../models/brutl_models.dart';
 import '../../providers/workout_provider.dart';
 
 class ShareWorkoutScreen extends StatefulWidget {
   const ShareWorkoutScreen({super.key});
-
-  static String normalizeDayName(String value) => value.trim().toLowerCase();
 
   @override
   State<ShareWorkoutScreen> createState() => _ShareWorkoutScreenState();
@@ -21,87 +20,16 @@ class ShareWorkoutScreen extends StatefulWidget {
 class _ShareWorkoutScreenState extends State<ShareWorkoutScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabController;
-  bool _requestedProgramDaysLoad = false;
 
-  void _ensureProgramDaysLoaded(WorkoutProvider provider) {
-    if (_requestedProgramDaysLoad || provider.programDays.isNotEmpty) return;
-    _requestedProgramDaysLoad = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      unawaited(
-        provider.initialize().catchError((Object error, StackTrace stackTrace) {
-          debugPrint('Failed to initialize WorkoutProvider: $error');
-          debugPrintStack(stackTrace: stackTrace);
-          final messenger = ScaffoldMessenger.maybeOf(context);
-          messenger
-            ?..hideCurrentSnackBar()
-            ..showSnackBar(
-              const SnackBar(
-                content: Text(
-                  'Failed to load workout exercises. Please retry.',
-                ),
-              ),
-            );
-        }),
-      );
-    });
-  }
-
-  List<ProgramDayModel> _matchingDays(
-    List<ProgramDayModel> programDays, {
-    required String targetName,
-    required String targetId,
-  }) {
-    final normalizedTargetName = ShareWorkoutScreen.normalizeDayName(
-      targetName,
-    );
-    return programDays
-        .where(
-          (d) =>
-              d.splitName.trim().toLowerCase() == normalizedTargetName ||
-              d.id == targetId,
-        )
-        .toList(growable: false);
-  }
-
-  List<ExerciseModel> _mergedExercisesFromMatches(
-    List<ProgramDayModel> matchedDays, {
-    required List<ExerciseModel> fallbackExercises,
-  }) {
-    if (matchedDays.isEmpty) return fallbackExercises;
-    final mergedExercises = <ExerciseModel>[];
-    for (final day in matchedDays) {
-      mergedExercises.addAll(day.exercises);
-    }
-    return mergedExercises.isEmpty ? fallbackExercises : mergedExercises;
-  }
-
-  void _shareMatchedDay(
-    List<ProgramDayModel> programDays, {
-    required String targetName,
-    required String targetId,
-    required List<ExerciseModel> fallbackExercises,
-  }) {
-    final matchedDays = _matchingDays(
-      programDays,
-      targetName: targetName,
-      targetId: targetId,
-    );
-    if (matchedDays.isEmpty) {
-      _shareDay(targetName, fallbackExercises);
-      return;
-    }
-    final selectedExercises = _mergedExercisesFromMatches(
-      matchedDays,
-      fallbackExercises: fallbackExercises,
-    );
-    _shareDay(matchedDays.first.splitName, selectedExercises);
-  }
+  // All loaded data: weekNumber → dayIndex → {dayName, exercises}
+  Map<int, List<_DayData>> _weekMap = {};
+  bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadFromFirestore());
   }
 
   @override
@@ -110,22 +38,105 @@ class _ShareWorkoutScreenState extends State<ShareWorkoutScreen>
     super.dispose();
   }
 
-  void _shareWeek(int weekNumber, List<ProgramDayModel> weekDays) {
+  Future<void> _loadFromFirestore() async {
+    if (!mounted) return;
+    setState(() => _isLoading = true);
+
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) {
+      if (mounted) setState(() => _isLoading = false);
+      return;
+    }
+
+    final provider = context.read<WorkoutProvider>();
+    final totalWeeks = provider.totalProgramWeeks;
+    final dayNames = provider.customSplitDays;
+    final totalDays = dayNames.length;
+
+    final db = FirebaseFirestore.instance;
+    final result = <int, List<_DayData>>{};
+
+    for (var week = 1; week <= totalWeeks; week++) {
+      final weekId = 'week_$week';
+      final days = <_DayData>[];
+
+      for (var d = 0; d < totalDays; d++) {
+        final dayId = 'day_${d + 1}';
+        final dayName = dayNames[d];
+
+        try {
+          final snap = await db
+              .collection('users')
+              .doc(uid)
+              .collection('weeks')
+              .doc(weekId)
+              .collection('days')
+              .doc(dayId)
+              .get();
+
+          final rawExercises =
+              ((snap.data()?['exercises']) as List<dynamic>?) ?? const [];
+          final exercises = rawExercises
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList();
+
+          days.add(
+            _DayData(
+              weekId: weekId,
+              dayId: dayId,
+              dayName: dayName,
+              dayIndex: d,
+              exercises: exercises,
+            ),
+          );
+        } catch (_) {
+          days.add(
+            _DayData(
+              weekId: weekId,
+              dayId: dayId,
+              dayName: dayName,
+              dayIndex: d,
+              exercises: const [],
+            ),
+          );
+        }
+      }
+
+      result[week] = days;
+    }
+
+    if (mounted) {
+      setState(() {
+        _weekMap = result;
+        _isLoading = false;
+      });
+    }
+  }
+
+  bool get _hasAnyExercise =>
+      _weekMap.values.any((days) => days.any((d) => d.exercises.isNotEmpty));
+
+  // ── navigation helpers ────────────────────────────────────────────────────
+
+  void _shareWeek(int weekNumber, List<_DayData> weekDays) {
     final allExercises = <Map<String, dynamic>>[];
     final dayNames = <String>[];
+
     for (final day in weekDays) {
-      if (day.splitName.toLowerCase() == 'rest') continue;
-      dayNames.add(day.splitName);
+      if (day.dayName.toLowerCase() == 'rest') continue;
+      dayNames.add(day.dayName);
       for (final ex in day.exercises) {
         allExercises.add({
-          'exerciseName': ex.name,
-          'sets': ex.sets,
-          'reps': ex.reps,
-          'weight': ex.weightDisplay,
-          'day': day.splitName,
+          'exerciseName': ex['name'] ?? '',
+          'sets': ex['sets'],
+          'reps': ex['reps'],
+          'weight': ex['weight'] ?? '',
+          'day': day.dayName,
         });
       }
     }
+
     Navigator.pop<Map<String, dynamic>>(context, {
       'shareScope': 'week',
       'title': 'Week $weekNumber',
@@ -135,61 +146,42 @@ class _ShareWorkoutScreenState extends State<ShareWorkoutScreen>
     });
   }
 
-  void _shareDay(String dayName, List<ExerciseModel> exercises) {
+  void _shareDay(String dayName, List<Map<String, dynamic>> exercises) {
     Navigator.pop<Map<String, dynamic>>(context, {
       'shareScope': 'day',
       'title': dayName,
       'exercises': exercises
           .map(
             (ex) => {
-              'exerciseName': ex.name,
-              'sets': ex.sets,
-              'reps': ex.reps,
-              'weight': ex.weightDisplay,
+              'exerciseName': ex['name'] ?? '',
+              'sets': ex['sets'],
+              'reps': ex['reps'],
+              'weight': ex['weight'] ?? '',
             },
           )
           .toList(),
     });
   }
 
-  void _shareExercise(ExerciseModel exercise) {
+  void _shareExercise(Map<String, dynamic> exercise) {
     Navigator.pop<Map<String, dynamic>>(context, {
       'shareScope': 'exercise',
-      'title': exercise.name,
+      'title': exercise['name'] ?? 'Exercise',
       'exercises': [
         {
-          'exerciseName': exercise.name,
-          'sets': exercise.sets,
-          'reps': exercise.reps,
-          'weight': exercise.weightDisplay,
+          'exerciseName': exercise['name'] ?? '',
+          'sets': exercise['sets'],
+          'reps': exercise['reps'],
+          'weight': exercise['weight'] ?? '',
         },
       ],
     });
   }
 
   void _showExercisePicker(
-    List<ProgramDayModel> programDays, {
-    required String dayName,
-    required String dayId,
-    required List<ExerciseModel> exercises,
-  }) {
-    final matchedDays = _matchingDays(
-      programDays,
-      targetName: dayName,
-      targetId: dayId,
-    );
-    final selectedDay = matchedDays.isEmpty
-        ? null
-        : matchedDays.firstWhere(
-            (d) => d.exercises.isNotEmpty,
-            orElse: () => matchedDays.first,
-          );
-    final selectedDayName = selectedDay?.splitName ?? dayName;
-    final selectedExercises = _mergedExercisesFromMatches(
-      matchedDays,
-      fallbackExercises: exercises,
-    );
-
+    String dayName,
+    List<Map<String, dynamic>> exercises,
+  ) {
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -210,15 +202,12 @@ class _ShareWorkoutScreenState extends State<ShareWorkoutScreen>
               child: Row(
                 children: [
                   Expanded(
-                    child: Text(
-                      selectedDayName,
-                      style: AppTextStyles.headingLarge(),
-                    ),
+                    child: Text(dayName, style: AppTextStyles.headingLarge()),
                   ),
                   TextButton(
                     onPressed: () {
                       Navigator.pop(ctx);
-                      _shareDay(selectedDayName, selectedExercises);
+                      _shareDay(dayName, exercises);
                     },
                     child: Text(
                       'Share Day',
@@ -234,11 +223,11 @@ class _ShareWorkoutScreenState extends State<ShareWorkoutScreen>
               child: ListView.separated(
                 controller: scrollCtrl,
                 padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-                itemCount: selectedExercises.length,
+                itemCount: exercises.length,
                 separatorBuilder: (_, __) =>
                     const SizedBox(height: AppSpacing.sm),
                 itemBuilder: (ctx, i) {
-                  final ex = selectedExercises[i];
+                  final ex = exercises[i];
                   return _ExerciseTile(
                     exercise: ex,
                     onTap: () {
@@ -255,122 +244,111 @@ class _ShareWorkoutScreenState extends State<ShareWorkoutScreen>
     );
   }
 
+  // ── build ─────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
-    return Consumer<WorkoutProvider>(
-      builder: (context, provider, _) {
-        _ensureProgramDaysLoaded(provider);
-        final programDays = provider.programDays;
-        final hasData = programDays.any((d) => d.exercises.isNotEmpty);
-
-        return Scaffold(
-          backgroundColor: AppColors.backgroundPrimary,
-          appBar: AppBar(
-            backgroundColor: AppColors.backgroundPrimary,
-            elevation: 0,
-            leading: IconButton(
-              icon: const Icon(
-                Icons.arrow_back_rounded,
-                color: AppColors.textPrimary,
+    return Scaffold(
+      backgroundColor: AppColors.backgroundPrimary,
+      appBar: AppBar(
+        backgroundColor: AppColors.backgroundPrimary,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(
+            Icons.arrow_back_rounded,
+            color: AppColors.textPrimary,
+          ),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Text('Share Workout', style: AppTextStyles.headingLarge()),
+        bottom: TabBar(
+          controller: _tabController,
+          indicatorColor: AppColors.accentPrimary,
+          indicatorWeight: 2,
+          labelColor: AppColors.accentPrimary,
+          unselectedLabelColor: AppColors.textTertiary,
+          labelStyle: AppTextStyles.labelLarge(color: AppColors.accentPrimary),
+          unselectedLabelStyle: AppTextStyles.labelLarge(
+            color: AppColors.textTertiary,
+          ),
+          tabs: const [
+            Tab(text: 'WEEK'),
+            Tab(text: 'DAY'),
+            Tab(text: 'EXERCISE'),
+          ],
+        ),
+      ),
+      body: _isLoading
+          ? const Center(
+              child: CircularProgressIndicator(color: AppColors.accentPrimary),
+            )
+          : !_hasAnyExercise
+          ? Center(
+              child: Text(
+                'No exercises found.\nAdd exercises from the workout screen first.',
+                textAlign: TextAlign.center,
+                style: AppTextStyles.bodyMedium(color: AppColors.textTertiary),
               ),
-              onPressed: () => Navigator.pop(context),
-            ),
-            title: Text('Share Workout', style: AppTextStyles.headingLarge()),
-            bottom: TabBar(
+            )
+          : TabBarView(
               controller: _tabController,
-              indicatorColor: AppColors.accentPrimary,
-              indicatorWeight: 2,
-              labelColor: AppColors.accentPrimary,
-              unselectedLabelColor: AppColors.textTertiary,
-              labelStyle: AppTextStyles.labelLarge(
-                color: AppColors.accentPrimary,
-              ),
-              unselectedLabelStyle: AppTextStyles.labelLarge(
-                color: AppColors.textTertiary,
-              ),
-              tabs: const [
-                Tab(text: 'WEEK'),
-                Tab(text: 'DAY'),
-                Tab(text: 'EXERCISE'),
+              children: [
+                _WeekTab(weekMap: _weekMap, onShare: _shareWeek),
+                _DayTab(weekMap: _weekMap, onShare: _shareDay),
+                _ExerciseTab(
+                  weekMap: _weekMap,
+                  onShowPicker: _showExercisePicker,
+                ),
               ],
             ),
-          ),
-          body: !hasData
-              ? Center(
-                  child: Text(
-                    'No exercises found.\nAdd exercises from the workout screen first.',
-                    textAlign: TextAlign.center,
-                    style: AppTextStyles.bodyMedium(
-                      color: AppColors.textTertiary,
-                    ),
-                  ),
-                )
-              : TabBarView(
-                  controller: _tabController,
-                  children: [
-                    _WeekTabContent(
-                      programDays: programDays,
-                      onShare: _shareWeek,
-                    ),
-                    _DayTabContent(
-                      programDays: programDays,
-                      onShare: (targetName, targetId, fallbackExercises) =>
-                          _shareMatchedDay(
-                            programDays,
-                            targetName: targetName,
-                            targetId: targetId,
-                            fallbackExercises: fallbackExercises,
-                          ),
-                    ),
-                    _ExerciseTabContent(
-                      programDays: programDays,
-                      onShowPicker: (targetName, targetId, fallbackExercises) {
-                        _showExercisePicker(
-                          programDays,
-                          dayName: targetName,
-                          dayId: targetId,
-                          exercises: fallbackExercises,
-                        );
-                      },
-                    ),
-                  ],
-                ),
-        );
-      },
     );
   }
 }
 
-// =============================================================================
+// ---------------------------------------------------------------------------
+// Data holder
+// ---------------------------------------------------------------------------
+
+class _DayData {
+  const _DayData({
+    required this.weekId,
+    required this.dayId,
+    required this.dayName,
+    required this.dayIndex,
+    required this.exercises,
+  });
+
+  final String weekId;
+  final String dayId;
+  final String dayName;
+  final int dayIndex;
+  final List<Map<String, dynamic>> exercises;
+}
+
+// ---------------------------------------------------------------------------
 // Week tab
-// =============================================================================
+// ---------------------------------------------------------------------------
 
-class _WeekTabContent extends StatelessWidget {
-  const _WeekTabContent({required this.programDays, required this.onShare});
+class _WeekTab extends StatelessWidget {
+  const _WeekTab({required this.weekMap, required this.onShare});
 
-  final List<ProgramDayModel> programDays;
-  final void Function(int weekNumber, List<ProgramDayModel> weekDays) onShare;
+  final Map<int, List<_DayData>> weekMap;
+  final void Function(int week, List<_DayData> days) onShare;
 
   @override
   Widget build(BuildContext context) {
-    final weeks = programDays.map((d) => d.weekNumber).toSet().toList()..sort();
-
+    final weeks = weekMap.keys.toList()..sort();
     return ListView.separated(
       padding: const EdgeInsets.all(AppSpacing.lg),
       itemCount: weeks.length,
       separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.sm),
       itemBuilder: (context, i) {
         final week = weeks[i];
-        final weekDays =
-            programDays
-                .where(
-                  (d) =>
-                      d.weekNumber == week &&
-                      d.splitName.toLowerCase() != 'rest',
-                )
-                .toList()
-              ..sort((a, b) => a.dayNumber.compareTo(b.dayNumber));
-        final exerciseCount = weekDays.fold(
+        final days = weekMap[week] ?? [];
+        final activeDays = days.where(
+          (d) => d.dayName.toLowerCase() != 'rest' && d.exercises.isNotEmpty,
+        );
+        final exerciseCount = activeDays.fold(
           0,
           (sum, d) => sum + d.exercises.length,
         );
@@ -378,41 +356,43 @@ class _WeekTabContent extends StatelessWidget {
         return _ScopeCard(
           icon: Icons.calendar_month,
           title: 'Week $week',
-          subtitle: '${weekDays.length} days · $exerciseCount exercises',
+          subtitle: '${activeDays.length} days · $exerciseCount exercises',
           isHighlighted: true,
-          onTap: () => onShare(week, weekDays),
+          onTap: () => onShare(week, days),
         );
       },
     );
   }
 }
 
-// =============================================================================
-// Day tab
-// =============================================================================
+// ---------------------------------------------------------------------------
+// Day tab — deduplicated by name, uses the week with the most exercises
+// ---------------------------------------------------------------------------
 
-class _DayTabContent extends StatelessWidget {
-  const _DayTabContent({required this.programDays, required this.onShare});
+class _DayTab extends StatelessWidget {
+  const _DayTab({required this.weekMap, required this.onShare});
 
-  final List<ProgramDayModel> programDays;
-  final void Function(
-    String dayName,
-    String dayId,
-    List<ExerciseModel> exercises,
-  )
+  final Map<int, List<_DayData>> weekMap;
+  final void Function(String dayName, List<Map<String, dynamic>> exercises)
   onShare;
 
   @override
   Widget build(BuildContext context) {
-    final seen = <String>{};
-    final uniqueDays = <ProgramDayModel>[];
-    for (final d in programDays) {
-      if (d.splitName.toLowerCase() == 'rest') continue;
-      final normalizedDayName = ShareWorkoutScreen.normalizeDayName(
-        d.splitName,
-      );
-      if (seen.add(normalizedDayName)) uniqueDays.add(d);
+    // Build a map: normalised dayName → best _DayData (most exercises)
+    final bestByName = <String, _DayData>{};
+    for (final days in weekMap.values) {
+      for (final day in days) {
+        if (day.dayName.toLowerCase() == 'rest') continue;
+        final key = day.dayName.trim().toLowerCase();
+        final existing = bestByName[key];
+        if (existing == null ||
+            day.exercises.length > existing.exercises.length) {
+          bestByName[key] = day;
+        }
+      }
     }
+
+    final uniqueDays = bestByName.values.toList();
 
     return ListView.separated(
       padding: const EdgeInsets.all(AppSpacing.lg),
@@ -422,46 +402,44 @@ class _DayTabContent extends StatelessWidget {
         final day = uniqueDays[i];
         return _ScopeCard(
           icon: Icons.fitness_center_rounded,
-          title: day.splitName,
+          title: day.dayName,
           subtitle:
               '${day.exercises.length} exercise${day.exercises.length == 1 ? '' : 's'}',
-          onTap: () => onShare(day.splitName, day.id, day.exercises),
+          onTap: () => onShare(day.dayName, day.exercises),
         );
       },
     );
   }
 }
 
-// =============================================================================
-// Exercise tab
-// =============================================================================
+// ---------------------------------------------------------------------------
+// Exercise tab — groups by day, shows picker
+// ---------------------------------------------------------------------------
 
-class _ExerciseTabContent extends StatelessWidget {
-  const _ExerciseTabContent({
-    required this.programDays,
-    required this.onShowPicker,
-  });
+class _ExerciseTab extends StatelessWidget {
+  const _ExerciseTab({required this.weekMap, required this.onShowPicker});
 
-  final List<ProgramDayModel> programDays;
-  final void Function(
-    String dayName,
-    String dayId,
-    List<ExerciseModel> exercises,
-  )
+  final Map<int, List<_DayData>> weekMap;
+  final void Function(String dayName, List<Map<String, dynamic>> exercises)
   onShowPicker;
 
   @override
   Widget build(BuildContext context) {
-    final seen = <String>{};
-    final uniqueDays = <ProgramDayModel>[];
-    for (final d in programDays) {
-      if (d.splitName.toLowerCase() == 'rest') continue;
-      if (d.exercises.isEmpty) continue;
-      final normalizedDayName = ShareWorkoutScreen.normalizeDayName(
-        d.splitName,
-      );
-      if (seen.add(normalizedDayName)) uniqueDays.add(d);
+    final bestByName = <String, _DayData>{};
+    for (final days in weekMap.values) {
+      for (final day in days) {
+        if (day.dayName.toLowerCase() == 'rest') continue;
+        if (day.exercises.isEmpty) continue;
+        final key = day.dayName.trim().toLowerCase();
+        final existing = bestByName[key];
+        if (existing == null ||
+            day.exercises.length > existing.exercises.length) {
+          bestByName[key] = day;
+        }
+      }
     }
+
+    final uniqueDays = bestByName.values.toList();
 
     if (uniqueDays.isEmpty) {
       return Center(
@@ -480,19 +458,19 @@ class _ExerciseTabContent extends StatelessWidget {
         final day = uniqueDays[i];
         return _ScopeCard(
           icon: Icons.sports_gymnastics,
-          title: day.splitName,
+          title: day.dayName,
           subtitle: 'Tap to pick a specific exercise',
           showChevron: true,
-          onTap: () => onShowPicker(day.splitName, day.id, day.exercises),
+          onTap: () => onShowPicker(day.dayName, day.exercises),
         );
       },
     );
   }
 }
 
-// =============================================================================
-// Shared scope card
-// =============================================================================
+// ---------------------------------------------------------------------------
+// Shared widgets
+// ---------------------------------------------------------------------------
 
 class _ScopeCard extends StatelessWidget {
   const _ScopeCard({
@@ -568,11 +546,18 @@ class _ScopeCard extends StatelessWidget {
 
 class _ExerciseTile extends StatelessWidget {
   const _ExerciseTile({required this.exercise, required this.onTap});
-  final ExerciseModel exercise;
+
+  final Map<String, dynamic> exercise;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
+    final name = exercise['name']?.toString() ?? 'Exercise';
+    final sets = exercise['sets']?.toString() ?? '—';
+    final reps = exercise['reps']?.toString() ?? '—';
+    final weight = exercise['weight']?.toString() ?? '';
+    final unit = exercise['weightUnit']?.toString() ?? 'kg';
+
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(AppSpacing.borderRadiusSmall),
@@ -589,9 +574,9 @@ class _ExerciseTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(exercise.name, style: AppTextStyles.headingSmall()),
+                  Text(name, style: AppTextStyles.headingSmall()),
                   Text(
-                    '${exercise.sets} sets × ${exercise.reps} reps • ${exercise.weightDisplay} ${exercise.weightUnit}',
+                    '$sets sets × $reps reps${weight.isNotEmpty ? ' • $weight $unit' : ''}',
                     style: AppTextStyles.labelSmall(
                       color: AppColors.textTertiary,
                     ),

@@ -222,7 +222,11 @@ class ChatProvider extends ChangeNotifier {
     _friends = _friends.where((f) => f.uid != friendUid).toList();
     notifyListeners();
 
+    final chatId = buildChatId(_uid, friendUid);
+
     try {
+      await clearChatHistory(chatId);
+
       final batch = _db.batch();
       batch.delete(
         _db.collection('users').doc(_uid).collection('friends').doc(friendUid),
@@ -234,17 +238,8 @@ class ChatProvider extends ChangeNotifier {
     } catch (error, stackTrace) {
       _friends = previousFriends;
       notifyListeners();
-      debugPrint('Failed to delete friend records for $friendUid: $error');
-      debugPrintStack(stackTrace: stackTrace);
-      rethrow;
-    }
-
-    try {
-      final chatId = buildChatId(_uid, friendUid);
-      await clearChatHistory(chatId);
-    } catch (error, stackTrace) {
       debugPrint(
-        'Friend removed but chat history clear failed for $friendUid: $error',
+        'Failed to remove friend $friendUid with cascade delete: $error',
       );
       debugPrintStack(stackTrace: stackTrace);
       rethrow;

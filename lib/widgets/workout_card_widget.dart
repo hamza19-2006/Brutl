@@ -40,7 +40,7 @@ class WorkoutCardWidget extends StatelessWidget {
   final String workoutName;
   final String uid;
 
-  /// Smart label for updatedAt timestamp:
+  /// Smart timestamp label:
   /// - Same day   → "Today 9:11 PM"
   /// - Yesterday  → "Yesterday 9:11 PM"
   /// - Older      → "7:00 PM 4/5/2026"
@@ -69,7 +69,7 @@ class WorkoutCardWidget extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // ── "Day X" label sits OUTSIDE and ABOVE the card ──
+        // "Day X" label above the card
         Text(
           dayNumber,
           textAlign: TextAlign.left,
@@ -80,7 +80,7 @@ class WorkoutCardWidget extends StatelessWidget {
         ),
         const SizedBox(height: 8),
 
-        // ── Individual StreamBuilder per card for independent timestamps ──
+        // Independent StreamBuilder per card so each timestamp updates live
         StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
           stream: FirebaseFirestore.instance
               .collection('users')
@@ -99,7 +99,6 @@ class WorkoutCardWidget extends StatelessWidget {
             final Timestamp? updatedAt = data?['updatedAt'] as Timestamp?;
             final String updatedLabel = _formatUpdatedAt(updatedAt);
 
-            // ── Clickable card → navigates to DayDetailScreen ──
             return Material(
               color: Colors.transparent,
               child: InkWell(

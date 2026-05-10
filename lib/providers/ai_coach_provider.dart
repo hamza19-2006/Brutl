@@ -86,9 +86,15 @@ class AiCoachMessage {
 }
 
 class AiCoachProvider extends ChangeNotifier {
-  static const int _pageSize = 25;
+  static const int _pageSize = 20;
+  static const int _retentionDays = 14;
+  static const int _pruneBatchSize = 400;
   static const String _geminiModel = 'gemini-1.5-flash-latest';
   static const String _grokModel = 'grok-beta';
+  static final RegExp _summaryTagPattern = RegExp(
+    r'\[\[UPDATE_SUMMARY:\s*([\s\S]*?)\]\]',
+    caseSensitive: false,
+  );
 
   final FirebaseAuth _auth;
   final FirebaseFirestore _firestore;
@@ -108,6 +114,7 @@ class AiCoachProvider extends ChangeNotifier {
   bool _isLoadingMore = false;
   bool _isSending = false;
   bool _hasMore = true;
+  bool _didRunPrune = false;
   String? _error;
   DocumentSnapshot<Map<String, dynamic>>? _oldestLoadedDoc;
   Future<void>? _initialLoadFuture;
@@ -134,6 +141,16 @@ class AiCoachProvider extends ChangeNotifier {
         .collection('messages');
   }
 
+  DocumentReference<Map<String, dynamic>>? get _summaryDocument {
+    final uid = _uid;
+    if (uid == null || uid.isEmpty) return null;
+    return _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('ai_coach')
+        .doc('summary');
+  }
+
   Future<void> initialize() {
     _initialLoadFuture ??= _loadInitialMessages();
     return _initialLoadFuture!;
@@ -155,6 +172,11 @@ class AiCoachProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
+      if (!_didRunPrune) {
+        await _pruneExpiredMessages();
+        _didRunPrune = true;
+      }
+
       final querySnapshot = await collection
           .orderBy('timestamp', descending: true)
           .limit(_pageSize)
@@ -268,7 +290,19 @@ class AiCoachProvider extends ChangeNotifier {
         latestUserMessage: userMessage,
       );
 
-      if (assistantText.trim().isEmpty) {
+      final parsed = _parseAssistantReply(assistantText);
+      if (parsed.summaryText.isNotEmpty) {
+        final summaryDocument = _summaryDocument;
+        if (summaryDocument != null) {
+          await summaryDocument.set(<String, dynamic>{
+            'summary': parsed.summaryText,
+            'updatedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+        }
+      }
+
+      final cleanedAssistantText = parsed.userVisibleText;
+      if (cleanedAssistantText.trim().isEmpty) {
         throw StateError('Empty assistant response');
       }
 
@@ -276,7 +310,7 @@ class AiCoachProvider extends ChangeNotifier {
       final assistantMessage = AiCoachMessage(
         id: assistantDocRef.id,
         role: 'assistant',
-        content: assistantText.trim(),
+        content: cleanedAssistantText.trim(),
         timestamp: DateTime.now(),
       );
 
@@ -302,6 +336,46 @@ class AiCoachProvider extends ChangeNotifier {
       'attachmentType': message.attachmentType,
       'attachmentData': message.attachmentData,
     };
+  }
+
+  _AssistantReplyParseResult _parseAssistantReply(String text) {
+    final match = _summaryTagPattern.firstMatch(text);
+    final summaryText = match?.group(1)?.trim() ?? '';
+    final cleanedText = text.replaceAll(_summaryTagPattern, '').trim();
+    return _AssistantReplyParseResult(
+      userVisibleText: cleanedText,
+      summaryText: summaryText,
+    );
+  }
+
+  Future<void> _pruneExpiredMessages() async {
+    final collection = _messagesCollection;
+    if (collection == null) return;
+
+    final cutoff = Timestamp.fromDate(
+      DateTime.now().subtract(const Duration(days: _retentionDays)),
+    );
+
+    while (true) {
+      final staleSnapshot = await collection
+          .where('timestamp', isLessThan: cutoff)
+          .limit(_pruneBatchSize)
+          .get();
+
+      if (staleSnapshot.docs.isEmpty) {
+        break;
+      }
+
+      final batch = _firestore.batch();
+      for (final doc in staleSnapshot.docs) {
+        batch.delete(doc.reference);
+      }
+      await batch.commit();
+
+      if (staleSnapshot.docs.length < _pruneBatchSize) {
+        break;
+      }
+    }
   }
 
   Future<String> _generateAssistantReply({
@@ -485,4 +559,14 @@ class AiCoachProvider extends ChangeNotifier {
     _httpClient.close();
     super.dispose();
   }
+}
+
+class _AssistantReplyParseResult {
+  const _AssistantReplyParseResult({
+    required this.userVisibleText,
+    required this.summaryText,
+  });
+
+  final String userVisibleText;
+  final String summaryText;
 }

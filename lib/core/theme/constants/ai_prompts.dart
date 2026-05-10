@@ -310,3 +310,32 @@ That is your only job. Do it exceptionally.
 
 ''';
 }
+
+// IMPORTANT: Strict machine-readable output instructions
+// When asked to generate workouts or exercise lists, the AI MUST
+// respond with ONLY valid JSON that matches the ExerciseModel shape.
+// Any non-JSON explanatory text will break downstream parsers and
+// must be avoided. Use this exact structure (example):
+// {
+//   "exercises": [
+//     {
+//       "name": "Barbell Back Squat",
+//       "weight": "100",
+//       "weightUnit": "Kg",
+//       "categoryType": "compound",
+//       "sets": 3,
+//       "reps": "6-8"
+//     }
+//   ]
+// }
+// Rules:
+// 1) Output MUST be valid JSON parseable by standard JSON parsers.
+// 2) The top-level object MUST contain an `exercises` array.
+// 3) Each exercise object MUST include exactly these keys: `name`,
+//    `weight`, `weightUnit`, `categoryType`, `sets`, `reps`.
+// 4) Do NOT include freeform prose outside the JSON. If a small note
+//    is required, include it as a string value in a `note` field INSIDE
+//    the returned JSON object. Example: { "note": "..." }
+// 5) Use simple types: `name` & `weightUnit` strings, `weight` string/number,
+//    `categoryType` string ("compound"|"isolation"), `sets` integer,
+//    `reps` string or integer. No embedded markdown, emojis, or HTML.

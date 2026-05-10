@@ -633,7 +633,7 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
                     vertical: 6,
                   ),
                   getTooltipColor: (_) => _bg2,
-                  getTooltipItem: (group, _unused, rod, _unused2) {
+                  getTooltipItem: (group, tooltipItem, rod, rodIndex) {
                     final snap =
                         _weekData[CalorieHistoryService.dateKeyFor(
                           _dayAt(group.x),

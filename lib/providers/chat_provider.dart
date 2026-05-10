@@ -442,10 +442,9 @@ class ChatProvider extends ChangeNotifier {
 
     // Reset our own unread counter on the parent chat doc.
     try {
-      await chatRef.set(
-        <String, dynamic>{unreadKey: 0},
-        SetOptions(merge: true),
-      );
+      await chatRef.set(<String, dynamic>{
+        unreadKey: 0,
+      }, SetOptions(merge: true));
     } catch (error, stackTrace) {
       debugPrint('Failed to reset unread count on chat $chatId: $error');
       debugPrintStack(stackTrace: stackTrace);
@@ -527,12 +526,15 @@ class ChatProvider extends ChangeNotifier {
     required int reps,
     double? previousBest,
   }) async {
+    final previousBestEntry = previousBest == null
+        ? null
+        : <String, dynamic>{'previousBest': previousBest};
     await sendWidgetMessage(chatId, 'pr_share', <String, dynamic>{
       'exerciseName': exerciseName,
       'weight': weight,
       'unit': unit,
       'reps': reps,
-      if (previousBest != null) 'previousBest': previousBest,
+      ...?previousBestEntry,
       'achievedAt': Timestamp.fromDate(DateTime.now()),
     });
   }
@@ -547,7 +549,7 @@ class ChatProvider extends ChangeNotifier {
     await sendWidgetMessage(chatId, 'streak_share', <String, dynamic>{
       'streakDays': streakDays,
       'streakType': streakType,
-      if (note != null && note.isNotEmpty) 'note': note,
+      if (note?.isNotEmpty ?? false) 'note': note,
       'sharedAt': Timestamp.fromDate(DateTime.now()),
     });
   }
@@ -586,14 +588,8 @@ class ChatProvider extends ChangeNotifier {
       'createdBy': _uid,
       'status': 'active',
       'progress': <String, dynamic>{
-        _uid: <String, dynamic>{
-          'currentValue': 0,
-          'lastUpdated': null,
-        },
-        friendUid: <String, dynamic>{
-          'currentValue': 0,
-          'lastUpdated': null,
-        },
+        _uid: <String, dynamic>{'currentValue': 0, 'lastUpdated': null},
+        friendUid: <String, dynamic>{'currentValue': 0, 'lastUpdated': null},
       },
     };
 
@@ -725,8 +721,7 @@ class ChatProvider extends ChangeNotifier {
         final current = <String, List<String>>{};
         raw.forEach((key, value) {
           if (value is List) {
-            current[key.toString()] =
-                value.map((e) => e.toString()).toList();
+            current[key.toString()] = value.map((e) => e.toString()).toList();
           }
         });
 
@@ -738,9 +733,8 @@ class ChatProvider extends ChangeNotifier {
 
         // Was the user already on this emoji? `current` no longer has them, so
         // we determine 'toggle off' by comparing against the original list.
-        final originalList = (raw[emoji] as List?)
-                ?.map((e) => e.toString())
-                .toList() ??
+        final originalList =
+            (raw[emoji] as List?)?.map((e) => e.toString()).toList() ??
             const <String>[];
         final wasReacted = originalList.contains(_uid);
 
@@ -862,9 +856,7 @@ class ChatProvider extends ChangeNotifier {
       final raw = data == null ? null : data['presence'];
       if (raw is Map<String, dynamic>) return PresenceModel.fromJson(raw);
       if (raw is Map) {
-        return PresenceModel.fromJson(
-          Map<String, dynamic>.from(raw),
-        );
+        return PresenceModel.fromJson(Map<String, dynamic>.from(raw));
       }
       return PresenceModel.offline;
     });
@@ -965,8 +957,8 @@ class ChatProvider extends ChangeNotifier {
       case 'exercise_share':
         final title =
             message.payload['title'] as String? ??
-                message.payload['name'] as String? ??
-                'a workout';
+            message.payload['name'] as String? ??
+            'a workout';
         return '💪 Workout: $title';
       case 'pr_share':
         final exercise = message.payload['exerciseName'] as String? ?? 'PR';

@@ -97,7 +97,7 @@ class _EditDaysScreenState extends State<EditDaysScreen> {
                             vertical: AppSpacing.lg,
                           ),
                           itemCount: dayNames.length,
-                          separatorBuilder: (_, __) =>
+                          separatorBuilder: (context, index) =>
                               const SizedBox(height: AppSpacing.sm),
                           itemBuilder: (context, index) {
                             final weekNumber = _selectedWeekIndex + 1;
@@ -396,28 +396,29 @@ class _FirestoreEditExercisesScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: AppColors.backgroundPrimary,
       appBar: buildSettingsAppBar(context, '$dayName Exercises'),
-      floatingActionButton: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-        stream: docRef.snapshots(),
-        builder: (context, snapshot) {
-          final rawExercises =
-              (snapshot.data?.data()?['exercises'] as List<dynamic>?) ??
+      floatingActionButton:
+          StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+            stream: docRef.snapshots(),
+            builder: (context, snapshot) {
+              final rawExercises =
+                  (snapshot.data?.data()?['exercises'] as List<dynamic>?) ??
                   const [];
-          final exercises = rawExercises
-              .whereType<Map>()
-              .map((e) => Map<String, dynamic>.from(e))
-              .toList();
-          return FloatingActionButton.extended(
-            onPressed: () => _showAddDialog(context, docRef, exercises),
-            backgroundColor: AppColors.accentPrimary,
-            foregroundColor: Colors.white,
-            icon: const Icon(Icons.add),
-            label: Text(
-              'Add Exercise',
-              style: AppTextStyles.labelLarge(color: Colors.white),
-            ),
-          );
-        },
-      ),
+              final exercises = rawExercises
+                  .whereType<Map>()
+                  .map((e) => Map<String, dynamic>.from(e))
+                  .toList();
+              return FloatingActionButton.extended(
+                onPressed: () => _showAddDialog(context, docRef, exercises),
+                backgroundColor: AppColors.accentPrimary,
+                foregroundColor: Colors.white,
+                icon: const Icon(Icons.add),
+                label: Text(
+                  'Add Exercise',
+                  style: AppTextStyles.labelLarge(color: Colors.white),
+                ),
+              );
+            },
+          ),
       body: SafeArea(
         child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
           stream: docRef.snapshots(),
@@ -454,7 +455,7 @@ class _FirestoreEditExercisesScreen extends StatelessWidget {
                 vertical: AppSpacing.lg,
               ),
               itemCount: exercises.length,
-              separatorBuilder: (_, __) =>
+              separatorBuilder: (context, index) =>
                   const SizedBox(height: AppSpacing.sm),
               itemBuilder: (context, index) {
                 final ex = exercises[index];
@@ -591,8 +592,9 @@ class _FirestoreEditExercisesScreen extends StatelessWidget {
                 const SizedBox(height: AppSpacing.md),
                 TextFormField(
                   controller: weightCtrl,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
                   decoration: const InputDecoration(
                     hintText: 'Optional',
                     labelText: 'Weight (kg)',
@@ -635,9 +637,7 @@ class _FirestoreEditExercisesScreen extends StatelessWidget {
                   ..hideCurrentSnackBar()
                   ..showSnackBar(
                     SnackBar(
-                      content: Text(
-                        '"${newExercise['name']}" added.',
-                      ),
+                      content: Text('"${newExercise['name']}" added.'),
                       backgroundColor: AppColors.statusSuccess,
                       behavior: SnackBarBehavior.floating,
                     ),

@@ -7,7 +7,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
 
 import 'Screens/auth/login_screen.dart';
-import 'Screens/home_screen.dart';
+import 'Screens/home_screen.dart' show HomeScreen;
 import 'Screens/onboarding/onboarding_screen.dart';
 import 'core/theme/app_theme.dart';
 import 'services/firebase_bootstrap.dart';
@@ -107,11 +107,13 @@ class _AppWarmupGateState extends State<AppWarmupGate>
     switch (state) {
       case AppLifecycleState.resumed:
         unawaited(providerRef.setOnlineStatus(true));
+        break;
       case AppLifecycleState.inactive:
       case AppLifecycleState.paused:
       case AppLifecycleState.detached:
       case AppLifecycleState.hidden:
         unawaited(providerRef.setOnlineStatus(false));
+        break;
     }
   }
 

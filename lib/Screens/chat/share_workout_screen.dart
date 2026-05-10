@@ -224,7 +224,7 @@ class _ShareWorkoutScreenState extends State<ShareWorkoutScreen>
                 controller: scrollCtrl,
                 padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
                 itemCount: exercises.length,
-                separatorBuilder: (_, __) =>
+                separatorBuilder: (context, index) =>
                     const SizedBox(height: AppSpacing.sm),
                 itemBuilder: (ctx, i) {
                   final ex = exercises[i];
@@ -341,7 +341,8 @@ class _WeekTab extends StatelessWidget {
     return ListView.separated(
       padding: const EdgeInsets.all(AppSpacing.lg),
       itemCount: weeks.length,
-      separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.sm),
+      separatorBuilder: (context, index) =>
+          const SizedBox(height: AppSpacing.sm),
       itemBuilder: (context, i) {
         final week = weeks[i];
         final days = weekMap[week] ?? [];
@@ -350,7 +351,7 @@ class _WeekTab extends StatelessWidget {
         );
         final exerciseCount = activeDays.fold(
           0,
-          (sum, d) => sum + d.exercises.length,
+          (total, day) => total + day.exercises.length,
         );
 
         return _ScopeCard(
@@ -397,7 +398,8 @@ class _DayTab extends StatelessWidget {
     return ListView.separated(
       padding: const EdgeInsets.all(AppSpacing.lg),
       itemCount: uniqueDays.length,
-      separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.sm),
+      separatorBuilder: (context, index) =>
+          const SizedBox(height: AppSpacing.sm),
       itemBuilder: (context, i) {
         final day = uniqueDays[i];
         return _ScopeCard(
@@ -453,7 +455,8 @@ class _ExerciseTab extends StatelessWidget {
     return ListView.separated(
       padding: const EdgeInsets.all(AppSpacing.lg),
       itemCount: uniqueDays.length,
-      separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.sm),
+      separatorBuilder: (context, index) =>
+          const SizedBox(height: AppSpacing.sm),
       itemBuilder: (context, i) {
         final day = uniqueDays[i];
         return _ScopeCard(

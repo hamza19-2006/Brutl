@@ -2227,9 +2227,7 @@ class _ChallengeBubble extends StatelessWidget {
             ((progress[friendUid] as Map?)?['currentValue'] as num?)?.toInt() ??
             0;
 
-        final daysLeft = endDate == null
-            ? null
-            : endDate.difference(DateTime.now()).inDays;
+        final daysLeft = endDate?.difference(DateTime.now()).inDays;
         final isCompleted = status == 'completed';
 
         return Container(

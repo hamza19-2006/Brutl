@@ -579,6 +579,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       targetFats: _targetFats,
       isProfileComplete: true,
     );
+    final workoutProvider = context.read<WorkoutProvider>();
 
     try {
       final docRef = FirebaseFirestore.instance
@@ -616,7 +617,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         'customSplitDays': FieldValue.delete(),
         'isProfileComplete': FieldValue.delete(),
       }, SetOptions(merge: true));
-      await context.read<WorkoutProvider>().loadUserData();
+      await workoutProvider.loadUserData();
+      if (!mounted) return;
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt('step_goal', brutlUser.dailySteps);

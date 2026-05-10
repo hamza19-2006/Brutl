@@ -244,7 +244,7 @@ class _EditEmailScreenState extends State<EditEmailScreen> {
                 width: 72,
                 height: 72,
                 decoration: BoxDecoration(
-                  color: AppColors.statusSuccess.withOpacity(0.12),
+                  color: AppColors.statusSuccess.withValues(alpha: 0.12),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(

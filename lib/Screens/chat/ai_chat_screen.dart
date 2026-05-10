@@ -9,7 +9,14 @@ import '../../core/theme/app_text_styles.dart';
 import '../../providers/ai_coach_provider.dart';
 
 class AiCoachChatScreen extends StatefulWidget {
-  const AiCoachChatScreen({super.key});
+  const AiCoachChatScreen({
+    super.key,
+    this.initialDraft,
+    this.initialAttachment,
+  });
+
+  final String? initialDraft;
+  final AiCoachAttachment? initialAttachment;
 
   @override
   State<AiCoachChatScreen> createState() => _AiCoachChatScreenState();
@@ -24,7 +31,15 @@ class _AiCoachChatScreenState extends State<AiCoachChatScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       context.read<AiCoachProvider>().initialize();
+      final initialDraft = widget.initialDraft?.trim();
+      if (initialDraft != null && initialDraft.isNotEmpty) {
+        _controller.text = initialDraft;
+      }
+      if (widget.initialAttachment != null) {
+        setState(() => _attachment = widget.initialAttachment);
+      }
     });
     _scrollController.addListener(_onScroll);
   }

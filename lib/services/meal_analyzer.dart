@@ -1,5 +1,6 @@
 import 'dart:convert';
-import 'dart:typed_data';
+// firebase_ai is not a direct dependency in this workspace.
+// ignore: depend_on_referenced_packages
 import 'package:firebase_ai/firebase_ai.dart';
 import 'package:flutter/foundation.dart';
 

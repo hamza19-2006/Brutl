@@ -6,9 +6,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../../models/brutl_models.dart' as brutl;
 import '../../models/user_model.dart';
+import '../../providers/ai_coach_provider.dart';
 import '../../providers/brutl_user_provider.dart';
 import '../../providers/workout_provider.dart';
+import '../chat/ai_chat_screen.dart';
 
 class HomeScreenExShow extends StatefulWidget {
   const HomeScreenExShow({super.key});
@@ -18,6 +21,7 @@ class HomeScreenExShow extends StatefulWidget {
 }
 
 class _HomeScreenExShowState extends State<HomeScreenExShow> {
+  static const String _progressionSplitName = 'home_progression';
   late Future<_ProgressionPayload> _payloadFuture;
 
   @override
@@ -182,6 +186,7 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
         targetReps: safeMin,
         weightUnit: unit,
         actionLabel: 'Increase Weight',
+        aiPayload: _toAiExercisePayload(exercise),
       );
     }
 
@@ -198,7 +203,28 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
       targetReps: targetReps,
       weightUnit: unit,
       actionLabel: 'Increase Reps',
+      aiPayload: _toAiExercisePayload(exercise),
     );
+  }
+
+  Map<String, dynamic> _toAiExercisePayload(_ExerciseSnapshot exercise) {
+    final normalizedWeight = exercise.weight % 1 == 0
+        ? exercise.weight.toStringAsFixed(0)
+        : exercise.weight.toStringAsFixed(1);
+    final stableId =
+        'progression_${exercise.name.hashCode}_${exercise.sets}_${exercise.topSetReps}_${normalizedWeight.hashCode}';
+    final model = brutl.ExerciseModel(
+      id: stableId,
+      name: exercise.name,
+      sets: exercise.sets,
+      reps: '${exercise.topSetReps}',
+      weight: normalizedWeight,
+      categoryType: exercise.isCompound ? 'compound' : 'isolation',
+      weightUnit: exercise.weightUnit,
+      isSynced: true,
+      splitName: _progressionSplitName,
+    );
+    return model.toJson();
   }
 
   static bool _isRestName(String input) {
@@ -233,6 +259,7 @@ class _ExerciseSnapshot {
   const _ExerciseSnapshot({
     required this.name,
     required this.isCompound,
+    required this.sets,
     required this.weight,
     required this.weightUnit,
     required this.topSetReps,
@@ -258,6 +285,7 @@ class _ExerciseSnapshot {
     return _ExerciseSnapshot(
       name: (map['name'] ?? 'Exercise').toString(),
       isCompound: isCompound,
+      sets: sets,
       weight: weight,
       weightUnit:
           (map['weightUnit'] ?? map['weight_unit'] ?? map['unit'] ?? 'Kg')
@@ -269,6 +297,7 @@ class _ExerciseSnapshot {
 
   final String name;
   final bool isCompound;
+  final int sets;
   final double weight;
   final String weightUnit;
   final int topSetReps;
@@ -313,6 +342,7 @@ class _TargetCardData {
     required this.targetReps,
     required this.weightUnit,
     required this.actionLabel,
+    required this.aiPayload,
   });
 
   final String name;
@@ -323,6 +353,7 @@ class _TargetCardData {
   final int targetReps;
   final String weightUnit;
   final String actionLabel;
+  final Map<String, dynamic> aiPayload;
 }
 
 class _TargetCard extends StatelessWidget {
@@ -425,6 +456,70 @@ class _TargetCard extends StatelessWidget {
                   color: Color(0xFFBDBDBD),
                   fontSize: 12,
                   fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextButton.icon(
+                      onPressed: () async {
+                        await HapticFeedback.lightImpact();
+                        if (!context.mounted) return;
+                        await Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => AiCoachChatScreen(
+                              initialDraft:
+                                  'Help me optimize progression for this exercise.',
+                              initialAttachment: AiCoachAttachment(
+                                type: 'workout',
+                                data: item.aiPayload,
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                      style: TextButton.styleFrom(
+                        foregroundColor: const Color(0xFFFF3D00),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                      ),
+                      icon: const Icon(Icons.smart_toy_rounded, size: 16),
+                      label: const Text(
+                        'Share to AI',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(Icons.smart_toy),
+                      color: const Color(0xFFFF3D00),
+                      tooltip: 'Share preset to AI',
+                      onPressed: () async {
+                        await HapticFeedback.lightImpact();
+                        if (!context.mounted) return;
+                        final sets = item.aiPayload['sets']?.toString() ?? '';
+                        final targetSets = sets.isNotEmpty ? sets : '1';
+                        final draft =
+                            'Coach, adjust this target for today: ${item.name} - ${targetSets}x${item.targetReps} @ ${_fmtWeight(item.targetWeight)}${item.weightUnit}';
+                        await Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => AiCoachChatScreen(
+                              initialDraft: draft,
+                              initialAttachment: AiCoachAttachment(
+                                type: 'workout',
+                                data: item.aiPayload,
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
                 ),
               ),
             ],

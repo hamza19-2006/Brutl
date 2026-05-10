@@ -122,9 +122,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   label: friend.isPinned ? 'Unpin Chat' : 'Pin Chat',
                   onTap: () {
                     Navigator.pop(ctx);
-                    context
-                        .read<ChatProvider>()
-                        .setPinnedFriend(friend.uid, !friend.isPinned);
+                    context.read<ChatProvider>().setPinnedFriend(
+                      friend.uid,
+                      !friend.isPinned,
+                    );
                   },
                 ),
                 const SizedBox(height: AppSpacing.sm),
@@ -137,9 +138,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
                       : 'Mute Notifications',
                   onTap: () {
                     Navigator.pop(ctx);
-                    context
-                        .read<ChatProvider>()
-                        .setMutedFriend(friend.uid, !friend.isMuted);
+                    context.read<ChatProvider>().setMutedFriend(
+                      friend.uid,
+                      !friend.isMuted,
+                    );
                   },
                 ),
                 const SizedBox(height: AppSpacing.sm),
@@ -164,9 +166,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 const SizedBox(height: AppSpacing.sm),
                 _ContextMenuItem(
                   icon: Icons.block_rounded,
-                  label: friend.isBlocked
-                      ? 'Unblock User'
-                      : 'Block User',
+                  label: friend.isBlocked ? 'Unblock User' : 'Block User',
                   isDestructive: !friend.isBlocked,
                   onTap: () {
                     Navigator.pop(ctx);
@@ -219,9 +219,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
           ),
           TextButton(
             onPressed: () {
-              context
-                  .read<ChatProvider>()
-                  .setBlockedFriend(friend.uid, shouldBlock);
+              context.read<ChatProvider>().setBlockedFriend(
+                friend.uid,
+                shouldBlock,
+              );
               Navigator.pop(ctx);
             },
             child: Text(
@@ -423,8 +424,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
     // Filter out blocked friends, then sort: pinned first, then by
     // existing order (Firestore already returns by addedAt desc).
-    final visibleFriends =
-        chatProvider.friends.where((f) => !f.isBlocked).toList();
+    final visibleFriends = chatProvider.friends
+        .where((f) => !f.isBlocked)
+        .toList();
     visibleFriends.sort((a, b) {
       if (a.isPinned == b.isPinned) return 0;
       return a.isPinned ? -1 : 1;
@@ -442,7 +444,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
           backgroundColor: AppColors.backgroundPrimary,
           elevation: 0,
           leading: _BellIcon(
-            count: chatProvider.pendingRequestCount,
+            count: context.watch<ChatProvider>().pendingRequestCount,
             onTap: () => Navigator.push(
               context,
               MaterialPageRoute<void>(
@@ -536,8 +538,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 results: _searchResults,
                 isLoading: _isSearching,
                 sentRequests: _sentRequests,
-                existingFriendUids:
-                    visibleFriends.map((f) => f.uid).toSet(),
+                existingFriendUids: visibleFriends.map((f) => f.uid).toSet(),
                 onAdd: _sendRequest,
               ),
 

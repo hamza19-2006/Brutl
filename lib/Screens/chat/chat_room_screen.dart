@@ -13,6 +13,7 @@ import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../models/chat_models.dart';
 import '../../providers/chat_provider.dart';
+import '../../providers/workout_provider.dart';
 import 'share_meal_screen.dart';
 import 'share_pr_screen.dart';
 import 'share_streak_screen.dart';
@@ -79,9 +80,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       unawaited(context.read<ChatProvider>().setTypingStatus(_chatId, false));
     }
     final reply = _replyTo;
-    context
-        .read<ChatProvider>()
-        .sendTextMessage(_chatId, text, replyTo: reply);
+    context.read<ChatProvider>().sendTextMessage(_chatId, text, replyTo: reply);
     _controller.clear();
     if (_replyTo != null) {
       setState(() => _replyTo = null);
@@ -250,13 +249,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     );
     if (payload != null && mounted) {
       await context.read<ChatProvider>().sendPRMessage(
-            _chatId,
-            exerciseName: payload['exerciseName'] as String,
-            weight: (payload['weight'] as num).toDouble(),
-            unit: payload['unit'] as String,
-            reps: payload['reps'] as int,
-            previousBest: (payload['previousBest'] as num?)?.toDouble(),
-          );
+        _chatId,
+        exerciseName: payload['exerciseName'] as String,
+        weight: (payload['weight'] as num).toDouble(),
+        unit: payload['unit'] as String,
+        reps: payload['reps'] as int,
+        previousBest: (payload['previousBest'] as num?)?.toDouble(),
+      );
       if (mounted) _scrollToBottom();
     }
   }
@@ -270,11 +269,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     );
     if (payload != null && mounted) {
       await context.read<ChatProvider>().sendStreakMessage(
-            _chatId,
-            streakDays: payload['streakDays'] as int,
-            streakType: payload['streakType'] as String,
-            note: payload['note'] as String?,
-          );
+        _chatId,
+        streakDays: payload['streakDays'] as int,
+        streakType: payload['streakType'] as String,
+        note: payload['note'] as String?,
+      );
       if (mounted) _scrollToBottom();
     }
   }
@@ -283,20 +282,19 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     final payload = await Navigator.push<Map<String, dynamic>>(
       context,
       MaterialPageRoute<Map<String, dynamic>>(
-        builder: (_) => StartChallengeScreen(
-          friendName: widget.friend.resolvedName,
-        ),
+        builder: (_) =>
+            StartChallengeScreen(friendName: widget.friend.resolvedName),
       ),
     );
     if (payload != null && mounted) {
       await context.read<ChatProvider>().startChallenge(
-            _chatId,
-            widget.friend.uid,
-            title: payload['title'] as String,
-            type: payload['type'] as String,
-            durationDays: payload['durationDays'] as int,
-            targetValue: payload['targetValue'] as int,
-          );
+        _chatId,
+        widget.friend.uid,
+        title: payload['title'] as String,
+        type: payload['type'] as String,
+        durationDays: payload['durationDays'] as int,
+        targetValue: payload['targetValue'] as int,
+      );
       if (mounted) _scrollToBottom();
     }
   }
@@ -332,9 +330,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                 _ReactionPickerRow(
                   onSelect: (emoji) {
                     Navigator.pop(sheetCtx);
-                    context
-                        .read<ChatProvider>()
-                        .toggleReaction(_chatId, message.id, emoji);
+                    context.read<ChatProvider>().toggleReaction(
+                      _chatId,
+                      message.id,
+                      emoji,
+                    );
                   },
                 ),
                 const SizedBox(height: AppSpacing.md),
@@ -411,10 +411,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Message Details',
-                  style: AppTextStyles.headingMedium(),
-                ),
+                Text('Message Details', style: AppTextStyles.headingMedium()),
                 const SizedBox(height: AppSpacing.md),
                 _DetailRow(
                   label: 'Sent',
@@ -423,8 +420,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                 if (message.readAt != null)
                   _DetailRow(
                     label: 'Seen',
-                    value:
-                        DateFormat('MMM d, h:mm a').format(message.readAt!),
+                    value: DateFormat('MMM d, h:mm a').format(message.readAt!),
                   )
                 else
                   _DetailRow(
@@ -584,8 +580,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                           friendName: widget.friend.resolvedName,
                           isPending: pendingIds.contains(msg.id),
                           onLongPress: () => _showMessageActions(msg),
-                          onReactionTap: (emoji) => chatProvider
-                              .toggleReaction(_chatId, msg.id, emoji),
+                          onReactionTap: (emoji) => chatProvider.toggleReaction(
+                            _chatId,
+                            msg.id,
+                            emoji,
+                          ),
                         );
                       },
                     );
@@ -677,8 +676,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                   '@${widget.friend.username}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style:
-                      AppTextStyles.labelSmall(color: AppColors.textTertiary),
+                  style: AppTextStyles.labelSmall(
+                    color: AppColors.textTertiary,
+                  ),
                 ),
               ],
             ),
@@ -692,13 +692,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
 /// Internal interleaved item for the message list (date separator vs message).
 class _RoomItem {
-  _RoomItem.separator(this.day)
-      : message = null,
-        isSeparator = true;
+  _RoomItem.separator(this.day) : message = null, isSeparator = true;
   _RoomItem.message(MessageModel m)
-      : day = null,
-        message = m,
-        isSeparator = false;
+    : day = null,
+      message = m,
+      isSeparator = false;
   final bool isSeparator;
   final DateTime? day;
   final MessageModel? message;
@@ -765,15 +763,13 @@ class _MessageBubble extends StatelessWidget {
           content = _MealShareBubble(payload: message.payload, isMe: isMe);
           break;
         case 'exercise_share':
-          content =
-              _ExerciseShareBubble(payload: message.payload, isMe: isMe);
+          content = _ExerciseShareBubble(payload: message.payload, isMe: isMe);
           break;
         case 'pr_share':
           content = _PRShareBubble(payload: message.payload, isMe: isMe);
           break;
         case 'streak_share':
-          content =
-              _StreakShareBubble(payload: message.payload, isMe: isMe);
+          content = _StreakShareBubble(payload: message.payload, isMe: isMe);
           break;
         case 'challenge':
           content = _ChallengeBubble(
@@ -795,7 +791,9 @@ class _MessageBubble extends StatelessWidget {
 
     final useSolidBubble = isTextMessage || isDeleted;
     final bubbleColor = isDeleted
-        ? (isMe ? AppColors.accentPrimary.withValues(alpha: 0.55) : const Color(0xFF171A1F))
+        ? (isMe
+              ? AppColors.accentPrimary.withValues(alpha: 0.55)
+              : const Color(0xFF171A1F))
         : (isMe ? AppColors.accentPrimary : const Color(0xFF171A1F));
     final bubbleRadius = isMe
         ? const BorderRadius.only(
@@ -811,7 +809,8 @@ class _MessageBubble extends StatelessWidget {
             bottomRight: Radius.circular(16),
           );
 
-    final showReply = message.isReply &&
+    final showReply =
+        message.isReply &&
         !isDeleted &&
         (message.replyToPreview ?? '').isNotEmpty;
 
@@ -829,8 +828,9 @@ class _MessageBubble extends StatelessWidget {
             maxWidth: MediaQuery.of(context).size.width * 0.82,
           ),
           child: Column(
-            crossAxisAlignment:
-                isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            crossAxisAlignment: isMe
+                ? CrossAxisAlignment.end
+                : CrossAxisAlignment.start,
             children: [
               Container(
                 padding: useSolidBubble
@@ -949,8 +949,7 @@ class _BubbleMeta extends StatelessWidget {
 
     return Row(
       mainAxisSize: MainAxisSize.min,
-      mainAxisAlignment:
-          isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+      mainAxisAlignment: isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
       children: [
         Text(timeText, style: timeStyle),
         if (isMe) ...[
@@ -1010,14 +1009,11 @@ class _BubbleReplyChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final accent =
-        onMyBubble ? AppColors.textPrimary : AppColors.accentPrimary;
+    final accent = onMyBubble ? AppColors.textPrimary : AppColors.accentPrimary;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
-        color: (onMyBubble
-                ? AppColors.textPrimary
-                : AppColors.accentPrimary)
+        color: (onMyBubble ? AppColors.textPrimary : AppColors.accentPrimary)
             .withValues(alpha: 0.12),
         border: Border(left: BorderSide(color: accent, width: 3)),
         borderRadius: const BorderRadius.only(
@@ -1033,9 +1029,9 @@ class _BubbleReplyChip extends StatelessWidget {
         children: [
           Text(
             isMine ? 'You' : 'Reply',
-            style: AppTextStyles.labelSmall(color: accent).copyWith(
-              fontWeight: FontWeight.w700,
-            ),
+            style: AppTextStyles.labelSmall(
+              color: accent,
+            ).copyWith(fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 2),
           Text(
@@ -1082,11 +1078,9 @@ class _ReactionChips extends StatelessWidget {
           for (final entry in entries)
             InkWell(
               onTap: () => onTap(entry.key),
-              borderRadius:
-                  BorderRadius.circular(AppSpacing.borderRadiusFull),
+              borderRadius: BorderRadius.circular(AppSpacing.borderRadiusFull),
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   color: entry.value.contains(myUid)
                       ? AppColors.accentSoft
@@ -1096,8 +1090,9 @@ class _ReactionChips extends StatelessWidget {
                         ? AppColors.accentPrimary
                         : AppColors.borderSubtle,
                   ),
-                  borderRadius:
-                      BorderRadius.circular(AppSpacing.borderRadiusFull),
+                  borderRadius: BorderRadius.circular(
+                    AppSpacing.borderRadiusFull,
+                  ),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -1293,6 +1288,211 @@ class _ExerciseShareBubble extends StatelessWidget {
   final Map<String, dynamic> payload;
   final bool isMe;
 
+  Future<void> _saveToPlan(
+    BuildContext context,
+    List<Map<String, dynamic>> sharedExercises,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final workoutProvider = context.read<WorkoutProvider>();
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final splitDays = workoutProvider.customSplitDays;
+
+    if (uid == null || uid.isEmpty) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Please sign in to save this workout.')),
+      );
+      return;
+    }
+
+    if (splitDays.isEmpty) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Set up your workout split first, then try again.'),
+        ),
+      );
+      return;
+    }
+
+    final selectedDayIndex = await showModalBottomSheet<int>(
+      context: context,
+      backgroundColor: AppColors.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(AppSpacing.borderRadiusLarge),
+        ),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.lg,
+                  AppSpacing.lg,
+                  AppSpacing.lg,
+                  AppSpacing.md,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Save to which day?',
+                        style: AppTextStyles.headingSmall(),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(sheetContext),
+                      icon: const Icon(
+                        Icons.close_rounded,
+                        color: AppColors.textTertiary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              for (var i = 0; i < splitDays.length; i++)
+                ListTile(
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.lg,
+                  ),
+                  title: Text(
+                    splitDays[i],
+                    style: AppTextStyles.bodyMedium(
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  onTap: () => Navigator.pop(sheetContext, i),
+                ),
+              const SizedBox(height: AppSpacing.md),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (selectedDayIndex == null) return;
+
+    final selectedDayName = splitDays[selectedDayIndex];
+    final normalizedExercises = _normalizeSharedExercises(
+      sharedExercises,
+      selectedDayName,
+    );
+
+    if (normalizedExercises.isEmpty) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('No exercises found in this share.')),
+      );
+      return;
+    }
+
+    final weekId = 'week_${workoutProvider.selectedWeek}';
+    final dayId = 'day_${selectedDayIndex + 1}';
+
+    final dayDocRef = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('weeks')
+        .doc(weekId)
+        .collection('days')
+        .doc(dayId);
+
+    try {
+      final daySnapshot = await dayDocRef.get();
+      final rawExistingExercises =
+          (daySnapshot.data()?['exercises'] as List<dynamic>?) ??
+          const <dynamic>[];
+      final existingExercises = rawExistingExercises
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+
+      final batch = FirebaseFirestore.instance.batch();
+      batch.set(dayDocRef, <String, dynamic>{
+        'name': selectedDayName,
+        'dayName': selectedDayName,
+        'exercises': <Map<String, dynamic>>[
+          ...existingExercises,
+          ...normalizedExercises,
+        ],
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      await batch.commit();
+
+      if (!context.mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            'Saved ${normalizedExercises.length} exercise${normalizedExercises.length == 1 ? '' : 's'} to $selectedDayName.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Failed to save. Please try again.')),
+      );
+      debugPrint('CHAT_ROOM: Save to plan failed — $error');
+    }
+  }
+
+  List<Map<String, dynamic>> _normalizeSharedExercises(
+    List<Map<String, dynamic>> sharedExercises,
+    String splitName,
+  ) {
+    final now = DateTime.now().microsecondsSinceEpoch;
+    return sharedExercises
+        .asMap()
+        .entries
+        .map((entry) {
+          final index = entry.key;
+          final raw = entry.value;
+          final name =
+              (raw['name'] as String?) ??
+              (raw['exerciseName'] as String?) ??
+              '';
+          final sets = switch (raw['sets']) {
+            num value => value.toInt(),
+            String value => int.tryParse(value) ?? 1,
+            _ => 1,
+          };
+          final repsSource = raw['reps'];
+          final reps = switch (repsSource) {
+            List<dynamic> value =>
+              value
+                  .map((item) => item.toString().trim())
+                  .where((item) => item.isNotEmpty)
+                  .join(', '),
+            null => '10',
+            _ =>
+              repsSource.toString().trim().isEmpty
+                  ? '10'
+                  : repsSource.toString().trim(),
+          };
+          final weight = (raw['weight'] ?? '').toString();
+          final categoryType =
+              (raw['categoryType'] ?? raw['category_type'] ?? '').toString();
+          final weightUnit = (raw['weightUnit'] ?? 'Kg').toString();
+
+          return <String, dynamic>{
+            'id': (raw['id'] ?? 'shared_${now}_$index').toString(),
+            'name': name,
+            'sets': sets,
+            'reps': reps,
+            'weight': weight,
+            'categoryType': categoryType,
+            'category_type': categoryType,
+            'weightUnit': weightUnit,
+            'weightDisplay': weight,
+            'isSynced': false,
+            'splitName': splitName,
+          };
+        })
+        .where((exercise) => (exercise['name'] as String).trim().isNotEmpty)
+        .toList();
+  }
+
   @override
   Widget build(BuildContext context) {
     final scope = payload['shareScope'] as String? ?? 'day';
@@ -1361,7 +1561,7 @@ class _ExerciseShareBubble extends StatelessWidget {
             color: AppColors.backgroundQuaternary,
             borderRadius: BorderRadius.circular(AppSpacing.borderRadiusSmall),
             child: InkWell(
-              onTap: () {},
+              onTap: () => unawaited(_saveToPlan(context, exercises)),
               borderRadius: BorderRadius.circular(AppSpacing.borderRadiusSmall),
               splashColor: AppColors.accentGlow,
               highlightColor: AppColors.accentSoft.withValues(alpha: 0.45),
@@ -1565,9 +1765,7 @@ class _PRShareBubbleState extends State<_PRShareBubble>
           colors: [Color(0xFF1A1206), Color(0xFF14181D)],
         ),
         border: Border.all(
-          color: widget.isMe
-              ? AppColors.borderAccent
-              : AppColors.borderDefault,
+          color: widget.isMe ? AppColors.borderAccent : AppColors.borderDefault,
         ),
         borderRadius: BorderRadius.circular(AppSpacing.borderRadiusMedium),
       ),
@@ -1587,8 +1785,9 @@ class _PRShareBubbleState extends State<_PRShareBubble>
                       end: Alignment.bottomRight,
                       colors: [Color(0xFFFFB42A), Color(0xFFFF7A00)],
                     ),
-                    borderRadius:
-                        BorderRadius.circular(AppSpacing.borderRadiusSmall),
+                    borderRadius: BorderRadius.circular(
+                      AppSpacing.borderRadiusSmall,
+                    ),
                   ),
                   child: const Icon(
                     Icons.emoji_events_rounded,
@@ -1604,12 +1803,13 @@ class _PRShareBubbleState extends State<_PRShareBubble>
                   children: [
                     Text(
                       'NEW PR',
-                      style: AppTextStyles.labelSmall(
-                        color: const Color(0xFFFFB42A),
-                      ).copyWith(
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 1.2,
-                      ),
+                      style:
+                          AppTextStyles.labelSmall(
+                            color: const Color(0xFFFFB42A),
+                          ).copyWith(
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 1.2,
+                          ),
                     ),
                     Text(
                       exercise,
@@ -1632,13 +1832,14 @@ class _PRShareBubbleState extends State<_PRShareBubble>
               children: [
                 Text(
                   _formatWeight(weight),
-                  style: AppTextStyles.headingLarge(
-                    color: AppColors.textPrimary,
-                  ).copyWith(
-                    fontSize: 36,
-                    fontWeight: FontWeight.w800,
-                    height: 1,
-                  ),
+                  style:
+                      AppTextStyles.headingLarge(
+                        color: AppColors.textPrimary,
+                      ).copyWith(
+                        fontSize: 36,
+                        fontWeight: FontWeight.w800,
+                        height: 1,
+                      ),
                 ),
                 const SizedBox(width: 6),
                 Padding(
@@ -1748,8 +1949,7 @@ class _StreakShareBubble extends StatelessWidget {
           colors: [Color(0xFF200D04), Color(0xFF14181D)],
         ),
         border: Border.all(
-          color:
-              isMe ? AppColors.borderAccent : AppColors.borderDefault,
+          color: isMe ? AppColors.borderAccent : AppColors.borderDefault,
         ),
         borderRadius: BorderRadius.circular(AppSpacing.borderRadiusMedium),
       ),
@@ -1769,8 +1969,9 @@ class _StreakShareBubble extends StatelessWidget {
                     end: Alignment.bottomCenter,
                     colors: [Color(0xFFFF7A00), Color(0xFFFF3D00)],
                   ),
-                  borderRadius:
-                      BorderRadius.circular(AppSpacing.borderRadiusSmall),
+                  borderRadius: BorderRadius.circular(
+                    AppSpacing.borderRadiusSmall,
+                  ),
                 ),
                 child: const Text('🔥', style: TextStyle(fontSize: 32)),
               ),
@@ -1790,12 +1991,13 @@ class _StreakShareBubble extends StatelessWidget {
                         children: [
                           TextSpan(
                             text: '$days',
-                            style: AppTextStyles.headingLarge(
-                              color: AppColors.accentPrimary,
-                            ).copyWith(
-                              fontSize: 28,
-                              fontWeight: FontWeight.w800,
-                            ),
+                            style:
+                                AppTextStyles.headingLarge(
+                                  color: AppColors.accentPrimary,
+                                ).copyWith(
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.w800,
+                                ),
                           ),
                           const TextSpan(text: ' '),
                           TextSpan(
@@ -1831,8 +2033,9 @@ class _StreakShareBubble extends StatelessWidget {
               ),
               decoration: BoxDecoration(
                 color: AppColors.accentSoft,
-                borderRadius:
-                    BorderRadius.circular(AppSpacing.borderRadiusFull),
+                borderRadius: BorderRadius.circular(
+                  AppSpacing.borderRadiusFull,
+                ),
                 border: Border.all(color: AppColors.accentPrimary),
               ),
               child: Text(
@@ -1847,8 +2050,9 @@ class _StreakShareBubble extends StatelessWidget {
             const SizedBox(height: AppSpacing.md),
             Text(
               '"$note"',
-              style: AppTextStyles.bodySmall(color: AppColors.textSecondary)
-                  .copyWith(fontStyle: FontStyle.italic),
+              style: AppTextStyles.bodySmall(
+                color: AppColors.textSecondary,
+              ).copyWith(fontStyle: FontStyle.italic),
             ),
           ],
         ],
@@ -1921,10 +2125,7 @@ class _ChallengeBubble extends StatelessWidget {
             : const <int>[1, 3, 5];
         return AlertDialog(
           backgroundColor: AppColors.backgroundSecondary,
-          title: Text(
-            'Update Progress',
-            style: AppTextStyles.headingMedium(),
-          ),
+          title: Text('Update Progress', style: AppTextStyles.headingMedium()),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1942,13 +2143,11 @@ class _ChallengeBubble extends StatelessWidget {
                     InkWell(
                       onTap: () {
                         Navigator.pop(ctx);
-                        context
-                            .read<ChatProvider>()
-                            .incrementChallengeProgress(
-                              chatId,
-                              challengeId,
-                              step,
-                            );
+                        context.read<ChatProvider>().incrementChallengeProgress(
+                          chatId,
+                          challengeId,
+                          step,
+                        );
                       },
                       borderRadius: BorderRadius.circular(
                         AppSpacing.borderRadiusSmall,
@@ -1982,9 +2181,7 @@ class _ChallengeBubble extends StatelessWidget {
               onPressed: () => Navigator.pop(ctx),
               child: Text(
                 'Close',
-                style: AppTextStyles.bodyMedium(
-                  color: AppColors.textSecondary,
-                ),
+                style: AppTextStyles.bodyMedium(color: AppColors.textSecondary),
               ),
             ),
           ],
@@ -2021,15 +2218,14 @@ class _ChallengeBubble extends StatelessWidget {
         DateTime? endDate;
         if (endTs is Timestamp) endDate = endTs.toDate();
 
-        final progress = (data?['progress'] as Map<dynamic, dynamic>?) ??
+        final progress =
+            (data?['progress'] as Map<dynamic, dynamic>?) ??
             const <dynamic, dynamic>{};
-        final myValue = ((progress[myUid] as Map?)?['currentValue'] as num?)
-                ?.toInt() ??
-            0;
+        final myValue =
+            ((progress[myUid] as Map?)?['currentValue'] as num?)?.toInt() ?? 0;
         final theirValue =
-            ((progress[friendUid] as Map?)?['currentValue'] as num?)
-                    ?.toInt() ??
-                0;
+            ((progress[friendUid] as Map?)?['currentValue'] as num?)?.toInt() ??
+            0;
 
         final daysLeft = endDate == null
             ? null
@@ -2044,12 +2240,9 @@ class _ChallengeBubble extends StatelessWidget {
             border: Border.all(
               color: isCompleted
                   ? AppColors.statusSuccess
-                  : (isMe
-                      ? AppColors.borderAccent
-                      : AppColors.borderDefault),
+                  : (isMe ? AppColors.borderAccent : AppColors.borderDefault),
             ),
-            borderRadius:
-                BorderRadius.circular(AppSpacing.borderRadiusMedium),
+            borderRadius: BorderRadius.circular(AppSpacing.borderRadiusMedium),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -2081,12 +2274,13 @@ class _ChallengeBubble extends StatelessWidget {
                       children: [
                         Text(
                           'CHALLENGE',
-                          style: AppTextStyles.labelSmall(
-                            color: AppColors.accentPrimary,
-                          ).copyWith(
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 1.2,
-                          ),
+                          style:
+                              AppTextStyles.labelSmall(
+                                color: AppColors.accentPrimary,
+                              ).copyWith(
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 1.2,
+                              ),
                         ),
                         Text(
                           title,
@@ -2106,8 +2300,7 @@ class _ChallengeBubble extends StatelessWidget {
                         vertical: 3,
                       ),
                       decoration: BoxDecoration(
-                        color: AppColors.statusSuccess
-                            .withValues(alpha: 0.15),
+                        color: AppColors.statusSuccess.withValues(alpha: 0.15),
                         border: Border.all(color: AppColors.statusSuccess),
                         borderRadius: BorderRadius.circular(
                           AppSpacing.borderRadiusFull,
@@ -2149,8 +2342,8 @@ class _ChallengeBubble extends StatelessWidget {
                     daysLeft == null
                         ? '—'
                         : daysLeft <= 0
-                            ? 'Ended'
-                            : '$daysLeft day${daysLeft == 1 ? '' : 's'} left',
+                        ? 'Ended'
+                        : '$daysLeft day${daysLeft == 1 ? '' : 's'} left',
                     style: AppTextStyles.labelSmall(
                       color: AppColors.textTertiary,
                     ),
@@ -2227,8 +2420,9 @@ class _ChallengeStaticCard extends StatelessWidget {
         children: [
           Text(
             'CHALLENGE',
-            style: AppTextStyles.labelSmall(color: AppColors.accentPrimary)
-                .copyWith(fontWeight: FontWeight.w800, letterSpacing: 1.2),
+            style: AppTextStyles.labelSmall(
+              color: AppColors.accentPrimary,
+            ).copyWith(fontWeight: FontWeight.w800, letterSpacing: 1.2),
           ),
           const SizedBox(height: 4),
           Text(
@@ -2271,9 +2465,7 @@ class _ChallengeProgressRow extends StatelessWidget {
                 label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: AppTextStyles.labelSmall(
-                  color: AppColors.textSecondary,
-                ),
+                style: AppTextStyles.labelSmall(color: AppColors.textSecondary),
               ),
             ),
             Text(
@@ -2294,9 +2486,7 @@ class _ChallengeProgressRow extends StatelessWidget {
             minHeight: 6,
             backgroundColor: AppColors.backgroundQuaternary,
             valueColor: AlwaysStoppedAnimation<Color>(
-              isComplete
-                  ? AppColors.statusSuccess
-                  : AppColors.accentPrimary,
+              isComplete ? AppColors.statusSuccess : AppColors.accentPrimary,
             ),
           ),
         ),
@@ -2505,8 +2695,9 @@ class _DateSeparator extends StatelessWidget {
         ),
         child: Text(
           _label(),
-          style: AppTextStyles.labelSmall(color: AppColors.textTertiary)
-              .copyWith(fontWeight: FontWeight.w600),
+          style: AppTextStyles.labelSmall(
+            color: AppColors.textTertiary,
+          ).copyWith(fontWeight: FontWeight.w600),
         ),
       ),
     );
@@ -2640,8 +2831,7 @@ class _ReactionPickerRow extends StatelessWidget {
                 HapticFeedback.lightImpact();
                 onSelect(emoji);
               },
-              borderRadius:
-                  BorderRadius.circular(AppSpacing.borderRadiusFull),
+              borderRadius: BorderRadius.circular(AppSpacing.borderRadiusFull),
               child: Padding(
                 padding: const EdgeInsets.all(AppSpacing.sm),
                 child: Text(emoji, style: const TextStyle(fontSize: 24)),
@@ -2672,8 +2862,7 @@ class _MenuActionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color =
-        isDestructive ? AppColors.statusError : AppColors.textPrimary;
+    final color = isDestructive ? AppColors.statusError : AppColors.textPrimary;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(AppSpacing.borderRadiusSmall),

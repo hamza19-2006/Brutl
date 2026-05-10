@@ -7,7 +7,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
 
 import 'Screens/auth/login_screen.dart';
-import 'Screens/home_screen.dart' show HomeScreen;
+import 'Screens/home_screen.dart';
 import 'Screens/onboarding/onboarding_screen.dart';
 import 'core/theme/app_theme.dart';
 import 'services/firebase_bootstrap.dart';

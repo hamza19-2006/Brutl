@@ -461,65 +461,38 @@ class _TargetCard extends StatelessWidget {
               const SizedBox(height: 6),
               Align(
                 alignment: Alignment.centerRight,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextButton.icon(
-                      onPressed: () async {
-                        await HapticFeedback.lightImpact();
-                        if (!context.mounted) return;
-                        await Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => AiCoachChatScreen(
-                              initialDraft:
-                                  'Help me optimize progression for this exercise.',
-                              initialAttachment: AiCoachAttachment(
-                                type: 'workout',
-                                data: item.aiPayload,
-                              ),
-                            ),
+                child: TextButton.icon(
+                  onPressed: () async {
+                    await HapticFeedback.lightImpact();
+                    if (!context.mounted) return;
+                    final sets = item.aiPayload['sets']?.toString() ?? '';
+                    final targetSets = sets.isNotEmpty ? sets : '1';
+                    final draft =
+                        'Coach, adjust this target for today: ${item.name} - ${targetSets}x${item.targetReps} @ ${_fmtWeight(item.targetWeight)}${item.weightUnit}';
+                    await Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => AiCoachChatScreen(
+                          initialDraft: draft,
+                          initialAttachment: AiCoachAttachment(
+                            type: 'workout',
+                            data: item.aiPayload,
                           ),
-                        );
-                      },
-                      style: TextButton.styleFrom(
-                        foregroundColor: const Color(0xFFFF3D00),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 6,
                         ),
                       ),
-                      icon: const Icon(Icons.smart_toy_rounded, size: 16),
-                      label: const Text(
-                        'Share to AI',
-                        style: TextStyle(fontWeight: FontWeight.w600),
-                      ),
+                    );
+                  },
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFFFF3D00),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
                     ),
-                    const SizedBox(width: 8),
-                    IconButton(
-                      icon: const Icon(Icons.smart_toy),
-                      color: const Color(0xFFFF3D00),
-                      tooltip: 'Share preset to AI',
-                      onPressed: () async {
-                        await HapticFeedback.lightImpact();
-                        if (!context.mounted) return;
-                        final sets = item.aiPayload['sets']?.toString() ?? '';
-                        final targetSets = sets.isNotEmpty ? sets : '1';
-                        final draft =
-                            'Coach, adjust this target for today: ${item.name} - ${targetSets}x${item.targetReps} @ ${_fmtWeight(item.targetWeight)}${item.weightUnit}';
-                        await Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => AiCoachChatScreen(
-                              initialDraft: draft,
-                              initialAttachment: AiCoachAttachment(
-                                type: 'workout',
-                                data: item.aiPayload,
-                              ),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ],
+                  ),
+                  icon: const Icon(Icons.smart_toy_rounded, size: 16),
+                  label: const Text(
+                    'Share to AI',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
                 ),
               ),
             ],

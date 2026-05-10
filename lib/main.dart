@@ -107,11 +107,13 @@ class _AppWarmupGateState extends State<AppWarmupGate>
     switch (state) {
       case AppLifecycleState.resumed:
         unawaited(providerRef.setOnlineStatus(true));
+        break;
       case AppLifecycleState.inactive:
       case AppLifecycleState.paused:
       case AppLifecycleState.detached:
       case AppLifecycleState.hidden:
         unawaited(providerRef.setOnlineStatus(false));
+        break;
     }
   }
 

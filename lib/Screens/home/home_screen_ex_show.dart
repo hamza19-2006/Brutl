@@ -187,7 +187,8 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
         : _heuristicTemplateForDay('')
               .whereType<Map>()
               .map(
-                (raw) => _ExerciseSnapshot.fromMap(Map<String, dynamic>.from(raw)),
+                (raw) =>
+                    _ExerciseSnapshot.fromMap(Map<String, dynamic>.from(raw)),
               )
               .toList(growable: false);
     final targets = resolvedSource
@@ -429,38 +430,45 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
     required _ExerciseSnapshot exercise,
     required BrutlUser user,
   }) {
-    final minRep = exercise.isCompound
-        ? user.compoundRepMin
-        : user.isolationRepMin;
-    final maxRep = exercise.isCompound
-        ? user.compoundRepMax
-        : user.isolationRepMax;
-    final safeMin = minRep <= 0 ? 1 : minRep;
-    final safeMax = maxRep < safeMin ? safeMin : maxRep;
-    final baseReps = ((safeMin + safeMax) / 2)
-        .round()
-        .clamp(safeMin, safeMax)
-        .toInt();
+    final range = _parseDynamicBaseRange(
+      baseRange: exercise.baseRangeString,
+      isCompound: exercise.isCompound,
+      user: user,
+    );
+    final lowerLimit = range.lower;
+    final upperLimit = range.upper;
+
     final unit = exercise.weightUnit.trim().isEmpty
         ? user.weightUnit
         : exercise.weightUnit;
     final startWeight = exercise.weight < 0 ? 0.0 : exercise.weight;
 
-    // MODULE 2C: Emit base-range as a string (e.g. "8-12")
-    final templateRepsString = safeMin == safeMax
-        ? '$safeMin'
-        : '$safeMin-$safeMax';
+    // Template cards always go into the empty-state path since there is no
+    // real "last week" data behind them.
+    final dayNames = [
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+      'Sunday',
+    ];
+    final currentDayName = dayNames[(DateTime.now().weekday - 1) % 7];
 
     return _TargetCardData(
       name: exercise.name,
       isCompound: exercise.isCompound,
       lastWeight: startWeight,
-      lastReps: baseReps,
+      lastReps: 0,
       targetWeight: startWeight,
-      targetRepsString: templateRepsString,
+      targetRepsString: '$lowerLimit-$upperLimit',
       weightUnit: unit,
-      actionLabel: 'Base range: $safeMin-$safeMax reps',
+      actionLabel: 'Base range: $lowerLimit-$upperLimit reps',
       aiPayload: _toAiExercisePayload(exercise),
+      lastWeekDisplayString: 'Nothing logged last $currentDayName.',
+      targetDisplayString:
+          'Start your first session! Target: $lowerLimit-$upperLimit reps.',
     );
   }
 
@@ -506,23 +514,50 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
     required _ExerciseSnapshot exercise,
     required BrutlUser user,
   }) {
-    // ── Step 2A: Variable Extraction ──────────────────────────────────────
-    final minRep = exercise.isCompound
-        ? user.compoundRepMin
-        : user.isolationRepMin;
-    final maxRep = exercise.isCompound
-        ? user.compoundRepMax
-        : user.isolationRepMax;
-    // Base range with safe fallbacks (default 8-12 if parsing fails)
-    final lowerLimit = minRep <= 0 ? 8 : minRep;
-    final upperLimit = maxRep < lowerLimit ? 12 : maxRep;
+    // ── Step 2A: Resolve dynamic base range ──────────────────────────────────
+    final range = _parseDynamicBaseRange(
+      baseRange: exercise.baseRangeString,
+      isCompound: exercise.isCompound,
+      user: user,
+    );
+    final lowerLimit = range.lower;
+    final upperLimit = range.upper;
 
-    final lastTopRep = exercise.topSetReps > 0 ? exercise.topSetReps : lowerLimit;
+    final lastTopRep = exercise.topSetReps;
     final lastWeight = exercise.weight;
     final weightUnit = exercise.weightUnit.trim().isEmpty
         ? user.weightUnit
         : exercise.weightUnit;
-    final exerciseType = exercise.isCompound ? 'Compound' : 'Isolation';
+
+    // ── Branch 0: Empty State — user has no prior data ───────────────────────
+    if (lastTopRep == 0 || lastWeight == 0) {
+      final dayNames = [
+        'Monday',
+        'Tuesday',
+        'Wednesday',
+        'Thursday',
+        'Friday',
+        'Saturday',
+        'Sunday',
+      ];
+      final currentDayName = dayNames[(DateTime.now().weekday - 1) % 7];
+
+      return _TargetCardData(
+        name: exercise.name,
+        isCompound: exercise.isCompound,
+        lastWeight: 0,
+        lastReps: 0,
+        lastRepsRaw: exercise.repsRaw,
+        targetWeight: 0,
+        targetRepsString: '$lowerLimit-$upperLimit',
+        weightUnit: weightUnit,
+        actionLabel: 'First Session',
+        aiPayload: _toAiExercisePayload(exercise),
+        lastWeekDisplayString: 'Nothing logged last $currentDayName.',
+        targetDisplayString:
+            'Start your first session! Target: $lowerLimit-$upperLimit reps.',
+      );
+    }
 
     // Freeze the "last week" display value BEFORE calculating target
     final displayLastReps = lastTopRep;
@@ -531,38 +566,27 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
     String newTargetRepsString;
     String actionLabel;
 
-    // ── Step 2B: Mathematical Branching Logic ─────────────────────────────
-    if (lastTopRep >= upperLimit) {
-      // ── BRANCH 1: UPPER LIMIT REACHED → WEIGHT PROGRESSION ────────────
-      if (weightUnit.toLowerCase().contains('plate')) {
-        // Plates: +1 plate
+    // ── Branch 1: Rep Progression (below upper limit) ─────────────────────────
+    if (lastTopRep < upperLimit) {
+      newTargetWeight = lastWeight;
+      final minRep = lastTopRep + 1;
+      final maxRep = math.min(lastTopRep + 2, upperLimit);
+      newTargetRepsString = minRep == maxRep ? '$minRep' : '$minRep-$maxRep';
+      actionLabel = 'Increase Reps';
+    }
+    // ── Branch 2: Weight Progression (upper limit reached) ───────────────────
+    else {
+      final unitLower = weightUnit.toLowerCase();
+      if (unitLower.contains('plate')) {
         newTargetWeight = lastWeight + 1;
-      } else if (exerciseType.toLowerCase().contains('compound')) {
-        // Compound: +5.0 Kg/Lbs
+      } else if (exercise.isCompound) {
         newTargetWeight = lastWeight + 5.0;
       } else {
-        // Isolation: +2.5 Kg/Lbs
         newTargetWeight = lastWeight + 2.5;
       }
-      // Reset reps to bottom of base range
+      // Reset reps to bottom of dynamic base range
       newTargetRepsString = '$lowerLimit-${lowerLimit + 1}';
       actionLabel = 'Increase Weight';
-    } else {
-      // ── BRANCH 2: BELOW UPPER LIMIT → REP PROGRESSION ─────────────────
-      newTargetWeight = lastWeight;
-      final repTargetMin = lastTopRep + 1;
-      int repTargetMax = lastTopRep + 2;
-      // Crucial cap: clamp to upperLimit
-      if (repTargetMax > upperLimit) repTargetMax = upperLimit;
-      if (repTargetMin > upperLimit) {
-        // Edge case: already at or past upper limit
-        newTargetRepsString = '$upperLimit';
-      } else if (repTargetMin == repTargetMax) {
-        newTargetRepsString = '$repTargetMin';
-      } else {
-        newTargetRepsString = '$repTargetMin-$repTargetMax';
-      }
-      actionLabel = 'Increase Reps';
     }
 
     return _TargetCardData(
@@ -604,6 +628,36 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
     return normalized.isEmpty || normalized.contains('rest');
   }
 
+  ({int lower, int upper}) _parseDynamicBaseRange({
+    required String? baseRange,
+    required bool isCompound,
+    required BrutlUser user,
+  }) {
+    if (baseRange != null && baseRange.trim().isNotEmpty) {
+      // Try "X-Y" format
+      final parts = baseRange.trim().split('-');
+      if (parts.length == 2) {
+        final lo = int.tryParse(parts[0].trim());
+        final hi = int.tryParse(parts[1].trim());
+        if (lo != null && hi != null && lo > 0 && hi >= lo) {
+          return (lower: lo, upper: hi);
+        }
+      }
+      // Try single number "X"
+      final single = int.tryParse(baseRange.trim());
+      if (single != null && single > 0) {
+        return (lower: single, upper: single);
+      }
+    }
+    // Fallback to user profile rep ranges
+    final lower = isCompound
+        ? (user.compoundRepMin > 0 ? user.compoundRepMin : 4)
+        : (user.isolationRepMin > 0 ? user.isolationRepMin : 8);
+    final upper = isCompound
+        ? (user.compoundRepMax >= lower ? user.compoundRepMax : 8)
+        : (user.isolationRepMax >= lower ? user.isolationRepMax : 12);
+    return (lower: lower, upper: upper);
+  }
 }
 
 class _ProgressionPayload {
@@ -620,6 +674,47 @@ class _ProgressionPayload {
   final String? recoveryReason;
 }
 
+
+
+// ── _TargetCardData ──────────────────────────────────────────────────────────
+
+class _TargetCardData {
+  const _TargetCardData({
+    required this.name,
+    required this.isCompound,
+    required this.lastWeight,
+    required this.lastReps,
+    this.lastRepsRaw = '',
+    required this.targetWeight,
+    required this.targetRepsString,
+    required this.weightUnit,
+    required this.actionLabel,
+    required this.aiPayload,
+    // Empty-state strings (non-null means "first session" mode)
+    this.lastWeekDisplayString,
+    this.targetDisplayString,
+  });
+
+  final String name;
+  final bool isCompound;
+  final double lastWeight;
+  final int lastReps;
+  final String lastRepsRaw;
+  final double targetWeight;
+  final String targetRepsString;
+  final String weightUnit;
+  final String actionLabel;
+  final Map<String, dynamic> aiPayload;
+
+  // When these are non-null, the card is in "first session" empty-state mode.
+  final String? lastWeekDisplayString;
+  final String? targetDisplayString;
+
+  bool get isFirstSession => lastWeekDisplayString != null;
+}
+
+
+
 class _ExerciseSnapshot {
   const _ExerciseSnapshot({
     required this.name,
@@ -630,10 +725,10 @@ class _ExerciseSnapshot {
     required this.topSetReps,
     required this.repsRaw,
     required this.estimatedVolume,
+    this.baseRangeString,
   });
 
   factory _ExerciseSnapshot.fromMap(Map<String, dynamic> map) {
-    // BUG 1 FIX: Explicit comma-split parsing for rep strings
     final reps = _parseRepValues(map['reps']);
     final topSetReps = reps.isEmpty ? 0 : reps.reduce(math.max);
     final repsRaw = map['reps']?.toString() ?? '';
@@ -650,6 +745,12 @@ class _ExerciseSnapshot {
         ? isCompoundFlag
         : categoryRaw.trim().toLowerCase().contains('compound');
 
+    // Read optional baseRange field written by the exercise editor
+    final baseRangeRaw = map['baseRange'] ?? map['base_range'];
+    final baseRangeString = baseRangeRaw?.toString().trim().isNotEmpty == true
+        ? baseRangeRaw.toString().trim()
+        : null;
+
     return _ExerciseSnapshot(
       name: (map['name'] ?? 'Exercise').toString(),
       isCompound: isCompound,
@@ -661,6 +762,7 @@ class _ExerciseSnapshot {
       topSetReps: topSetReps,
       repsRaw: repsRaw,
       estimatedVolume: estimatedVolume,
+      baseRangeString: baseRangeString,
     );
   }
 
@@ -670,15 +772,13 @@ class _ExerciseSnapshot {
   final double weight;
   final String weightUnit;
   final int topSetReps;
-  /// The original raw reps string from Firestore (e.g. "6,5" or "10,8")
   final String repsRaw;
   final double estimatedVolume;
 
-  /// BUG 1 FIX: Parse comma-separated rep strings safely.
-  /// Input "6,5"  → [6, 5]  → max = 6
-  /// Input "10,8" → [10, 8] → max = 10
-  /// Input "8-12" → [8, 12] → max = 12  (range format)
-  /// Input 10      → [10]
+  /// Optional "X-Y" string stored on the exercise document (e.g. "5-10").
+  /// When present, overrides the user's profile rep-range settings.
+  final String? baseRangeString;
+
   static List<int> _parseRepValues(dynamic raw) {
     if (raw is List) {
       return raw
@@ -692,7 +792,6 @@ class _ExerciseSnapshot {
     final str = raw.toString().trim();
     if (str.isEmpty) return const <int>[];
 
-    // Primary: split by comma (handles "6,5", "10,8,7")
     if (str.contains(',')) {
       final parts = str
           .split(',')
@@ -703,7 +802,6 @@ class _ExerciseSnapshot {
       if (parts.isNotEmpty) return parts;
     }
 
-    // Fallback: extract all digit groups (handles "8-12", "8 x 12", etc.)
     return RegExp(r'\d+')
         .allMatches(str)
         .map((m) => int.tryParse(m.group(0) ?? '') ?? 0)
@@ -724,34 +822,7 @@ class _ExerciseSnapshot {
   }
 }
 
-class _TargetCardData {
-  const _TargetCardData({
-    required this.name,
-    required this.isCompound,
-    required this.lastWeight,
-    required this.lastReps,
-    this.lastRepsRaw = '',
-    required this.targetWeight,
-    required this.targetRepsString,
-    required this.weightUnit,
-    required this.actionLabel,
-    required this.aiPayload,
-  });
-
-  final String name;
-  final bool isCompound;
-  final double lastWeight;
-  /// The extracted top rep from last week (strictly for display)
-  final int lastReps;
-  /// Raw rep string from Firestore for optional display (e.g. "6,5")
-  final String lastRepsRaw;
-  final double targetWeight;
-  /// MODULE 2A: Target reps is now a String range (e.g. "7-8", "4-5", "10")
-  final String targetRepsString;
-  final String weightUnit;
-  final String actionLabel;
-  final Map<String, dynamic> aiPayload;
-}
+// ── _TargetCard (replaces existing widget) ───────────────────────────────────
 
 class _TargetCard extends StatelessWidget {
   const _TargetCard({required this.item});
@@ -787,6 +858,7 @@ class _TargetCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // ── Header row ───────────────────────────────────────────────
               Row(
                 children: [
                   Expanded(
@@ -829,25 +901,50 @@ class _TargetCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 10),
-              // MODULE 3: "Last Week" shows raw reps, "Target Today" shows
-              // the computed string range from the progressive overload engine.
-              Text(
-                'Last Week: ${_fmtWeight(item.lastWeight)}${item.weightUnit} x ${item.lastRepsRaw.isNotEmpty ? item.lastRepsRaw : '${item.lastReps}'}',
-                style: const TextStyle(
-                  color: Color(0xFF8B8B8B),
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
+
+              // ── Last week / target rows ───────────────────────────────────
+              if (item.isFirstSession) ...[
+                // Empty-state mode
+                Text(
+                  item.lastWeekDisplayString!,
+                  style: const TextStyle(
+                    color: Color(0xFF8B8B8B),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Target Today: ${_fmtWeight(item.targetWeight)}${item.weightUnit} x ${item.targetRepsString} 🎯',
-                style: const TextStyle(
-                  color: Color(0xFFFF3D00),
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
+                const SizedBox(height: 4),
+                Text(
+                  item.targetDisplayString!,
+                  style: const TextStyle(
+                    color: Color(0xFFFF3D00),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
-              ),
+              ] else ...[
+                // Normal progression mode
+                Text(
+                  'Last Week: ${_fmtWeight(item.lastWeight)}${item.weightUnit}'
+                  ' x ${item.lastRepsRaw.isNotEmpty ? item.lastRepsRaw : '${item.lastReps}'}',
+                  style: const TextStyle(
+                    color: Color(0xFF8B8B8B),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Target Today: ${_fmtWeight(item.targetWeight)}${item.weightUnit}'
+                  ' x ${item.targetRepsString} 🎯',
+                  style: const TextStyle(
+                    color: Color(0xFFFF3D00),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+
               const SizedBox(height: 6),
               Text(
                 item.actionLabel,
@@ -858,6 +955,8 @@ class _TargetCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 6),
+
+              // ── AI button ─────────────────────────────────────────────────
               Align(
                 alignment: Alignment.centerRight,
                 child: TextButton.icon(
@@ -866,8 +965,12 @@ class _TargetCard extends StatelessWidget {
                     if (!context.mounted) return;
                     final sets = item.aiPayload['sets']?.toString() ?? '';
                     final targetSets = sets.isNotEmpty ? sets : '1';
-                    final draft =
-                        'Coach, adjust this target for today: ${item.name} - ${targetSets}x${item.targetRepsString} @ ${_fmtWeight(item.targetWeight)}${item.weightUnit}';
+                    final draft = item.isFirstSession
+                        ? 'Coach, help me with my first session for: '
+                              '${item.name} — ${item.targetRepsString} reps'
+                        : 'Coach, adjust this target for today: '
+                              '${item.name} - ${targetSets}x${item.targetRepsString}'
+                              ' @ ${_fmtWeight(item.targetWeight)}${item.weightUnit}';
                     await Navigator.of(context).push(
                       MaterialPageRoute<void>(
                         builder: (_) => AiCoachChatScreen(

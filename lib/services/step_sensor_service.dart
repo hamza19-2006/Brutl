@@ -14,6 +14,8 @@ class StepSensorService {
   static const String _keyLastSavedDate = 'last_saved_date';
   static const String _keyInitialHardwareSteps = 'initial_hardware_steps';
   static const String _keyLatestRaw = 'brutl_step_latest_raw';
+  // BUG 3 FIX: Persist whether a real sensor baseline has been set for today.
+  static const String _keyBaselineSet = 'brutl_step_baseline_set';
 
   SharedPreferences? _prefs;
   StreamSubscription<StepCount>? _sensorSubscription;
@@ -28,6 +30,13 @@ class StepSensorService {
 
   bool _isInitialized = false;
   bool _isListening = false;
+
+  /// BUG 3 FIX: True once we have received at least one pedometer event
+  /// for the current day and used it to set _initialHardwareSteps.
+  /// Without this, a new-day hydration sets _initialHardwareSteps = 0,
+  /// and the first sensor event (total-since-boot, e.g. 20,000) would
+  /// be emitted as daily steps instead of being used as the baseline.
+  bool _baselineSetForToday = false;
 
   bool get isInitialized => _isInitialized;
   bool get isListening => _isListening;
@@ -78,6 +87,10 @@ class StepSensorService {
       return 0;
     }
 
+    // BUG 3 FIX: If no baseline has been set yet, we have 0 real steps.
+    final baselineSet = prefs.getBool(_keyBaselineSet) ?? false;
+    if (!baselineSet) return 0;
+
     final initial = prefs.getInt(_keyInitialHardwareSteps) ?? 0;
     final latest = prefs.getInt(_keyLatestRaw) ?? 0;
     return calculateDailySteps(
@@ -111,6 +124,8 @@ class StepSensorService {
     _initialHardwareSteps = 0;
     _latestRaw = 0;
     _lastSavedDate = today;
+    // BUG 3 FIX: Mark baseline as not yet established for today.
+    _baselineSetForToday = false;
     _persistState(today);
 
     // FIX 3: Force-emit 0 so every StreamBuilder rebuilds immediately
@@ -151,11 +166,27 @@ class StepSensorService {
 
     debugPrint(
       'BRUTL_STEPS: Sensor event — raw=$rawSteps, '
-      'initial=$_initialHardwareSteps, date=$_lastSavedDate',
+      'initial=$_initialHardwareSteps, date=$_lastSavedDate, '
+      'baselineSet=$_baselineSetForToday',
     );
 
     if (_lastSavedDate != today) {
       _performMidnightRollover(rawSteps, today);
+      return;
+    }
+
+    // BUG 3 FIX: First sensor event of the day — use it as the baseline,
+    // NOT as accumulated steps. This prevents showing total-since-boot
+    // (e.g. 20,000+) when the app opens on a new day or after a reboot.
+    if (!_baselineSetForToday) {
+      _initialHardwareSteps = rawSteps;
+      _latestRaw = rawSteps;
+      _baselineSetForToday = true;
+      _persistState(today);
+      _emitSteps(0);
+      debugPrint(
+        'BRUTL_STEPS: Daily baseline established — initial=$rawSteps',
+      );
       return;
     }
 
@@ -200,6 +231,8 @@ class StepSensorService {
     _initialHardwareSteps = currentRaw;
     _latestRaw = currentRaw;
     _lastSavedDate = newDate;
+    // BUG 3 FIX: Baseline IS set because we received an actual sensor event.
+    _baselineSetForToday = true;
 
     _persistState(newDate);
     // Force re-emit even if last emitted was also 0
@@ -237,17 +270,27 @@ class StepSensorService {
       // Same day — restore persisted counts and emit them
       _initialHardwareSteps = _prefs?.getInt(_keyInitialHardwareSteps) ?? 0;
       _latestRaw = _prefs?.getInt(_keyLatestRaw) ?? 0;
+      // BUG 3 FIX: Restore whether baseline was already set today.
+      _baselineSetForToday = _prefs?.getBool(_keyBaselineSet) ?? false;
 
-      final restoredSteps = calculateDailySteps(
-        rawSensor: _latestRaw,
-        initialHardwareSteps: _initialHardwareSteps,
-      );
-      _emitSteps(restoredSteps);
+      // BUG 3 FIX: Only emit real steps if baseline was established.
+      if (_baselineSetForToday) {
+        final restoredSteps = calculateDailySteps(
+          rawSensor: _latestRaw,
+          initialHardwareSteps: _initialHardwareSteps,
+        );
+        _emitSteps(restoredSteps);
 
-      debugPrint(
-        'BRUTL_STEPS: Hydrated from storage — initial=$_initialHardwareSteps, '
-        'latest=$_latestRaw, steps=$restoredSteps',
-      );
+        debugPrint(
+          'BRUTL_STEPS: Hydrated from storage — initial=$_initialHardwareSteps, '
+          'latest=$_latestRaw, steps=$restoredSteps',
+        );
+      } else {
+        _emitSteps(0);
+        debugPrint(
+          'BRUTL_STEPS: Hydrated from storage — baseline not yet set, emitting 0',
+        );
+      }
     } else {
       // FIX 1: New day detected on init. Save yesterday's data to history,
       // reset counters, then IMMEDIATELY emit 0 before any UI paints.
@@ -269,6 +312,8 @@ class StepSensorService {
       _lastSavedDate = today;
       _initialHardwareSteps = 0;
       _latestRaw = 0;
+      // BUG 3 FIX: No baseline yet for the new day.
+      _baselineSetForToday = false;
       _persistState(today);
 
       // FIX 1: Emit 0 immediately so the UI paints the correct value
@@ -280,6 +325,8 @@ class StepSensorService {
     _prefs?.setString(_keyLastSavedDate, date);
     _prefs?.setInt(_keyInitialHardwareSteps, _initialHardwareSteps);
     _prefs?.setInt(_keyLatestRaw, _latestRaw);
+    // BUG 3 FIX: Also persist the baseline flag.
+    _prefs?.setBool(_keyBaselineSet, _baselineSetForToday);
   }
 
   Future<void> _saveToHiveHistory(String dateKey, int steps) async {

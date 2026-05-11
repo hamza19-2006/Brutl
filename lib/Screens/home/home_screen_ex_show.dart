@@ -509,11 +509,15 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
         : user.isolationRepMax;
     final safeMin = minRep <= 0 ? 1 : minRep;
     final safeMax = maxRep < safeMin ? safeMin : maxRep;
+    // BUG 1 FIX: topSetReps is now the true max from comma-separated parsing
     final lastTopReps = exercise.topSetReps > 0 ? exercise.topSetReps : safeMin;
     final unit = exercise.weightUnit.trim().isEmpty
         ? user.weightUnit
         : exercise.weightUnit;
     final increment = _isLbs(unit) ? 5.0 : 2.5;
+
+    // BUG 2 FIX: Freeze the "last week" display value BEFORE calculating target
+    final displayLastReps = lastTopReps;
 
     if (lastTopReps >= safeMax) {
       final nextWeight = _roundToIncrement(
@@ -524,7 +528,8 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
         name: exercise.name,
         isCompound: exercise.isCompound,
         lastWeight: exercise.weight,
-        lastReps: lastTopReps,
+        lastReps: displayLastReps,
+        lastRepsRaw: exercise.repsRaw,
         targetWeight: nextWeight,
         targetReps: safeMin,
         weightUnit: unit,
@@ -541,7 +546,8 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
       name: exercise.name,
       isCompound: exercise.isCompound,
       lastWeight: exercise.weight,
-      lastReps: lastTopReps,
+      lastReps: displayLastReps,
+      lastRepsRaw: exercise.repsRaw,
       targetWeight: exercise.weight,
       targetReps: targetReps,
       weightUnit: unit,
@@ -606,12 +612,15 @@ class _ExerciseSnapshot {
     required this.weight,
     required this.weightUnit,
     required this.topSetReps,
+    required this.repsRaw,
     required this.estimatedVolume,
   });
 
   factory _ExerciseSnapshot.fromMap(Map<String, dynamic> map) {
+    // BUG 1 FIX: Explicit comma-split parsing for rep strings
     final reps = _parseRepValues(map['reps']);
     final topSetReps = reps.isEmpty ? 0 : reps.reduce(math.max);
+    final repsRaw = map['reps']?.toString() ?? '';
     final weight = _parseWeight(map['weight'] ?? map['weightDisplay']);
     final sets = _parseInt(map['sets'], fallback: 1);
     final estimatedVolume =
@@ -634,6 +643,7 @@ class _ExerciseSnapshot {
           (map['weightUnit'] ?? map['weight_unit'] ?? map['unit'] ?? 'Kg')
               .toString(),
       topSetReps: topSetReps,
+      repsRaw: repsRaw,
       estimatedVolume: estimatedVolume,
     );
   }
@@ -644,8 +654,15 @@ class _ExerciseSnapshot {
   final double weight;
   final String weightUnit;
   final int topSetReps;
+  /// The original raw reps string from Firestore (e.g. "6,5" or "10,8")
+  final String repsRaw;
   final double estimatedVolume;
 
+  /// BUG 1 FIX: Parse comma-separated rep strings safely.
+  /// Input "6,5"  → [6, 5]  → max = 6
+  /// Input "10,8" → [10, 8] → max = 10
+  /// Input "8-12" → [8, 12] → max = 12  (range format)
+  /// Input 10      → [10]
   static List<int> _parseRepValues(dynamic raw) {
     if (raw is List) {
       return raw
@@ -655,8 +672,24 @@ class _ExerciseSnapshot {
     }
     if (raw is num) return <int>[raw.toInt()];
     if (raw == null) return const <int>[];
+
+    final str = raw.toString().trim();
+    if (str.isEmpty) return const <int>[];
+
+    // Primary: split by comma (handles "6,5", "10,8,7")
+    if (str.contains(',')) {
+      final parts = str
+          .split(',')
+          .map((s) => int.tryParse(s.trim()))
+          .whereType<int>()
+          .where((v) => v > 0)
+          .toList(growable: false);
+      if (parts.isNotEmpty) return parts;
+    }
+
+    // Fallback: extract all digit groups (handles "8-12", "8 x 12", etc.)
     return RegExp(r'\d+')
-        .allMatches(raw.toString())
+        .allMatches(str)
         .map((m) => int.tryParse(m.group(0) ?? '') ?? 0)
         .where((v) => v > 0)
         .toList(growable: false);
@@ -681,6 +714,7 @@ class _TargetCardData {
     required this.isCompound,
     required this.lastWeight,
     required this.lastReps,
+    this.lastRepsRaw = '',
     required this.targetWeight,
     required this.targetReps,
     required this.weightUnit,
@@ -691,7 +725,10 @@ class _TargetCardData {
   final String name;
   final bool isCompound;
   final double lastWeight;
+  /// BUG 2 FIX: The extracted top rep from last week (strictly for display)
   final int lastReps;
+  /// Raw rep string from Firestore for optional display (e.g. "6,5")
+  final String lastRepsRaw;
   final double targetWeight;
   final int targetReps;
   final String weightUnit;
@@ -775,6 +812,8 @@ class _TargetCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 10),
+              // BUG 2 FIX: "Last Week" strictly shows extracted lastReps,
+              // "Target Today" strictly shows the newly calculated targetReps.
               Text(
                 'Last Week: ${_fmtWeight(item.lastWeight)}${item.weightUnit} x ${item.lastReps}',
                 style: const TextStyle(

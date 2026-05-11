@@ -13,6 +13,7 @@ import '../config/secrets.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/constants/ai_prompts.dart';
 import '../providers/health_provider.dart';
+import '../providers/nutrition_service.dart';
 import '../providers/workout_nutrition_provider.dart';
 import '../providers/workout_provider.dart';
 import '../widgets/biometric_card.dart';
@@ -765,7 +766,55 @@ class _HomeHeader extends StatelessWidget {
 
 // ─── Stats Row (Steps + Calories cards) ──────────────────────────────────────
 
-class _StatsRow extends StatelessWidget {
+// BUG 4 FIX: Changed from StatelessWidget to StatefulWidget so the
+// CaloriesCard can subscribe to NutritionService for consumed calories
+// instead of showing burned calories from StepProvider.
+class _StatsRow extends StatefulWidget {
+  @override
+  State<_StatsRow> createState() => _StatsRowState();
+}
+
+class _StatsRowState extends State<_StatsRow> {
+  int _caloriesEaten = 0;
+  int _calorieGoal = 0;
+  StreamSubscription<NutritionData>? _nutritionSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadNutrition();
+  }
+
+  Future<void> _loadNutrition() async {
+    // Seed from WorkoutProvider's goal so the circle isn't empty on first paint.
+    final workoutProvider = context.read<WorkoutProvider>();
+    final goalFromProfile = workoutProvider.user.dailyCalorieGoal;
+    if (goalFromProfile > 0 && mounted) {
+      setState(() => _calorieGoal = goalFromProfile);
+    }
+
+    final data = await NutritionService.instance.loadTodayNutrition();
+    if (!mounted) return;
+    setState(() {
+      _caloriesEaten = data.caloriesEaten;
+      _calorieGoal = data.calorieGoal > 0 ? data.calorieGoal : _calorieGoal;
+    });
+
+    _nutritionSub = NutritionService.instance.stream.listen((data) {
+      if (!mounted) return;
+      setState(() {
+        _caloriesEaten = data.caloriesEaten;
+        _calorieGoal = data.calorieGoal > 0 ? data.calorieGoal : _calorieGoal;
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _nutritionSub?.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer2<WorkoutProvider, StepProvider>(
@@ -779,12 +828,14 @@ class _StatsRow extends StatelessWidget {
             ? (steps / stepGoal).clamp(0.0, 1.0).toDouble()
             : 0.0;
 
-        final calorieGoal = workoutProvider.user.dailyCalorieGoal;
-        final caloriesBurned = stepProvider.currentSteps > 0
-            ? stepProvider.caloriesBurned
-            : workoutProvider.currentDailyCaloriesBurned;
+        // BUG 4 FIX: Use consumed calories from NutritionService
+        // instead of burned calories from StepProvider.
+        final consumedCalories = _caloriesEaten.toDouble();
+        final calorieGoal = _calorieGoal > 0
+            ? _calorieGoal
+            : workoutProvider.user.dailyCalorieGoal;
         final calProgress = calorieGoal > 0
-            ? (caloriesBurned / calorieGoal).clamp(0.0, 1.0)
+            ? (consumedCalories / calorieGoal).clamp(0.0, 1.0)
             : 0.0;
 
         return Padding(
@@ -807,11 +858,11 @@ class _StatsRow extends StatelessWidget {
                 Expanded(
                   flex: 4,
                   child: CaloriesCard(
-                    caloriesBurned: caloriesBurned,
+                    caloriesBurned: consumedCalories,
                     calorieGoal: calorieGoal,
                     progress: calProgress,
                     caloriesLabel: 'Calories',
-                    caloriesUnitLabel: 'kcal burned',
+                    caloriesUnitLabel: 'kcal eaten',
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(

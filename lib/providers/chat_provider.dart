@@ -22,6 +22,8 @@ class ChatProvider extends ChangeNotifier {
 
   List<FriendModel> _friends = [];
   List<FriendModel> get friends => List.unmodifiable(_friends);
+  List<FriendModel> get blockedUsers =>
+      List.unmodifiable(_friends.where((friend) => friend.isBlocked));
 
   List<FriendRequestModel> _pendingRequests = [];
   List<FriendRequestModel> get pendingRequests =>
@@ -811,6 +813,14 @@ class ChatProvider extends ChangeNotifier {
           .collection('friends')
           .doc(friendUid)
           .set(<String, dynamic>{field: value}, SetOptions(merge: true));
+
+      if (field == 'isBlocked') {
+        await _db.collection('users').doc(_uid).set(<String, dynamic>{
+          'blockedUsers': value
+              ? FieldValue.arrayUnion(<String>[friendUid])
+              : FieldValue.arrayRemove(<String>[friendUid]),
+        }, SetOptions(merge: true));
+      }
     } catch (error, stackTrace) {
       debugPrint('Failed to update $field on friend $friendUid: $error');
       debugPrintStack(stackTrace: stackTrace);

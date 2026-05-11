@@ -8,8 +8,10 @@ import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/brutl_user_provider.dart';
+import '../../providers/chat_provider.dart';
 import '../auth/login_screen.dart';
 import 'account_settings_screen.dart';
+import 'blocked_friends_screen.dart';
 import 'contact_support_screen.dart';
 import 'credentials/credentials_screen.dart';
 import 'feedback_screen.dart';
@@ -33,6 +35,7 @@ class _MainSettingsScreenState extends State<MainSettingsScreen> {
     // Make sure the canonical Firestore user doc is bound for sub-screens.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<BrutlUserProvider>().bindToCurrentUser();
+      context.read<ChatProvider>().listenToFriends();
     });
   }
 
@@ -113,6 +116,43 @@ class _MainSettingsScreenState extends State<MainSettingsScreen> {
                         builder: (_) => const ExerciseSettingsScreen(),
                       ),
                     ),
+                  ),
+                  Consumer<ChatProvider>(
+                    builder: (context, provider, _) {
+                      return ListTile(
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.lg,
+                        ),
+                        title: Text(
+                          'Blocked Friends',
+                          style: AppTextStyles.bodyLarge(
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              '${provider.blockedUsers.length}',
+                              style: AppTextStyles.bodyMedium(
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                            const SizedBox(width: AppSpacing.sm),
+                            const Icon(
+                              Icons.chevron_right,
+                              color: AppColors.textTertiary,
+                              size: 20,
+                            ),
+                          ],
+                        ),
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const BlockedFriendsScreen(),
+                          ),
+                        ),
+                      );
+                    },
                   ),
                 ],
               ),

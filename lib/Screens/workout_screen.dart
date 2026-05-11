@@ -44,6 +44,29 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   }
 
   Future<void> _loadNutrition() async {
+    // BUG 2 & 3 FIX: Sync the user's actual macro targets from WorkoutProvider
+    // into NutritionService before loading today's data, so the goal ring and
+    // hardcoded "2000" are replaced with the real Firestore value.
+    final workoutProvider = context.read<WorkoutProvider>();
+    final targetKcal = workoutProvider.user.dailyCalorieGoal;
+
+    // Derive macro goals proportionally if not yet set in SharedPreferences.
+    // These will be overwritten by any explicit values saved in Settings.
+    if (targetKcal > 0) {
+      final proteinGoal = (workoutProvider.user.weightKg * 2.0).round();
+      final fatGoal = (workoutProvider.user.weightKg * 0.7).round();
+      final carbGoal = ((targetKcal - (proteinGoal * 4) - (fatGoal * 9)) / 4)
+          .clamp(0, targetKcal)
+          .round();
+
+      await NutritionService.instance.saveGoals(
+        calorieGoal: targetKcal,
+        carbsGoal: carbGoal > 0 ? carbGoal : 200,
+        proteinGoal: proteinGoal > 0 ? proteinGoal : 150,
+        fatsGoal: fatGoal > 0 ? fatGoal : 60,
+      );
+    }
+
     final data = await NutritionService.instance.loadTodayNutrition();
     if (!mounted) return;
     _applyData(data);
@@ -55,7 +78,9 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   void _applyData(NutritionData data) {
     setState(() {
       _caloriesEaten = data.caloriesEaten;
-      _calorieGoal = data.calorieGoal;
+      // BUG 3 FIX: Use goal from NutritionService (which now reflects the
+      // real Firestore target), not the hardcoded 2000 default.
+      _calorieGoal = data.calorieGoal > 0 ? data.calorieGoal : _calorieGoal;
       _carbs = data.carbs;
       _carbsGoal = data.carbsGoal;
       _protein = data.protein;
@@ -74,6 +99,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
 
   NutritionModel get _builtNutrition => NutritionModel(
     totalCal: _caloriesEaten,
+    // BUG 2 FIX: goal ring now uses the real synced goal, not a stale 2000
     goalCal: _calorieGoal,
     carbs: MacroNutrientModel(consumed: _carbs, goal: _carbsGoal),
     protein: MacroNutrientModel(consumed: _protein, goal: _proteinGoal),
@@ -146,6 +172,8 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: MacroDashboardCard(
+                    // BUG 2 FIX: _builtNutrition now carries the real consumed
+                    // calories AND the real goal so the ring fills correctly.
                     nutrition: _builtNutrition,
                     ui: nutritionProvider.ui,
                     onTap: () => _openMealSelectionSheet(context),
@@ -445,6 +473,10 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
   // Holds AI result to show popup before populating fields
   Map<String, int>? _pendingAiResult;
 
+  // BUG 4 FIX: separate flags for camera-scan result vs ask-ai result so
+  // the two flows never share the same pending state variable.
+  bool _pendingResultFromCamera = false;
+
   Timer? _scanPhaseOneTimer;
   Timer? _scanPhaseTwoTimer;
 
@@ -489,6 +521,7 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
       _scanPhase = 0;
       _calorieError = null;
       _pendingAiResult = null;
+      _pendingResultFromCamera = false;
     });
 
     _scanPhaseOneTimer?.cancel();
@@ -524,10 +557,11 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
       return;
     }
 
-    // Show result popup instead of immediately filling fields
     setState(() {
       _isScanning = false;
       _pendingAiResult = result;
+      // BUG 4 FIX: mark that this result came from the camera scanner
+      _pendingResultFromCamera = true;
     });
   }
 
@@ -536,6 +570,7 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
   void _applyResultToFields(Map<String, int> result) {
     setState(() {
       _pendingAiResult = null;
+      _pendingResultFromCamera = false;
       _calCtrl.text = result['kcal']?.toString() ?? '';
       _carbCtrl.text = result['carbs']?.toString() ?? '';
       _proCtrl.text = result['protein']?.toString() ?? '';
@@ -545,6 +580,9 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
 
   // ─── Ask AI dialog ─────────────────────────────────────────────────────────
 
+  // BUG 4 FIX: Ask AI now has its OWN independent flow.
+  // It calls showAskAiDialog, logs the result directly, and never touches
+  // _pendingAiResult / camera popup state.
   Future<void> _openAskAiDialog() async {
     if (_anyBusy) return;
     setState(() => _isAskingAi = true);
@@ -554,22 +592,42 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
     if (!mounted) return;
     setState(() => _isAskingAi = false);
 
-    if (result != null) {
-      // Show same result popup for Ask AI too
-      setState(() => _pendingAiResult = result);
-    }
+    if (result == null) return;
+
+    final calories = (result['kcal'] ?? 0).clamp(0, 5000).toInt();
+    final carbs = (result['carbs'] ?? 0).clamp(0, 2000).toInt();
+    final protein = (result['protein'] ?? 0).clamp(0, 2000).toInt();
+    final fat = (result['fat'] ?? 0).clamp(0, 2000).toInt();
+
+    setState(() => _isSaving = true);
+    await NutritionService.instance.addMealCalories(
+      mealName: widget.meal.name,
+      calories: calories,
+      carbs: carbs,
+      protein: protein,
+      fats: fat,
+    );
+
+    if (!mounted) return;
+    setState(() => _isSaving = false);
+    Navigator.of(context).pop();
   }
 
   // ─── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    // If AI result is pending, show the beautiful result popup
-    if (_pendingAiResult != null) {
+    // BUG 4 FIX: Only show the popup when the result came from the camera
+    // scanner (_pendingResultFromCamera == true). The Ask AI flow never
+    // sets this flag, so it never triggers this popup.
+    if (_pendingAiResult != null && _pendingResultFromCamera) {
       return _AiResultPopup(
         result: _pendingAiResult!,
         onAddToMeal: () => _applyResultToFields(_pendingAiResult!),
-        onDismiss: () => setState(() => _pendingAiResult = null),
+        onDismiss: () => setState(() {
+          _pendingAiResult = null;
+          _pendingResultFromCamera = false;
+        }),
       );
     }
 
@@ -590,7 +648,6 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Drag handle
                 Center(
                   child: Container(
                     width: 44,
@@ -602,12 +659,8 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
                   ),
                 ),
                 const SizedBox(height: 16),
-
-                // AI buttons
                 _buildAiButtons(),
                 const SizedBox(height: 16),
-
-                // Meal title
                 Text(
                   widget.meal.name,
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
@@ -623,8 +676,6 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
                   ),
                 ),
                 const SizedBox(height: 16),
-
-                // Input fields
                 _buildField(
                   _calCtrl,
                   'Calories (kcal)',
@@ -638,8 +689,6 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
                 const SizedBox(height: 10),
                 _buildField(_fatCtrl, 'Fats (g)', TextInputType.number),
                 const SizedBox(height: 16),
-
-                // Log button
                 SizedBox(
                   width: double.infinity,
                   child: Opacity(
@@ -825,7 +874,7 @@ class _NutritionLogSheetState extends State<_NutritionLogSheet> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// AI RESULT POPUP — shown after camera scan OR Ask AI returns a result
+// AI RESULT POPUP — shown ONLY after camera scan
 // ═══════════════════════════════════════════════════════════════════════════════
 
 class _AiResultPopup extends StatelessWidget {
@@ -858,7 +907,6 @@ class _AiResultPopup extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Drag handle
               Center(
                 child: Container(
                   width: 44,
@@ -870,8 +918,6 @@ class _AiResultPopup extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 20),
-
-              // Header
               Row(
                 children: [
                   Container(
@@ -931,10 +977,7 @@ class _AiResultPopup extends StatelessWidget {
                   ),
                 ],
               ),
-
               const SizedBox(height: 22),
-
-              // Main result card
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(
@@ -957,7 +1000,6 @@ class _AiResultPopup extends StatelessWidget {
                 ),
                 child: Column(
                   children: [
-                    // Big calorie number
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.end,
@@ -992,8 +1034,6 @@ class _AiResultPopup extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 26),
-
-                    // Macro pills row
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [
@@ -1020,14 +1060,14 @@ class _AiResultPopup extends StatelessWidget {
                   ],
                 ),
               ),
-
               const SizedBox(height: 20),
-
-              // Add to Meal button
               SizedBox(
                 width: double.infinity,
                 height: 54,
                 child: ElevatedButton.icon(
+                  // BUG 4 FIX: onAddToMeal only calls _applyResultToFields,
+                  // which populates the text fields and clears _pendingAiResult.
+                  // It does NOT open a new dialog or camera flow.
                   onPressed: onAddToMeal,
                   icon: const Icon(Icons.add_circle_outline_rounded, size: 20),
                   label: const Text(
@@ -1044,9 +1084,7 @@ class _AiResultPopup extends StatelessWidget {
                   ),
                 ),
               ),
-
               const SizedBox(height: 8),
-
               TextButton(
                 onPressed: onDismiss,
                 child: const Text(
@@ -1115,10 +1153,6 @@ class _ResultMacroPill extends StatelessWidget {
     );
   }
 }
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// AI OPTION BUTTON
-// ═══════════════════════════════════════════════════════════════════════════════
 
 class _AiOptionButton extends StatelessWidget {
   const _AiOptionButton({

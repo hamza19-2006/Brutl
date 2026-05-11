@@ -11,6 +11,7 @@ import 'Screens/home_screen.dart' hide AiCoachProvider;
 import 'Screens/onboarding/onboarding_screen.dart';
 import 'core/theme/app_theme.dart';
 import 'services/firebase_bootstrap.dart';
+import 'services/step_service.dart';
 import 'providers/auth_provider.dart';
 import 'providers/auth_validation_provider.dart';
 import 'providers/brutl_user_provider.dart';
@@ -70,6 +71,7 @@ class _AppWarmupGateState extends State<AppWarmupGate>
     with WidgetsBindingObserver {
   bool _didStartWarmup = false;
   ChatProvider? _chatProviderRef;
+  StepProvider? _stepProviderRef;
 
   @override
   void initState() {
@@ -80,7 +82,6 @@ class _AppWarmupGateState extends State<AppWarmupGate>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    // Best-effort flip to offline as the app is torn down.
     final providerRef = _chatProviderRef;
     if (providerRef != null) {
       unawaited(providerRef.setOnlineStatus(false));
@@ -92,9 +93,8 @@ class _AppWarmupGateState extends State<AppWarmupGate>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _chatProviderRef = context.read<ChatProvider>();
-    if (_didStartWarmup) {
-      return;
-    }
+    _stepProviderRef = context.read<StepProvider>();
+    if (_didStartWarmup) return;
     _didStartWarmup = true;
     unawaited(_warmupServices());
   }
@@ -102,17 +102,21 @@ class _AppWarmupGateState extends State<AppWarmupGate>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    final providerRef = _chatProviderRef;
-    if (providerRef == null) return;
+    final chatRef = _chatProviderRef;
+    final stepRef = _stepProviderRef;
+
     switch (state) {
       case AppLifecycleState.resumed:
-        unawaited(providerRef.setOnlineStatus(true));
+        if (chatRef != null) unawaited(chatRef.setOnlineStatus(true));
+        // Refresh steps on resume so today's bar is immediately correct
+        if (stepRef != null) unawaited(stepRef.refreshSteps());
+        unawaited(StepService.instance.checkAndResetIfNewDay());
         break;
       case AppLifecycleState.inactive:
       case AppLifecycleState.paused:
       case AppLifecycleState.detached:
       case AppLifecycleState.hidden:
-        unawaited(providerRef.setOnlineStatus(false));
+        if (chatRef != null) unawaited(chatRef.setOnlineStatus(false));
         break;
     }
   }
@@ -121,23 +125,27 @@ class _AppWarmupGateState extends State<AppWarmupGate>
     try {
       final workoutProvider = context.read<WorkoutProvider>();
       final nutritionProvider = context.read<WorkoutNutritionProvider>();
+      final stepProvider = context.read<StepProvider>();
 
       await Hive.initFlutter();
       await Hive.openBox<String>('exercises');
 
-      // Add check to ensure context is still valid
       if (!mounted) return;
+
+      // Initialize StepService first (used by StepProvider internally)
+      await StepService.instance.initializeStepService();
+
+      // Initialize StepProvider — this starts the pedometer stream and
+      // requests ACTIVITY_RECOGNITION permission
+      await stepProvider.initialize();
 
       await workoutProvider.initialize();
       await nutritionProvider.initialize();
 
       if (mounted) {
-        // Bind canonical user document for Settings module.
         await context.read<BrutlUserProvider>().bindToCurrentUser();
       }
 
-      // Mark the user online once warmup is finished. Safe to call
-      // pre-auth too — setOnlineStatus is a no-op when uid is empty.
       if (mounted) {
         unawaited(context.read<ChatProvider>().setOnlineStatus(true));
       }
@@ -191,34 +199,23 @@ class AuthWrapper extends StatelessWidget {
             if (profileSnapshot.connectionState == ConnectionState.waiting) {
               return const _BrutlLoadingScreen();
             }
-
-            // Handle errors gracefully
             if (profileSnapshot.hasError) {
               return const _BrutlLoadingScreen();
             }
-
             final doc = profileSnapshot.data;
             final profileData = doc?.data();
-
-            // Check for profile completion flag — prioritize new field name
             final isProfileComplete =
                 doc != null &&
                 doc.exists &&
                 ((profileData?['is_profile_complete'] as bool?) ??
                     (profileData?['isProfileComplete'] as bool?) ??
                     false);
-
-            // For brand new users with no profile data, route to onboarding
             if (doc == null || !doc.exists) {
               return const OnboardingScreen();
             }
-
-            // If profile is not complete, show onboarding
             if (!isProfileComplete) {
               return const OnboardingScreen();
             }
-
-            // Profile complete, show home
             return const HomeScreen();
           },
         );

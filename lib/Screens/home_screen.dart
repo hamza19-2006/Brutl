@@ -20,7 +20,6 @@ import '../widgets/biometric_card.dart';
 import 'calories_history_screen.dart';
 import 'chat/chat_list_screen.dart';
 import 'home/home_screen_ex_show.dart';
-import 'settings/main_settings_screen.dart';
 import 'steps_history_screen.dart';
 import 'workout_screen.dart';
 
@@ -730,22 +729,8 @@ class _HomeHeader extends StatelessWidget {
                     'Brutl',
                     style: TextStyle(
                       color: Colors.white,
-                      fontSize: 32,
+                      fontSize: 36,
                       fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  GestureDetector(
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const MainSettingsScreen(),
-                      ),
-                    ),
-                    child: const Icon(
-                      Icons.settings_rounded,
-                      color: Color(0xFF555555),
-                      size: 20,
                     ),
                   ),
                 ],
@@ -798,36 +783,39 @@ class _StatsRow extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(
-        children: [
-          Expanded(
-            flex: 6,
-            child: StepsCard(
-              currentSteps: steps,
-              goalSteps: stepGoal,
-              progress: progress,
-              stepsLabel: 'Steps',
-              stepsUnitLabel: 'steps today',
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              flex: 6,
+              child: StepsCard(
+                currentSteps: steps,
+                goalSteps: stepGoal,
+                progress: progress,
+                stepsLabel: 'Steps',
+                stepsUnitLabel: 'steps today',
+              ),
             ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            flex: 4,
-            child: CaloriesCard(
-              caloriesBurned: caloriesBurned,
-              calorieGoal: calorieGoal,
-              progress: calProgress,
-              caloriesLabel: 'Calories',
-              caloriesUnitLabel: 'kcal burned',
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const CaloriesHistoryScreen(),
+            const SizedBox(width: 12),
+            Expanded(
+              flex: 4,
+              child: CaloriesCard(
+                caloriesBurned: caloriesBurned,
+                calorieGoal: calorieGoal,
+                progress: calProgress,
+                caloriesLabel: 'Calories',
+                caloriesUnitLabel: 'kcal burned',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const CaloriesHistoryScreen(),
+                  ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

@@ -39,9 +39,11 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
           return const _ProgressionSkeleton();
         }
 
-        if (snapshot.hasError ||
-            !snapshot.hasData ||
-            snapshot.data!.isRecovery) {
+        if (!snapshot.hasData) {
+          return const _ProgressionSkeleton();
+        }
+
+        if (snapshot.data!.isRecovery) {
           return _RecoveryProtocol(reason: snapshot.data?.recoveryReason);
         }
 
@@ -77,54 +79,331 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
       return const _ProgressionPayload.recovery('Split says rest day');
     }
 
-    final currentWeek = workoutProvider.selectedWeek;
-    final previousWeek = currentWeek - 1;
-    if (previousWeek <= 0) {
-      return const _ProgressionPayload.recovery('No previous week data');
+    final templateFallback = await _buildTemplateFallbackPayload(
+      uid: uid,
+      todayIndex: todayIndex,
+      todayName: todayName,
+      currentWeek: workoutProvider.selectedWeek,
+      userModel: userModel,
+    );
+
+    try {
+      final currentWeek = workoutProvider.selectedWeek;
+      final dayNumber = todayIndex + 1;
+      final rawExercises = await _loadPreviousWeekDayExercises(
+        uid: uid,
+        currentWeek: currentWeek,
+        dayNumber: dayNumber,
+      );
+      if (rawExercises.isEmpty) {
+        return templateFallback ??
+            const _ProgressionPayload.recovery(
+              'No exercises on previous week day',
+            );
+      }
+
+      final parsed = rawExercises
+          .whereType<Map>()
+          .map(
+            (raw) => _ExerciseSnapshot.fromMap(Map<String, dynamic>.from(raw)),
+          )
+          .where((e) => e.name.trim().isNotEmpty)
+          .toList(growable: false);
+
+      if (parsed.isEmpty) {
+        return templateFallback ??
+            const _ProgressionPayload.recovery('No parseable exercise data');
+      }
+
+      final selected = _selectExercises(parsed);
+      if (selected.isEmpty) {
+        return templateFallback ??
+            const _ProgressionPayload.recovery('No eligible exercises');
+      }
+
+      final targets = selected
+          .map((e) => _toTarget(exercise: e, user: userModel))
+          .toList(growable: false);
+
+      if (targets.isEmpty) {
+        return templateFallback ??
+            const _ProgressionPayload.recovery('No target calculations');
+      }
+
+      return _ProgressionPayload(targets: targets);
+    } catch (_) {
+      return templateFallback ??
+          const _ProgressionPayload.recovery('Failed to load progression data');
+    }
+  }
+
+  Future<List<dynamic>> _loadPreviousWeekDayExercises({
+    required String uid,
+    required int currentWeek,
+    required int dayNumber,
+  }) async {
+    final firestore = FirebaseFirestore.instance;
+    final candidates = <int>[];
+    final seen = <int>{};
+
+    void addCandidate(int week) {
+      if (week <= 0 || seen.contains(week)) return;
+      seen.add(week);
+      candidates.add(week);
     }
 
-    final previousDayRef = FirebaseFirestore.instance
+    if (currentWeek > 1) {
+      addCandidate(currentWeek - 1);
+    }
+
+    final weeksSnap = await firestore
         .collection('users')
         .doc(uid)
         .collection('weeks')
-        .doc('week_$previousWeek')
-        .collection('days')
-        .doc('day_${todayIndex + 1}');
+        .get();
 
-    final previousDaySnap = await previousDayRef.get();
-    final rawExercises =
-        (previousDaySnap.data()?['exercises'] as List<dynamic>?) ??
-        const <dynamic>[];
-    if (rawExercises.isEmpty) {
-      return const _ProgressionPayload.recovery(
-        'No exercises on previous week day',
+    final discoveredWeeks = weeksSnap.docs
+        .map((doc) {
+          final match = RegExp(r'^week_(\d+)$').firstMatch(doc.id);
+          if (match == null) return null;
+          return int.tryParse(match.group(1)!);
+        })
+        .whereType<int>()
+        .toList(growable: false)
+      ..sort((a, b) => b.compareTo(a));
+
+    for (final week in discoveredWeeks) {
+      if (currentWeek > 1 && week >= currentWeek) continue;
+      addCandidate(week);
+    }
+
+    for (final week in candidates) {
+      final daySnap = await firestore
+          .collection('users')
+          .doc(uid)
+          .collection('weeks')
+          .doc('week_$week')
+          .collection('days')
+          .doc('day_$dayNumber')
+          .get();
+
+      final rawExercises =
+          (daySnap.data()?['exercises'] as List<dynamic>?) ?? const <dynamic>[];
+      if (rawExercises.isNotEmpty) {
+        return rawExercises;
+      }
+    }
+
+    return const <dynamic>[];
+  }
+
+  Future<_ProgressionPayload?> _buildTemplateFallbackPayload({
+    required String uid,
+    required int todayIndex,
+    required String todayName,
+    required int currentWeek,
+    required BrutlUser userModel,
+  }) async {
+    try {
+      final templateExercises = await _loadTemplateExercisesForToday(
+        uid: uid,
+        todayIndex: todayIndex,
+        todayName: todayName,
+        currentWeek: currentWeek,
       );
+      if (templateExercises.isEmpty) return null;
+
+      final parsed = templateExercises
+          .whereType<Map>()
+          .map(
+            (raw) => _ExerciseSnapshot.fromMap(Map<String, dynamic>.from(raw)),
+          )
+          .where((e) => e.name.trim().isNotEmpty)
+          .toList(growable: false);
+      if (parsed.isEmpty) return null;
+
+      final selected = _selectExercises(parsed);
+      if (selected.isEmpty) return null;
+
+      final targets = selected
+          .map((e) => _toTemplateTarget(exercise: e, user: userModel))
+          .toList(growable: false);
+      if (targets.isEmpty) return null;
+
+      return _ProgressionPayload(targets: targets);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _loadTemplateExercisesForToday({
+    required String uid,
+    required int todayIndex,
+    required String todayName,
+    required int currentWeek,
+  }) async {
+    final firestore = FirebaseFirestore.instance;
+    final weekRefs = <DocumentReference<Map<String, dynamic>>>[
+      firestore
+          .collection('users')
+          .doc(uid)
+          .collection('weeks')
+          .doc('week_$currentWeek')
+          .collection('days')
+          .doc('day_${todayIndex + 1}'),
+      firestore
+          .collection('users')
+          .doc(uid)
+          .collection('weeks')
+          .doc('week_1')
+          .collection('days')
+          .doc('day_${todayIndex + 1}'),
+    ];
+
+    for (final ref in weekRefs) {
+      final fromDay = await _loadExercisesFromDayDoc(ref);
+      if (fromDay.isNotEmpty) return fromDay;
     }
 
-    final parsed = rawExercises
+    final fromWorkouts = await _loadExercisesFromWorkoutCollection(
+      uid: uid,
+      todayName: todayName,
+    );
+    if (fromWorkouts.isNotEmpty) return fromWorkouts;
+
+    return _heuristicTemplateForDay(todayName);
+  }
+
+  Future<List<Map<String, dynamic>>> _loadExercisesFromDayDoc(
+    DocumentReference<Map<String, dynamic>> ref,
+  ) async {
+    final snap = await ref.get();
+    final raw = (snap.data()?['exercises'] as List<dynamic>?) ?? const [];
+    return raw
         .whereType<Map>()
-        .map((raw) => _ExerciseSnapshot.fromMap(Map<String, dynamic>.from(raw)))
-        .where((e) => e.name.trim().isNotEmpty)
+        .map((e) => Map<String, dynamic>.from(e))
+        .where((e) => (e['name']?.toString().trim().isNotEmpty ?? false))
         .toList(growable: false);
+  }
 
-    if (parsed.isEmpty) {
-      return const _ProgressionPayload.recovery('No parseable exercise data');
+  Future<List<Map<String, dynamic>>> _loadExercisesFromWorkoutCollection({
+    required String uid,
+    required String todayName,
+  }) async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .collection('workouts')
+          .where('splitName', isEqualTo: todayName)
+          .limit(24)
+          .get();
+      return snap.docs
+          .map((d) => d.data())
+          .where((e) => (e['name']?.toString().trim().isNotEmpty ?? false))
+          .toList(growable: false);
+    } catch (_) {
+      return const <Map<String, dynamic>>[];
+    }
+  }
+
+  List<Map<String, dynamic>> _heuristicTemplateForDay(String todayName) {
+    final normalized = todayName.toLowerCase();
+
+    List<Map<String, dynamic>> byNames(List<String> names) {
+      return names
+          .map(
+            (name) => <String, dynamic>{
+              'name': name,
+              'sets': 3,
+              'reps': '8-12',
+              'weight': 0,
+              'weightUnit': 'Kg',
+              'categoryType': _looksCompound(name) ? 'compound' : 'isolation',
+            },
+          )
+          .toList(growable: false);
     }
 
-    final selected = _selectExercises(parsed);
-    if (selected.isEmpty) {
-      return const _ProgressionPayload.recovery('No eligible exercises');
+    if (normalized.contains('chest') || normalized.contains('push')) {
+      return byNames(const <String>[
+        'Bench Press',
+        'Incline Dumbbell Press',
+        'Triceps Pushdown',
+      ]);
+    }
+    if (normalized.contains('back') || normalized.contains('pull')) {
+      return byNames(const <String>[
+        'Barbell Row',
+        'Lat Pulldown',
+        'Dumbbell Curl',
+      ]);
+    }
+    if (normalized.contains('leg') || normalized.contains('lower')) {
+      return byNames(const <String>[
+        'Back Squat',
+        'Romanian Deadlift',
+        'Leg Extension',
+      ]);
+    }
+    if (normalized.contains('shoulder') || normalized.contains('upper')) {
+      return byNames(const <String>[
+        'Overhead Press',
+        'Seated Cable Row',
+        'Lateral Raise',
+      ]);
+    }
+    if (normalized.contains('arm')) {
+      return byNames(const <String>[
+        'Barbell Curl',
+        'Skull Crusher',
+        'Hammer Curl',
+      ]);
     }
 
-    final targets = selected
-        .map((e) => _toTarget(exercise: e, user: userModel))
-        .toList(growable: false);
+    return byNames(const <String>['Goblet Squat', 'Push Up', 'Dumbbell Row']);
+  }
 
-    if (targets.isEmpty) {
-      return const _ProgressionPayload.recovery('No target calculations');
-    }
+  _TargetCardData _toTemplateTarget({
+    required _ExerciseSnapshot exercise,
+    required BrutlUser user,
+  }) {
+    final minRep = exercise.isCompound
+        ? user.compoundRepMin
+        : user.isolationRepMin;
+    final maxRep = exercise.isCompound
+        ? user.compoundRepMax
+        : user.isolationRepMax;
+    final safeMin = minRep <= 0 ? 1 : minRep;
+    final safeMax = maxRep < safeMin ? safeMin : maxRep;
+    final baseReps = ((safeMin + safeMax) / 2).round().clamp(safeMin, safeMax);
+    final unit = exercise.weightUnit.trim().isEmpty
+        ? user.weightUnit
+        : exercise.weightUnit;
+    final startWeight = exercise.weight < 0 ? 0 : exercise.weight;
 
-    return _ProgressionPayload(targets: targets);
+    return _TargetCardData(
+      name: exercise.name,
+      isCompound: exercise.isCompound,
+      lastWeight: startWeight,
+      lastReps: baseReps,
+      targetWeight: startWeight,
+      targetReps: baseReps,
+      weightUnit: unit,
+      actionLabel: 'Base range: $safeMin-$safeMax reps',
+      aiPayload: _toAiExercisePayload(exercise),
+    );
+  }
+
+  static bool _looksCompound(String name) {
+    final n = name.trim().toLowerCase();
+    return n.contains('bench') ||
+        n.contains('squat') ||
+        n.contains('deadlift') ||
+        n.contains('row') ||
+        n.contains('press') ||
+        n.contains('pull up') ||
+        n.contains('pulldown');
   }
 
   List<_ExerciseSnapshot> _selectExercises(List<_ExerciseSnapshot> source) {

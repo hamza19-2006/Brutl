@@ -446,13 +446,18 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
         : exercise.weightUnit;
     final startWeight = exercise.weight < 0 ? 0.0 : exercise.weight;
 
+    // MODULE 2C: Emit base-range as a string (e.g. "8-12")
+    final templateRepsString = safeMin == safeMax
+        ? '$safeMin'
+        : '$safeMin-$safeMax';
+
     return _TargetCardData(
       name: exercise.name,
       isCompound: exercise.isCompound,
       lastWeight: startWeight,
       lastReps: baseReps,
       targetWeight: startWeight,
-      targetReps: baseReps,
+      targetRepsString: templateRepsString,
       weightUnit: unit,
       actionLabel: 'Base range: $safeMin-$safeMax reps',
       aiPayload: _toAiExercisePayload(exercise),
@@ -501,57 +506,75 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
     required _ExerciseSnapshot exercise,
     required BrutlUser user,
   }) {
+    // ── Step 2A: Variable Extraction ──────────────────────────────────────
     final minRep = exercise.isCompound
         ? user.compoundRepMin
         : user.isolationRepMin;
     final maxRep = exercise.isCompound
         ? user.compoundRepMax
         : user.isolationRepMax;
-    final safeMin = minRep <= 0 ? 1 : minRep;
-    final safeMax = maxRep < safeMin ? safeMin : maxRep;
-    // BUG 1 FIX: topSetReps is now the true max from comma-separated parsing
-    final lastTopReps = exercise.topSetReps > 0 ? exercise.topSetReps : safeMin;
-    final unit = exercise.weightUnit.trim().isEmpty
+    // Base range with safe fallbacks (default 8-12 if parsing fails)
+    final lowerLimit = minRep <= 0 ? 8 : minRep;
+    final upperLimit = maxRep < lowerLimit ? 12 : maxRep;
+
+    final lastTopRep = exercise.topSetReps > 0 ? exercise.topSetReps : lowerLimit;
+    final lastWeight = exercise.weight;
+    final weightUnit = exercise.weightUnit.trim().isEmpty
         ? user.weightUnit
         : exercise.weightUnit;
-    final increment = _isLbs(unit) ? 5.0 : 2.5;
+    final exerciseType = exercise.isCompound ? 'Compound' : 'Isolation';
 
-    // BUG 2 FIX: Freeze the "last week" display value BEFORE calculating target
-    final displayLastReps = lastTopReps;
+    // Freeze the "last week" display value BEFORE calculating target
+    final displayLastReps = lastTopRep;
 
-    if (lastTopReps >= safeMax) {
-      final nextWeight = _roundToIncrement(
-        exercise.weight + increment,
-        increment,
-      );
-      return _TargetCardData(
-        name: exercise.name,
-        isCompound: exercise.isCompound,
-        lastWeight: exercise.weight,
-        lastReps: displayLastReps,
-        lastRepsRaw: exercise.repsRaw,
-        targetWeight: nextWeight,
-        targetReps: safeMin,
-        weightUnit: unit,
-        actionLabel: 'Increase Weight',
-        aiPayload: _toAiExercisePayload(exercise),
-      );
+    double newTargetWeight;
+    String newTargetRepsString;
+    String actionLabel;
+
+    // ── Step 2B: Mathematical Branching Logic ─────────────────────────────
+    if (lastTopRep >= upperLimit) {
+      // ── BRANCH 1: UPPER LIMIT REACHED → WEIGHT PROGRESSION ────────────
+      if (weightUnit.toLowerCase().contains('plate')) {
+        // Plates: +1 plate
+        newTargetWeight = lastWeight + 1;
+      } else if (exerciseType.toLowerCase().contains('compound')) {
+        // Compound: +5.0 Kg/Lbs
+        newTargetWeight = lastWeight + 5.0;
+      } else {
+        // Isolation: +2.5 Kg/Lbs
+        newTargetWeight = lastWeight + 2.5;
+      }
+      // Reset reps to bottom of base range
+      newTargetRepsString = '$lowerLimit-${lowerLimit + 1}';
+      actionLabel = 'Increase Weight';
+    } else {
+      // ── BRANCH 2: BELOW UPPER LIMIT → REP PROGRESSION ─────────────────
+      newTargetWeight = lastWeight;
+      final repTargetMin = lastTopRep + 1;
+      int repTargetMax = lastTopRep + 2;
+      // Crucial cap: clamp to upperLimit
+      if (repTargetMax > upperLimit) repTargetMax = upperLimit;
+      if (repTargetMin > upperLimit) {
+        // Edge case: already at or past upper limit
+        newTargetRepsString = '$upperLimit';
+      } else if (repTargetMin == repTargetMax) {
+        newTargetRepsString = '$repTargetMin';
+      } else {
+        newTargetRepsString = '$repTargetMin-$repTargetMax';
+      }
+      actionLabel = 'Increase Reps';
     }
-
-    final room = safeMax - lastTopReps;
-    final bump = room >= 2 ? 2 : 1;
-    final targetReps = (lastTopReps + bump).clamp(safeMin, safeMax).toInt();
 
     return _TargetCardData(
       name: exercise.name,
       isCompound: exercise.isCompound,
-      lastWeight: exercise.weight,
+      lastWeight: lastWeight,
       lastReps: displayLastReps,
       lastRepsRaw: exercise.repsRaw,
-      targetWeight: exercise.weight,
-      targetReps: targetReps,
-      weightUnit: unit,
-      actionLabel: 'Increase Reps',
+      targetWeight: newTargetWeight,
+      targetRepsString: newTargetRepsString,
+      weightUnit: weightUnit,
+      actionLabel: actionLabel,
       aiPayload: _toAiExercisePayload(exercise),
     );
   }
@@ -581,13 +604,6 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
     return normalized.isEmpty || normalized.contains('rest');
   }
 
-  static bool _isLbs(String unit) => unit.trim().toLowerCase().contains('lb');
-
-  static double _roundToIncrement(double value, double increment) {
-    if (increment <= 0) return value;
-    final scaled = (value / increment).round();
-    return scaled * increment;
-  }
 }
 
 class _ProgressionPayload {
@@ -716,7 +732,7 @@ class _TargetCardData {
     required this.lastReps,
     this.lastRepsRaw = '',
     required this.targetWeight,
-    required this.targetReps,
+    required this.targetRepsString,
     required this.weightUnit,
     required this.actionLabel,
     required this.aiPayload,
@@ -725,12 +741,13 @@ class _TargetCardData {
   final String name;
   final bool isCompound;
   final double lastWeight;
-  /// BUG 2 FIX: The extracted top rep from last week (strictly for display)
+  /// The extracted top rep from last week (strictly for display)
   final int lastReps;
   /// Raw rep string from Firestore for optional display (e.g. "6,5")
   final String lastRepsRaw;
   final double targetWeight;
-  final int targetReps;
+  /// MODULE 2A: Target reps is now a String range (e.g. "7-8", "4-5", "10")
+  final String targetRepsString;
   final String weightUnit;
   final String actionLabel;
   final Map<String, dynamic> aiPayload;
@@ -812,10 +829,10 @@ class _TargetCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 10),
-              // BUG 2 FIX: "Last Week" strictly shows extracted lastReps,
-              // "Target Today" strictly shows the newly calculated targetReps.
+              // MODULE 3: "Last Week" shows raw reps, "Target Today" shows
+              // the computed string range from the progressive overload engine.
               Text(
-                'Last Week: ${_fmtWeight(item.lastWeight)}${item.weightUnit} x ${item.lastReps}',
+                'Last Week: ${_fmtWeight(item.lastWeight)}${item.weightUnit} x ${item.lastRepsRaw.isNotEmpty ? item.lastRepsRaw : '${item.lastReps}'}',
                 style: const TextStyle(
                   color: Color(0xFF8B8B8B),
                   fontSize: 13,
@@ -824,7 +841,7 @@ class _TargetCard extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                'Target Today: ${_fmtWeight(item.targetWeight)}${item.weightUnit} x ${item.targetReps} 🎯',
+                'Target Today: ${_fmtWeight(item.targetWeight)}${item.weightUnit} x ${item.targetRepsString} 🎯',
                 style: const TextStyle(
                   color: Color(0xFFFF3D00),
                   fontSize: 15,
@@ -850,7 +867,7 @@ class _TargetCard extends StatelessWidget {
                     final sets = item.aiPayload['sets']?.toString() ?? '';
                     final targetSets = sets.isNotEmpty ? sets : '1';
                     final draft =
-                        'Coach, adjust this target for today: ${item.name} - ${targetSets}x${item.targetReps} @ ${_fmtWeight(item.targetWeight)}${item.weightUnit}';
+                        'Coach, adjust this target for today: ${item.name} - ${targetSets}x${item.targetRepsString} @ ${_fmtWeight(item.targetWeight)}${item.weightUnit}';
                     await Navigator.of(context).push(
                       MaterialPageRoute<void>(
                         builder: (_) => AiCoachChatScreen(

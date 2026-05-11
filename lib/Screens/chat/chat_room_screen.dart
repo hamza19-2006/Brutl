@@ -1633,9 +1633,10 @@ class _ExerciseShareBubble extends StatelessWidget {
                       ),
                     ),
                   ),
-                ),
               ),
-          ),
+            ),
+            ),
+          ],
         ],
       ),
     );

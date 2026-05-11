@@ -12,6 +12,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -45,10 +46,28 @@ class StepProvider extends ChangeNotifier {
   // ─── Public getters ──────────────────────────────────────────────────────
   bool get isInitialized => _isInitialized;
   bool get isListening => _isListening;
-  int get currentSteps => _currentSteps;
   String? get sensorError => _sensorError;
   bool get hasPermission => _hasPermission;
   bool get permissionPermanentlyDenied => _permissionPermanentlyDenied;
+
+  /// MODULE 1 FIX — Strictly defined, publicly exposed getter for today's
+  /// computed steps. Always recomputes from the canonical pair
+  /// (raw hardware counter — daily baseline). Defensive against:
+  ///   • a stream race where the UI subscribes before baseline emit
+  ///   • a corrupted persistence state where baseline was never set
+  ///
+  /// `int get todaysDisplaySteps => math.max(0, _rawHardwareSteps - _dailyBaseline);`
+  int get todaysDisplaySteps {
+    if (!_sensorService.isBaselineSetForToday) return 0;
+    final raw = _sensorService.rawHardwareSteps;
+    final baseline = _sensorService.dailyBaseline;
+    return math.max(0, raw - baseline);
+  }
+
+  /// Backwards-compatible alias — every caller funnels through the
+  /// computed value so the Home Screen can never display the raw
+  /// hardware counter (e.g. 20,836).
+  int get currentSteps => todaysDisplaySteps;
 
   /// Calorie estimation using BMR + NEAT model.
   ///
@@ -57,10 +76,13 @@ class StepProvider extends ChangeNotifier {
   ///
   /// For a 70 kg person: 10,000 steps ≈ 280 kcal (NEAT component).
   /// This aligns with research from the American Council on Exercise.
+  ///
+  /// MODULE 1 FIX — multiplies the *computed* `todaysDisplaySteps`
+  /// by the calorie-per-step multiplier, never the raw hardware counter.
   double get caloriesBurned {
     final weight = _userWeightKg > 0 ? _userWeightKg : 70.0;
     final normalizedWeightFactor = weight / 70.0;
-    final estimatedCalories = _currentSteps * 0.04 * normalizedWeightFactor;
+    final estimatedCalories = todaysDisplaySteps * 0.04 * normalizedWeightFactor;
     return estimatedCalories.clamp(0, 5000).toDouble();
   }
 

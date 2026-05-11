@@ -18,7 +18,6 @@ import 'share_meal_screen.dart';
 import 'share_pr_screen.dart';
 import 'share_streak_screen.dart';
 import 'share_workout_screen.dart';
-import 'start_challenge_screen.dart';
 
 class ChatRoomScreen extends StatefulWidget {
   const ChatRoomScreen({super.key, required this.friend});
@@ -190,15 +189,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                   _navigateToStreakShare();
                 },
               ),
-              const SizedBox(height: AppSpacing.md),
-              _AttachOption(
-                icon: Icons.bolt_rounded,
-                label: 'Start Challenge',
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _navigateToChallenge();
-                },
-              ),
             ],
           ),
         ),
@@ -278,34 +268,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     }
   }
 
-  Future<void> _navigateToChallenge() async {
-    final payload = await Navigator.push<Map<String, dynamic>>(
-      context,
-      MaterialPageRoute<Map<String, dynamic>>(
-        builder: (_) =>
-            StartChallengeScreen(friendName: widget.friend.resolvedName),
-      ),
-    );
-    if (payload != null && mounted) {
-      await context.read<ChatProvider>().startChallenge(
-        _chatId,
-        widget.friend.uid,
-        title: payload['title'] as String,
-        type: payload['type'] as String,
-        durationDays: payload['durationDays'] as int,
-        targetValue: payload['targetValue'] as int,
-      );
-      if (mounted) _scrollToBottom();
-    }
-  }
-
   // ---------------------------------------------------------------------
   // Message long-press actions
   // ---------------------------------------------------------------------
 
   void _showMessageActions(MessageModel message) {
     if (message.isDeleted) return;
-    final isMe = message.senderId == _myUid;
     final isText = message.type == 'text';
 
     showModalBottomSheet<void>(
@@ -374,18 +342,16 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                     _showMessageDetailsSheet(message);
                   },
                 ),
-                if (isMe) ...[
-                  const SizedBox(height: AppSpacing.sm),
-                  _MenuActionTile(
-                    icon: Icons.delete_outline_rounded,
-                    label: 'Delete',
-                    isDestructive: true,
-                    onTap: () {
-                      Navigator.pop(sheetCtx);
-                      _confirmDeleteMessage(message);
-                    },
-                  ),
-                ],
+                const SizedBox(height: AppSpacing.sm),
+                _MenuActionTile(
+                  icon: Icons.delete_outline_rounded,
+                  label: 'Delete',
+                  isDestructive: true,
+                  onTap: () {
+                    Navigator.pop(sheetCtx);
+                    _showDeleteSheet(message);
+                  },
+                ),
               ],
             ),
           ),
@@ -446,39 +412,80 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     }
   }
 
-  void _confirmDeleteMessage(MessageModel message) {
-    showDialog<void>(
+  void _showDeleteSheet(MessageModel message) {
+    final isMe = message.senderId == _myUid;
+    // "Delete for everyone" is only meaningful for messages I authored, and
+    // only while they are not yet soft-deleted globally.
+    final canDeleteForEveryone = isMe && !message.isDeleted;
+
+    showModalBottomSheet<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.backgroundSecondary,
-        title: Text(
-          'Delete Message',
-          style: AppTextStyles.headingMedium(color: AppColors.statusError),
+      backgroundColor: AppColors.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(AppSpacing.borderRadiusLarge),
         ),
-        content: Text(
-          'This message will be deleted for everyone.',
-          style: AppTextStyles.bodyMedium(color: AppColors.textSecondary),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(
-              'Cancel',
-              style: AppTextStyles.bodyMedium(color: AppColors.textSecondary),
-            ),
-          ),
-          TextButton(
-            onPressed: () {
-              context.read<ChatProvider>().deleteMessage(_chatId, message);
-              Navigator.pop(ctx);
-            },
-            child: Text(
-              'Delete',
-              style: AppTextStyles.bodyMedium(color: AppColors.statusError),
-            ),
-          ),
-        ],
       ),
+      builder: (sheetCtx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.lg,
+              vertical: AppSpacing.lg,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('Delete message', style: AppTextStyles.headingMedium()),
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  canDeleteForEveryone
+                      ? '"Delete for me" only hides it from your side. "Delete for everyone" removes it from both sides.'
+                      : 'This will hide the message from your side only. The sender will still see it.',
+                  style: AppTextStyles.bodySmall(
+                    color: AppColors.textTertiary,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                _MenuActionTile(
+                  icon: Icons.visibility_off_outlined,
+                  label: 'Delete for me',
+                  isDestructive: true,
+                  onTap: () {
+                    Navigator.pop(sheetCtx);
+                    context.read<ChatProvider>().deleteMessageForMe(
+                      _chatId,
+                      message.id,
+                    );
+                  },
+                ),
+                if (canDeleteForEveryone) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  _MenuActionTile(
+                    icon: Icons.delete_forever_rounded,
+                    label: 'Delete for everyone',
+                    isDestructive: true,
+                    onTap: () {
+                      Navigator.pop(sheetCtx);
+                      context.read<ChatProvider>().deleteMessage(
+                        _chatId,
+                        message,
+                      );
+                    },
+                  ),
+                ],
+                const SizedBox(height: AppSpacing.sm),
+                _MenuActionTile(
+                  icon: Icons.close_rounded,
+                  label: 'Cancel',
+                  onTap: () => Navigator.pop(sheetCtx),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -490,15 +497,24 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   Widget build(BuildContext context) {
     final chatProvider = context.watch<ChatProvider>();
 
+    // Always derive the freshest friend record from the provider so toggles
+    // (block / nickname / pin / mute) propagate without re-pushing the screen.
+    final liveFriend = chatProvider.friends.firstWhere(
+      (f) => f.uid == widget.friend.uid,
+      orElse: () => widget.friend,
+    );
+    final isFriendBlocked = liveFriend.isBlocked;
+
     return Scaffold(
       backgroundColor: AppColors.backgroundPrimary,
-      appBar: _buildAppBar(chatProvider),
+      appBar: _buildAppBar(chatProvider, liveFriend),
       body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
         stream: chatProvider.chatMetaStream(_chatId),
         builder: (context, chatSnap) {
           final chatData = chatSnap.data?.data() ?? const <String, dynamic>{};
           final isFriendTyping =
-              (chatData['isTyping_${widget.friend.uid}'] as bool?) ?? false;
+              !isFriendBlocked &&
+              ((chatData['isTyping_${widget.friend.uid}'] as bool?) ?? false);
 
           return Column(
             children: [
@@ -506,7 +522,20 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                 child: StreamBuilder<List<MessageModel>>(
                   stream: chatProvider.messagesStream(_chatId),
                   builder: (ctx, snap) {
-                    final serverMessages = snap.data ?? [];
+                    final raw = snap.data ?? [];
+                    // 1) Hide any message the user has personally
+                    //    "Deleted for me" (deletedFor contains my uid).
+                    // 2) Defence-in-depth: when this user has blocked the
+                    //    friend, hide every message authored by the blocked
+                    //    sender.
+                    final serverMessages = raw.where((m) {
+                      if (m.isHiddenFor(_myUid)) return false;
+                      if (isFriendBlocked &&
+                          m.senderId == widget.friend.uid) {
+                        return false;
+                      }
+                      return true;
+                    }).toList();
                     _markAsReadIfNeeded(serverMessages);
                     final serverIds = serverMessages.map((m) => m.id).toSet();
                     final pendingIds = <String>{};
@@ -607,18 +636,27 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                     ),
                   ),
                 ),
-              if (_replyTo != null)
+              if (_replyTo != null && !isFriendBlocked)
                 _ReplyComposerPreview(
                   replyTo: _replyTo!,
                   isMine: _replyTo!.senderId == _myUid,
                   onClose: () => setState(() => _replyTo = null),
                 ),
-              _InputBar(
-                controller: _controller,
-                onSend: _send,
-                onAttach: _showAttachmentSheet,
-                onChanged: _onInputChanged,
-              ),
+              if (isFriendBlocked)
+                _BlockedBanner(
+                  friendName: liveFriend.resolvedName,
+                  onUnblock: () => chatProvider.setBlockedFriend(
+                    widget.friend.uid,
+                    false,
+                  ),
+                )
+              else
+                _InputBar(
+                  controller: _controller,
+                  onSend: _send,
+                  onAttach: _showAttachmentSheet,
+                  onChanged: _onInputChanged,
+                ),
             ],
           );
         },
@@ -626,7 +664,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     );
   }
 
-  PreferredSizeWidget _buildAppBar(ChatProvider chatProvider) {
+  PreferredSizeWidget _buildAppBar(
+    ChatProvider chatProvider,
+    FriendModel friend,
+  ) {
     return AppBar(
       backgroundColor: AppColors.backgroundPrimary,
       elevation: 0,
@@ -641,14 +682,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       title: Row(
         children: [
           Hero(
-            tag: 'avatar_${widget.friend.uid}',
+            tag: 'avatar_${friend.uid}',
             child: CircleAvatar(
               radius: 18,
               backgroundColor: AppColors.backgroundQuaternary,
-              backgroundImage: widget.friend.photoUrl.isNotEmpty
-                  ? CachedNetworkImageProvider(widget.friend.photoUrl)
+              backgroundImage: friend.photoUrl.isNotEmpty
+                  ? CachedNetworkImageProvider(friend.photoUrl)
                   : null,
-              child: widget.friend.photoUrl.isEmpty
+              child: friend.photoUrl.isEmpty
                   ? const Icon(
                       Icons.person,
                       color: AppColors.textTertiary,
@@ -664,7 +705,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  widget.friend.resolvedName,
+                  friend.resolvedName,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: AppTextStyles.headingSmall().copyWith(
@@ -673,11 +714,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                 ),
                 const SizedBox(height: 1),
                 Text(
-                  '@${widget.friend.username}',
+                  friend.isBlocked ? 'Blocked' : '@${friend.username}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: AppTextStyles.labelSmall(
-                    color: AppColors.textTertiary,
+                    color: friend.isBlocked
+                        ? AppColors.statusError
+                        : AppColors.textTertiary,
                   ),
                 ),
               ],
@@ -1554,36 +1597,44 @@ class _ExerciseShareBubble extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.md),
           body,
-          const SizedBox(height: AppSpacing.md),
-          const Divider(height: 1, color: AppColors.borderSubtle),
-          const SizedBox(height: AppSpacing.sm),
-          Material(
-            color: AppColors.backgroundQuaternary,
-            borderRadius: BorderRadius.circular(AppSpacing.borderRadiusSmall),
-            child: InkWell(
-              onTap: () => unawaited(_saveToPlan(context, exercises)),
-              borderRadius: BorderRadius.circular(AppSpacing.borderRadiusSmall),
-              splashColor: AppColors.accentGlow,
-              highlightColor: AppColors.accentSoft.withValues(alpha: 0.45),
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-                decoration: BoxDecoration(
-                  border: Border.all(color: AppColors.borderAccent),
-                  borderRadius: BorderRadius.circular(
-                    AppSpacing.borderRadiusSmall,
-                  ),
+          // "Save to My Plan" only makes sense for the receiver. The sender
+          // already has this workout in their plan, so they shouldn't see
+          // a save action on their own outgoing share bubble.
+          if (!isMe) ...[
+            const SizedBox(height: AppSpacing.md),
+            const Divider(height: 1, color: AppColors.borderSubtle),
+            const SizedBox(height: AppSpacing.sm),
+            Material(
+              color: AppColors.backgroundQuaternary,
+              borderRadius: BorderRadius.circular(
+                AppSpacing.borderRadiusSmall,
+              ),
+              child: InkWell(
+                onTap: () => unawaited(_saveToPlan(context, exercises)),
+                borderRadius: BorderRadius.circular(
+                  AppSpacing.borderRadiusSmall,
                 ),
-                child: Center(
-                  child: Text(
-                    'Save to My Plan',
-                    style: AppTextStyles.labelLarge(
-                      color: AppColors.accentPrimary,
+                splashColor: AppColors.accentGlow,
+                highlightColor: AppColors.accentSoft.withValues(alpha: 0.45),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: AppColors.borderAccent),
+                    borderRadius: BorderRadius.circular(
+                      AppSpacing.borderRadiusSmall,
+                    ),
+                  ),
+                  child: Center(
+                    child: Text(
+                      'Save to My Plan',
+                      style: AppTextStyles.labelLarge(
+                        color: AppColors.accentPrimary,
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
           ),
         ],
       ),
@@ -2919,6 +2970,97 @@ class _DetailRow extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// Blocked banner (replaces the input bar when the friend is blocked)
+// =============================================================================
+
+class _BlockedBanner extends StatelessWidget {
+  const _BlockedBanner({required this.friendName, required this.onUnblock});
+
+  final String friendName;
+  final VoidCallback onUnblock;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.lg,
+        vertical: AppSpacing.md,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.backgroundSecondary,
+        border: const Border(top: BorderSide(color: AppColors.borderDefault)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: AppColors.statusError.withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.block_rounded,
+                color: AppColors.statusError,
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'You blocked $friendName',
+                    style: AppTextStyles.bodyMedium(
+                      color: AppColors.textPrimary,
+                    ).copyWith(fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'New messages from them are hidden until you unblock.',
+                    style: AppTextStyles.labelSmall(
+                      color: AppColors.textTertiary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            TextButton(
+              onPressed: onUnblock,
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.accentPrimary,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.md,
+                  vertical: AppSpacing.sm,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(
+                    AppSpacing.borderRadiusSmall,
+                  ),
+                  side: const BorderSide(color: AppColors.accentPrimary),
+                ),
+              ),
+              child: Text(
+                'Unblock',
+                style: AppTextStyles.labelSmall(
+                  color: AppColors.accentPrimary,
+                ).copyWith(fontWeight: FontWeight.w700),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

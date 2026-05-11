@@ -70,7 +70,6 @@ class AppWarmupGate extends StatefulWidget {
 class _AppWarmupGateState extends State<AppWarmupGate>
     with WidgetsBindingObserver {
   bool _didStartWarmup = false;
-  ChatProvider? _chatProviderRef;
   StepProvider? _stepProviderRef;
 
   @override
@@ -82,17 +81,12 @@ class _AppWarmupGateState extends State<AppWarmupGate>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    final providerRef = _chatProviderRef;
-    if (providerRef != null) {
-      unawaited(providerRef.setOnlineStatus(false));
-    }
     super.dispose();
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _chatProviderRef = context.read<ChatProvider>();
     _stepProviderRef = context.read<StepProvider>();
     if (_didStartWarmup) return;
     _didStartWarmup = true;
@@ -102,12 +96,10 @@ class _AppWarmupGateState extends State<AppWarmupGate>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    final chatRef = _chatProviderRef;
     final stepRef = _stepProviderRef;
 
     switch (state) {
       case AppLifecycleState.resumed:
-        if (chatRef != null) unawaited(chatRef.setOnlineStatus(true));
         // Refresh steps on resume so today's bar is immediately correct
         if (stepRef != null) unawaited(stepRef.refreshSteps());
         unawaited(StepService.instance.checkAndResetIfNewDay());
@@ -116,7 +108,6 @@ class _AppWarmupGateState extends State<AppWarmupGate>
       case AppLifecycleState.paused:
       case AppLifecycleState.detached:
       case AppLifecycleState.hidden:
-        if (chatRef != null) unawaited(chatRef.setOnlineStatus(false));
         break;
     }
   }
@@ -144,10 +135,6 @@ class _AppWarmupGateState extends State<AppWarmupGate>
 
       if (mounted) {
         await context.read<BrutlUserProvider>().bindToCurrentUser();
-      }
-
-      if (mounted) {
-        unawaited(context.read<ChatProvider>().setOnlineStatus(true));
       }
     } catch (error) {
       debugPrint('BRUTL_BOOT: Startup warmup failed — $error');

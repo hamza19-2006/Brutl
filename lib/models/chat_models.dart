@@ -25,6 +25,7 @@ class MessageModel {
     this.replyToPreview,
     this.reactions = const <String, List<String>>{},
     this.isDeleted = false,
+    this.deletedFor = const <String>[],
   });
 
   final String id;
@@ -56,11 +57,17 @@ class MessageModel {
 
   // ── Soft delete ───────────────────────────────────────────────────────────
   /// When true, render as 'This message was deleted'. Original payload is
-  /// cleared by the provider on delete.
+  /// cleared by the provider on delete-for-everyone.
   final bool isDeleted;
+
+  /// UIDs that have hidden this message via "delete for me". The chat room
+  /// filters out messages whose deletedFor list contains the current uid.
+  final List<String> deletedFor;
 
   bool get isReply => replyToId != null && replyToId!.isNotEmpty;
   bool get hasReactions => reactions.isNotEmpty;
+
+  bool isHiddenFor(String uid) => uid.isNotEmpty && deletedFor.contains(uid);
 
   MessageModel copyWith({
     String? status,
@@ -68,6 +75,7 @@ class MessageModel {
     Map<String, List<String>>? reactions,
     bool? isDeleted,
     Map<String, dynamic>? payload,
+    List<String>? deletedFor,
   }) {
     return MessageModel(
       id: id,
@@ -83,6 +91,7 @@ class MessageModel {
       replyToPreview: replyToPreview,
       reactions: reactions ?? this.reactions,
       isDeleted: isDeleted ?? this.isDeleted,
+      deletedFor: deletedFor ?? this.deletedFor,
     );
   }
 
@@ -101,6 +110,7 @@ class MessageModel {
       if (replyToPreview != null) 'replyToPreview': replyToPreview,
       if (reactions.isNotEmpty) 'reactions': reactions,
       if (isDeleted) 'isDeleted': true,
+      if (deletedFor.isNotEmpty) 'deletedFor': deletedFor,
     };
   }
 
@@ -110,11 +120,17 @@ class MessageModel {
     if (rawReactions is Map) {
       rawReactions.forEach((key, value) {
         if (value is List) {
-          parsedReactions[key.toString()] =
-              value.map((e) => e.toString()).toList();
+          parsedReactions[key.toString()] = value
+              .map((e) => e.toString())
+              .toList();
         }
       });
     }
+
+    final rawDeletedFor = json['deletedFor'];
+    final parsedDeletedFor = rawDeletedFor is List
+        ? rawDeletedFor.map((e) => e.toString()).toList()
+        : const <String>[];
 
     return MessageModel(
       id: json['id'] as String? ?? '',
@@ -132,6 +148,7 @@ class MessageModel {
       replyToPreview: json['replyToPreview'] as String?,
       reactions: parsedReactions,
       isDeleted: (json['isDeleted'] as bool?) ?? false,
+      deletedFor: parsedDeletedFor,
     );
   }
 
@@ -249,34 +266,6 @@ class FriendModel {
       isPinned: isPinned ?? this.isPinned,
       isMuted: isMuted ?? this.isMuted,
       isBlocked: isBlocked ?? this.isBlocked,
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Presence (online / last-seen)
-// ---------------------------------------------------------------------------
-
-@immutable
-class PresenceModel {
-  const PresenceModel({
-    required this.isOnline,
-    required this.lastSeen,
-  });
-
-  final bool isOnline;
-  final DateTime? lastSeen;
-
-  static const PresenceModel offline = PresenceModel(
-    isOnline: false,
-    lastSeen: null,
-  );
-
-  factory PresenceModel.fromJson(Map<String, dynamic>? json) {
-    if (json == null) return PresenceModel.offline;
-    return PresenceModel(
-      isOnline: (json['isOnline'] as bool?) ?? false,
-      lastSeen: MessageModel._toNullableDateTime(json['lastSeen']),
     );
   }
 }

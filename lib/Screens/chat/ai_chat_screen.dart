@@ -383,60 +383,115 @@ class _MessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isUser = message.isUser;
-    return Align(
-      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: AppSpacing.sm),
-        padding: const EdgeInsets.all(AppSpacing.md),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.84,
-        ),
-        decoration: BoxDecoration(
-          color: isUser
-              ? AppColors.accentPrimary
-              : AppColors.backgroundTertiary,
-          border: Border.all(
-            color: isUser ? AppColors.accentPrimary : AppColors.borderDefault,
-          ),
-          borderRadius: BorderRadius.circular(AppSpacing.borderRadiusMedium),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (message.attachmentType != null &&
-                message.attachmentData != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                child: _AttachmentCard(
-                  type: message.attachmentType!,
-                  data: message.attachmentData!,
-                ),
-              ),
-            _MarkdownText(
-              message.content,
-              style: AppTextStyles.bodyMedium(
-                color: isUser ? AppColors.textPrimary : AppColors.textSecondary,
+    final hasAttachment =
+        message.attachmentType != null && message.attachmentData != null;
+    final hasContent = message.content.trim().isNotEmpty;
+    final maxWidth = MediaQuery.of(context).size.width * 0.84;
+
+    final bubbleRadius = isUser
+        ? const BorderRadius.only(
+            topLeft: Radius.circular(16),
+            topRight: Radius.circular(16),
+            bottomLeft: Radius.circular(16),
+            bottomRight: Radius.circular(4),
+          )
+        : const BorderRadius.only(
+            topLeft: Radius.circular(16),
+            topRight: Radius.circular(16),
+            bottomLeft: Radius.circular(4),
+            bottomRight: Radius.circular(16),
+          );
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: Column(
+        crossAxisAlignment: isUser
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.start,
+        children: [
+          if (hasAttachment)
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: maxWidth),
+              child: _AttachmentCard(
+                type: message.attachmentType!,
+                data: message.attachmentData!,
+                isUser: isUser,
               ),
             ),
-          ],
-        ),
+          if (hasAttachment && hasContent)
+            const SizedBox(height: AppSpacing.xs),
+          if (hasContent)
+            Container(
+              padding: const EdgeInsets.all(AppSpacing.md),
+              constraints: BoxConstraints(maxWidth: maxWidth),
+              decoration: BoxDecoration(
+                color: isUser
+                    ? AppColors.accentPrimary
+                    : const Color(0xFF171A1F),
+                border: Border.all(
+                  color: isUser
+                      ? AppColors.accentPrimary
+                      : AppColors.borderDefault,
+                ),
+                borderRadius: bubbleRadius,
+              ),
+              child: _MarkdownText(
+                message.content,
+                style: AppTextStyles.bodyMedium(
+                  color: isUser
+                      ? AppColors.textPrimary
+                      : AppColors.textSecondary,
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
 }
 
 class _AttachmentCard extends StatelessWidget {
-  const _AttachmentCard({required this.type, required this.data});
+  const _AttachmentCard({
+    required this.type,
+    required this.data,
+    required this.isUser,
+  });
 
   final String type;
+  final Map<String, dynamic> data;
+  final bool isUser;
+
+  @override
+  Widget build(BuildContext context) {
+    switch (type) {
+      case 'image':
+        return _AiImageAttachment(data: data);
+      case 'meal':
+        return _AiMealAttachment(data: data, isUser: isUser);
+      case 'workout':
+        return _AiWorkoutAttachment(data: data, isUser: isUser);
+      default:
+        return _AiFallbackAttachment(type: type, data: data);
+    }
+  }
+}
+
+class _AiImageAttachment extends StatelessWidget {
+  const _AiImageAttachment({required this.data});
   final Map<String, dynamic> data;
 
   @override
   Widget build(BuildContext context) {
-    if (type == 'image') {
-      final imageUrl = data['url'] as String? ?? '';
-      final caption = data['caption'] as String? ?? '';
-      return Column(
+    final imageUrl = data['url'] as String? ?? '';
+    final caption = data['caption'] as String? ?? '';
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.sm),
+      decoration: BoxDecoration(
+        color: const Color(0xFF14181D),
+        border: Border.all(color: AppColors.borderSubtle),
+        borderRadius: BorderRadius.circular(AppSpacing.borderRadiusMedium),
+      ),
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (imageUrl.trim().isNotEmpty)
@@ -445,7 +500,7 @@ class _AttachmentCard extends StatelessWidget {
               child: Image.network(
                 imageUrl,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(
+                errorBuilder: (_, _, _) => Container(
                   height: 140,
                   color: AppColors.backgroundSecondary,
                   alignment: Alignment.center,
@@ -461,14 +516,351 @@ class _AttachmentCard extends StatelessWidget {
             Text(caption, style: AppTextStyles.bodySmall()),
           ],
         ],
-      );
+      ),
+    );
+  }
+}
+
+class _AiMealAttachment extends StatelessWidget {
+  const _AiMealAttachment({required this.data, required this.isUser});
+  final Map<String, dynamic> data;
+  final bool isUser;
+
+  @override
+  Widget build(BuildContext context) {
+    final mealName = data['name'] as String? ?? 'Meal';
+    final calories = data['calories'] as num? ?? 0;
+    final protein = data['protein'] as num? ?? 0;
+    final carbs = data['carbs'] as num? ?? 0;
+    final fats = (data['fat'] ?? data['fats']) as num? ?? 0;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: const Color(0xFF14181D),
+        border: Border.all(
+          color: isUser ? AppColors.borderAccent : AppColors.borderSubtle,
+        ),
+        borderRadius: BorderRadius.circular(AppSpacing.borderRadiusMedium),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.restaurant_menu_rounded,
+                color: AppColors.accentPrimary,
+                size: 18,
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  mealName,
+                  style: AppTextStyles.headingSmall(
+                    color: AppColors.textPrimary,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Wrap(
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
+            children: [
+              _AiMacroPill(
+                label: 'Protein',
+                value: '${protein}g',
+                color: AppColors.statusSuccess,
+              ),
+              _AiMacroPill(
+                label: 'Carbs',
+                value: '${carbs}g',
+                color: AppColors.statusInfo,
+              ),
+              _AiMacroPill(
+                label: 'Fats',
+                value: '${fats}g',
+                color: AppColors.statusWarning,
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          const Divider(height: 1, color: AppColors.borderSubtle),
+          const SizedBox(height: AppSpacing.sm),
+          Row(
+            children: [
+              Text(
+                'Total Calories',
+                style: AppTextStyles.labelSmall(color: AppColors.textTertiary),
+              ),
+              const Spacer(),
+              Text(
+                '${calories.toStringAsFixed(calories % 1 == 0 ? 0 : 1)} kcal',
+                style: AppTextStyles.headingSmall(
+                  color: AppColors.accentPrimary,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AiWorkoutAttachment extends StatelessWidget {
+  const _AiWorkoutAttachment({required this.data, required this.isUser});
+  final Map<String, dynamic> data;
+  final bool isUser;
+
+  @override
+  Widget build(BuildContext context) {
+    final scope = data['shareScope'] as String? ?? 'day';
+    final title =
+        data['title'] as String? ?? data['name'] as String? ?? 'Workout';
+    final exercises = (data['exercises'] as List<dynamic>? ?? [])
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+    final days = (data['days'] as List<dynamic>? ?? [])
+        .map((e) => e.toString())
+        .toList();
+
+    final IconData headerIcon;
+    final Widget body;
+    switch (scope) {
+      case 'week':
+        headerIcon = Icons.calendar_month_rounded;
+        body = _AiWorkoutWeekBody(days: days);
+      case 'exercise':
+        headerIcon = Icons.sports_gymnastics_rounded;
+        final sets = exercises.isNotEmpty ? exercises[0]['sets'] : null;
+        final reps = exercises.isNotEmpty ? exercises[0]['reps'] : null;
+        body = _AiWorkoutExerciseBody(sets: sets, reps: reps);
+      default:
+        headerIcon = Icons.fitness_center_rounded;
+        body = _AiWorkoutDayBody(exercises: exercises);
     }
 
     return Container(
       width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: const Color(0xFF151A20),
+        border: Border.all(
+          color: isUser ? AppColors.borderAccent : AppColors.borderDefault,
+        ),
+        borderRadius: BorderRadius.circular(AppSpacing.borderRadiusMedium),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(headerIcon, color: AppColors.accentPrimary, size: 18),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  title,
+                  style: AppTextStyles.headingSmall(
+                    color: AppColors.textPrimary,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          body,
+        ],
+      ),
+    );
+  }
+}
+
+class _AiWorkoutWeekBody extends StatelessWidget {
+  const _AiWorkoutWeekBody({required this.days});
+  final List<String> days;
+
+  @override
+  Widget build(BuildContext context) {
+    if (days.isEmpty) {
+      return Text(
+        'No days in this program',
+        style: AppTextStyles.labelSmall(color: AppColors.textTertiary),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final day in days)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.circle,
+                  color: AppColors.accentPrimary,
+                  size: 5,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    day,
+                    style: AppTextStyles.bodySmall(
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _AiWorkoutDayBody extends StatelessWidget {
+  const _AiWorkoutDayBody({required this.exercises});
+  final List<Map<String, dynamic>> exercises;
+
+  @override
+  Widget build(BuildContext context) {
+    final preview = exercises.take(4).toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '${exercises.length} Exercise${exercises.length == 1 ? '' : 's'}',
+          style: AppTextStyles.bodySmall(color: AppColors.textSecondary),
+        ),
+        if (preview.isNotEmpty) const SizedBox(height: 6),
+        for (final ex in preview)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 2),
+            child: Text(
+              ex['exerciseName'] as String? ?? '',
+              style: AppTextStyles.labelSmall(color: AppColors.textTertiary),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        if (exercises.length > 4)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              '+ ${exercises.length - 4} more',
+              style: AppTextStyles.labelSmall(color: AppColors.textTertiary),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _AiWorkoutExerciseBody extends StatelessWidget {
+  const _AiWorkoutExerciseBody({required this.sets, required this.reps});
+  final dynamic sets;
+  final dynamic reps;
+
+  String _formatReps(dynamic reps) {
+    if (reps == null) return '-';
+    if (reps is num || reps is String) return reps.toString();
+    if (reps is Map) {
+      final map = Map<String, dynamic>.from(reps);
+      final min = map['min'] ?? map['minReps'] ?? map['from'];
+      final max = map['max'] ?? map['maxReps'] ?? map['to'];
+      if (min != null && max != null) return '$min - $max';
+      return (min ?? max)?.toString() ?? '-';
+    }
+    return '-';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: AppSpacing.sm,
+      runSpacing: AppSpacing.sm,
+      children: [
+        _AiMacroPill(
+          label: 'Sets',
+          value: sets?.toString() ?? '-',
+          color: AppColors.accentPrimary,
+        ),
+        _AiMacroPill(
+          label: 'Reps',
+          value: _formatReps(reps),
+          color: AppColors.statusInfo,
+        ),
+      ],
+    );
+  }
+}
+
+class _AiMacroPill extends StatelessWidget {
+  const _AiMacroPill({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+  final String label;
+  final String value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: 6,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.backgroundQuaternary,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: AppSpacing.xs),
+          Text(
+            label,
+            style: AppTextStyles.labelSmall(color: AppColors.textSecondary),
+          ),
+          const SizedBox(width: AppSpacing.xs),
+          Text(
+            value,
+            style: AppTextStyles.labelLarge(color: AppColors.textPrimary),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AiFallbackAttachment extends StatelessWidget {
+  const _AiFallbackAttachment({required this.type, required this.data});
+  final String type;
+  final Map<String, dynamic> data;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
       padding: const EdgeInsets.all(AppSpacing.sm),
       decoration: BoxDecoration(
-        color: AppColors.backgroundSecondary.withValues(alpha: 0.4),
+        color: const Color(0xFF14181D),
         borderRadius: BorderRadius.circular(AppSpacing.borderRadiusSmall),
         border: Border.all(color: AppColors.borderDefault),
       ),
@@ -764,71 +1156,231 @@ class _AttachmentSheetOption extends StatelessWidget {
   }
 }
 
+/// Lightweight Markdown renderer for AI chat replies.
+///
+/// Supports:
+/// * Multi-level headings: `#`, `##`, `###`, `####`.
+/// * Inline bold via `**bold**`.
+/// * Inline italic via `*italic*` (must be edge-flanked by non-space, so
+///   `2 * 3` is preserved as-is).
+/// * Inline code via `` `code` ``.
+/// * Bullet lists via `- item` or `* item`.
+/// * Ordered lists via `1. item`.
+/// * Fenced code blocks via triple backticks.
 class _MarkdownText extends StatelessWidget {
   const _MarkdownText(this.data, {required this.style});
 
   final String data;
   final TextStyle style;
 
+  static final RegExp _headingRe = RegExp(r'^(#{1,4})\s+(.+?)\s*$');
+  static final RegExp _bulletRe = RegExp(r'^\s*[-*]\s+(.+)$');
+  static final RegExp _numberedRe = RegExp(r'^\s*(\d+)\.\s+(.+)$');
+
+  // Inline tokenizer: bold (`**...**`), code (`` `...` ``), italic
+  // (`*...*` with non-space edges). Non-greedy bodies so we never swallow
+  // an entire paragraph if the model emits unbalanced asterisks.
+  static final RegExp _inlineRe = RegExp(
+    r'(?<bold>\*\*(?:[^*]|\*(?!\*))+?\*\*)'
+    r'|(?<code>`[^`]+?`)'
+    r'|(?<italic>\*(?:[^\s*][^*]*?[^\s*]|[^\s*])\*)',
+  );
+
   @override
   Widget build(BuildContext context) {
     final lines = data.replaceAll('\r\n', '\n').split('\n');
+    final widgets = <Widget>[];
+
+    var inCodeBlock = false;
+    final codeBuffer = <String>[];
+
+    for (final line in lines) {
+      // Fenced code block toggle (```)
+      if (line.trimRight().startsWith('```')) {
+        if (inCodeBlock) {
+          widgets.add(_CodeBlock(code: codeBuffer.join('\n')));
+          codeBuffer.clear();
+          inCodeBlock = false;
+        } else {
+          inCodeBlock = true;
+        }
+        continue;
+      }
+      if (inCodeBlock) {
+        codeBuffer.add(line);
+        continue;
+      }
+
+      // Headings (# / ## / ### / ####)
+      final headingMatch = _headingRe.firstMatch(line);
+      if (headingMatch != null) {
+        final level = headingMatch.group(1)!.length;
+        final text = headingMatch.group(2)!;
+        widgets.add(_buildHeading(level, text));
+        continue;
+      }
+
+      // Bullet list
+      final bulletMatch = _bulletRe.firstMatch(line);
+      if (bulletMatch != null) {
+        widgets.add(_buildListRow('•', bulletMatch.group(1)!));
+        continue;
+      }
+
+      // Numbered list
+      final numberedMatch = _numberedRe.firstMatch(line);
+      if (numberedMatch != null) {
+        widgets.add(
+          _buildListRow('${numberedMatch.group(1)}.', numberedMatch.group(2)!),
+        );
+        continue;
+      }
+
+      // Empty line → small vertical gap (paragraph break).
+      if (line.trim().isEmpty) {
+        widgets.add(const SizedBox(height: AppSpacing.xs));
+        continue;
+      }
+
+      // Regular paragraph
+      widgets.add(
+        SelectableText.rich(TextSpan(children: _inline(line, style))),
+      );
+    }
+
+    // Flush an unclosed code block, just in case.
+    if (inCodeBlock && codeBuffer.isNotEmpty) {
+      widgets.add(_CodeBlock(code: codeBuffer.join('\n')));
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: lines
-          .map((line) {
-            if (line.startsWith('# ')) {
-              return Padding(
-                padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-                child: Text(
-                  line.substring(2),
-                  style: AppTextStyles.headingSmall(
-                    color: style.color ?? AppColors.textPrimary,
-                  ),
-                ),
-              );
-            }
-            if (line.startsWith('- ')) {
-              return Padding(
-                padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-                child: Text('• ${line.substring(2)}', style: style),
-              );
-            }
-            return SelectableText.rich(
-              TextSpan(children: _inline(line, style)),
-            );
-          })
-          .toList(growable: false),
+      children: widgets,
+    );
+  }
+
+  Widget _buildHeading(int level, String text) {
+    final color = style.color ?? AppColors.textPrimary;
+    final TextStyle headingStyle;
+    switch (level) {
+      case 1:
+        headingStyle = AppTextStyles.headingLarge(color: color);
+      case 2:
+        headingStyle = AppTextStyles.headingMedium(color: color);
+      case 3:
+        headingStyle = AppTextStyles.headingSmall(color: color);
+      default:
+        headingStyle = AppTextStyles.bodyLarge(
+          color: color,
+        ).copyWith(fontWeight: FontWeight.w700);
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 6, bottom: 4),
+      child: SelectableText.rich(
+        TextSpan(children: _inline(text, headingStyle)),
+      ),
+    );
+  }
+
+  Widget _buildListRow(String marker, String content) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 20,
+            child: Text(marker, style: style.copyWith(height: 1.3)),
+          ),
+          Expanded(
+            child: SelectableText.rich(
+              TextSpan(children: _inline(content, style)),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   List<InlineSpan> _inline(String text, TextStyle baseStyle) {
-    if (!text.contains('**')) {
-      return [TextSpan(text: text, style: baseStyle)];
-    }
+    if (text.isEmpty) return const <InlineSpan>[];
+
     final spans = <InlineSpan>[];
-    var current = text;
-    while (current.contains('**')) {
-      final start = current.indexOf('**');
-      final end = current.indexOf('**', start + 2);
-      if (end == -1) break;
-      if (start > 0) {
+    var cursor = 0;
+
+    for (final match in _inlineRe.allMatches(text)) {
+      if (match.start > cursor) {
         spans.add(
-          TextSpan(text: current.substring(0, start), style: baseStyle),
+          TextSpan(
+            text: text.substring(cursor, match.start),
+            style: baseStyle,
+          ),
         );
       }
-      spans.add(
-        TextSpan(
-          text: current.substring(start + 2, end),
-          style: baseStyle.copyWith(fontWeight: FontWeight.w700),
-        ),
-      );
-      current = current.substring(end + 2);
+
+      final bold = match.namedGroup('bold');
+      final code = match.namedGroup('code');
+      final italic = match.namedGroup('italic');
+
+      if (bold != null) {
+        spans.add(
+          TextSpan(
+            text: bold.substring(2, bold.length - 2),
+            style: baseStyle.copyWith(fontWeight: FontWeight.w700),
+          ),
+        );
+      } else if (code != null) {
+        spans.add(
+          TextSpan(
+            text: code.substring(1, code.length - 1),
+            style: baseStyle.copyWith(
+              fontFamily: 'monospace',
+              backgroundColor: AppColors.backgroundQuaternary,
+            ),
+          ),
+        );
+      } else if (italic != null) {
+        spans.add(
+          TextSpan(
+            text: italic.substring(1, italic.length - 1),
+            style: baseStyle.copyWith(fontStyle: FontStyle.italic),
+          ),
+        );
+      }
+
+      cursor = match.end;
     }
-    if (current.isNotEmpty) {
-      spans.add(TextSpan(text: current, style: baseStyle));
+
+    if (cursor < text.length) {
+      spans.add(TextSpan(text: text.substring(cursor), style: baseStyle));
     }
+
     return spans;
+  }
+}
+
+class _CodeBlock extends StatelessWidget {
+  const _CodeBlock({required this.code});
+  final String code;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+      padding: const EdgeInsets.all(AppSpacing.sm),
+      decoration: BoxDecoration(
+        color: AppColors.backgroundQuaternary,
+        borderRadius: BorderRadius.circular(AppSpacing.borderRadiusSmall),
+        border: Border.all(color: AppColors.borderSubtle),
+      ),
+      child: SelectableText(
+        code,
+        style: AppTextStyles.bodySmall(
+          color: AppColors.textPrimary,
+        ).copyWith(fontFamily: 'monospace', height: 1.4),
+      ),
+    );
   }
 }
 

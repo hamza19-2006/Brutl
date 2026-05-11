@@ -42,6 +42,14 @@ class StepSensorService {
   bool get isListening => _isListening;
   String? get sensorError => _sensorError;
 
+  /// BUG FIX (Module 1): Strict, defensive accessors so consumers can
+  /// always recompute today's display steps from the canonical pair
+  /// (raw hardware counter — daily baseline) and never rely on a stale
+  /// stream emission.
+  int get rawHardwareSteps => _latestRaw;
+  int get dailyBaseline => _initialHardwareSteps;
+  bool get isBaselineSetForToday => _baselineSetForToday;
+
   final StreamController<int> _stepsController =
       StreamController<int>.broadcast();
 

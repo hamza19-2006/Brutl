@@ -31,6 +31,12 @@ class ChatProvider extends ChangeNotifier {
 
   int get pendingRequestCount => _pendingRequests.length;
 
+  /// Sender-uids whose pending request has been accepted/declined locally but
+  /// whose deletion may not yet have propagated through the Firestore stream.
+  /// Mapped to the timestamp of the request we acted on so a newer resend
+  /// bypasses the suppression and is surfaced again.
+  final Map<String, DateTime> _suppressedRequests = <String, DateTime>{};
+
   StreamSubscription<QuerySnapshot>? _friendsSub;
   StreamSubscription<QuerySnapshot>? _requestsSub;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _unreadChatsSub;
@@ -75,11 +81,31 @@ class ChatProvider extends ChangeNotifier {
         .where('status', isEqualTo: 'pending')
         .snapshots()
         .listen((snap) {
-          _pendingRequests = snap.docs.map((d) {
+          final raw = snap.docs.map((d) {
             final data = d.data();
             data['senderUid'] = d.id;
             return FriendRequestModel.fromJson(data);
           }).toList();
+
+          // Drop suppression entries whose underlying request has either been
+          // removed server-side (no longer in the snapshot) or has a newer
+          // timestamp than what we suppressed (the friend re-sent a fresh
+          // request after we accepted/declined an earlier one). This defeats
+          // the visual "flicker" where an accepted request reappears for an
+          // instant before the deletion propagates.
+          final byUid = <String, FriendRequestModel>{
+            for (final r in raw) r.senderUid: r,
+          };
+          _suppressedRequests.removeWhere((uid, ts) {
+            final current = byUid[uid];
+            if (current == null) return true;
+            if (current.timestamp.isAfter(ts)) return true;
+            return false;
+          });
+
+          _pendingRequests = raw
+              .where((r) => !_suppressedRequests.containsKey(r.senderUid))
+              .toList();
           notifyListeners();
         });
   }
@@ -136,11 +162,25 @@ class ChatProvider extends ChangeNotifier {
     if (_uid.isEmpty) return;
 
     final previousRequests = List<FriendRequestModel>.from(_pendingRequests);
+    final acted = _pendingRequests.firstWhere(
+      (r) => r.senderUid == senderUid,
+      orElse: () => FriendRequestModel(
+        senderUid: senderUid,
+        senderDisplayName: '',
+        senderUsername: '',
+        senderPhotoUrl: '',
+        status: 'pending',
+        timestamp: DateTime.now(),
+      ),
+    );
 
-    // Optimistic local mutation (UI is only notified after successful commit).
+    // Suppress this request from future stream emissions until either the
+    // deletion propagates or the friend resends a fresh request.
+    _suppressedRequests[senderUid] = acted.timestamp;
     _pendingRequests = _pendingRequests
         .where((r) => r.senderUid != senderUid)
         .toList();
+    notifyListeners();
 
     try {
       final senderDoc = await _db.collection('users').doc(senderUid).get();
@@ -189,8 +229,8 @@ class ChatProvider extends ChangeNotifier {
       batch.delete(requestRef);
 
       await batch.commit();
-      notifyListeners();
     } catch (e, st) {
+      _suppressedRequests.remove(senderUid);
       _pendingRequests = previousRequests;
       notifyListeners();
       debugPrint('Failed to accept friend request from $senderUid: $e');
@@ -201,18 +241,39 @@ class ChatProvider extends ChangeNotifier {
   Future<void> declineFriendRequest(String senderUid) async {
     if (_uid.isEmpty) return;
 
-    // Optimistic
+    final previousRequests = List<FriendRequestModel>.from(_pendingRequests);
+    final acted = _pendingRequests.firstWhere(
+      (r) => r.senderUid == senderUid,
+      orElse: () => FriendRequestModel(
+        senderUid: senderUid,
+        senderDisplayName: '',
+        senderUsername: '',
+        senderPhotoUrl: '',
+        status: 'pending',
+        timestamp: DateTime.now(),
+      ),
+    );
+
+    _suppressedRequests[senderUid] = acted.timestamp;
     _pendingRequests = _pendingRequests
         .where((r) => r.senderUid != senderUid)
         .toList();
     notifyListeners();
 
-    await _db
-        .collection('users')
-        .doc(_uid)
-        .collection('friend_requests')
-        .doc(senderUid)
-        .delete();
+    try {
+      await _db
+          .collection('users')
+          .doc(_uid)
+          .collection('friend_requests')
+          .doc(senderUid)
+          .delete();
+    } catch (e, st) {
+      _suppressedRequests.remove(senderUid);
+      _pendingRequests = previousRequests;
+      notifyListeners();
+      debugPrint('Failed to decline friend request from $senderUid: $e');
+      debugPrintStack(stackTrace: st);
+    }
   }
 
   Future<void> removeFriend(String friendUid) async {
@@ -752,8 +813,9 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
-  /// Soft-deletes a message authored by the current user. The bubble will
-  /// render as 'This message was deleted' and the chat preview is cleared.
+  /// Soft-deletes a message authored by the current user for everyone in the
+  /// chat. The bubble will render as 'This message was deleted' on both
+  /// sides and the chat preview is replaced.
   Future<void> deleteMessage(String chatId, MessageModel message) async {
     if (_uid.isEmpty || message.senderId != _uid) return;
     final msgRef = _db
@@ -776,6 +838,28 @@ class ChatProvider extends ChangeNotifier {
       await batch.commit();
     } catch (error, stackTrace) {
       debugPrint('Failed to delete message ${message.id}: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
+  }
+
+  /// Hides a message from the current user's view only. The friend will
+  /// still see it. Implemented by appending the current uid to the message's
+  /// `deletedFor` array — the chat room filters messages whose `deletedFor`
+  /// contains the local uid.
+  Future<void> deleteMessageForMe(String chatId, String messageId) async {
+    if (_uid.isEmpty || messageId.isEmpty) return;
+    final msgRef = _db
+        .collection('chats')
+        .doc(chatId)
+        .collection('messages')
+        .doc(messageId);
+
+    try {
+      await msgRef.update(<String, dynamic>{
+        'deletedFor': FieldValue.arrayUnion(<String>[_uid]),
+      });
+    } catch (error, stackTrace) {
+      debugPrint('Failed to delete-for-me message $messageId: $error');
       debugPrintStack(stackTrace: stackTrace);
     }
   }
@@ -835,42 +919,6 @@ class ChatProvider extends ChangeNotifier {
 
   Future<void> setBlockedFriend(String friendUid, bool isBlocked) =>
       _setFriendFlag(friendUid, 'isBlocked', isBlocked);
-
-  // -----------------------------------------------------------------------
-  // Presence (online / last-seen)
-  // -----------------------------------------------------------------------
-
-  /// Updates the current user's presence document. Called from the app
-  /// lifecycle observer in `main.dart` so it reflects foreground/background
-  /// transitions.
-  Future<void> setOnlineStatus(bool isOnline) async {
-    if (_uid.isEmpty) return;
-    try {
-      await _db.collection('users').doc(_uid).set(<String, dynamic>{
-        'presence': <String, dynamic>{
-          'isOnline': isOnline,
-          'lastSeen': FieldValue.serverTimestamp(),
-        },
-      }, SetOptions(merge: true));
-    } catch (error, stackTrace) {
-      debugPrint('Failed to update presence for $_uid: $error');
-      debugPrintStack(stackTrace: stackTrace);
-    }
-  }
-
-  /// Streams a friend's presence (online flag + last-seen timestamp).
-  Stream<PresenceModel> presenceStream(String uid) {
-    if (uid.isEmpty) return Stream<PresenceModel>.value(PresenceModel.offline);
-    return _db.collection('users').doc(uid).snapshots().map((snap) {
-      final data = snap.data();
-      final raw = data == null ? null : data['presence'];
-      if (raw is Map<String, dynamic>) return PresenceModel.fromJson(raw);
-      if (raw is Map) {
-        return PresenceModel.fromJson(Map<String, dynamic>.from(raw));
-      }
-      return PresenceModel.offline;
-    });
-  }
 
   // -----------------------------------------------------------------------
   // User search (for friend discovery)

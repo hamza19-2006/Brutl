@@ -120,6 +120,7 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
     try {
       final currentWeekNumber = workoutProvider.selectedWeek;
       final currentDayId = todayIndex + 1;
+
       final templateExercises = await _loadTemplateExercisesForToday(
         uid: uid,
         todayIndex: todayIndex,
@@ -130,6 +131,7 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
         return guaranteedFallback;
       }
 
+      // FIX 1: 4-week loop — never abort when targetWeek <= 0, always loop to 4.
       final historyExercises = await _loadPreviousWeekDayExercises(
         uid: uid,
         currentWeekNumber: currentWeekNumber,
@@ -188,6 +190,8 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
     }
   }
 
+  /// FIX 1: The 4-week loop. targetWeek = currentWeekNumber - 1.
+  /// If targetWeek <= 0, loop to 4. Never abort.
   Future<List<dynamic>> _loadPreviousWeekDayExercises({
     required String uid,
     required int currentWeekNumber,
@@ -212,6 +216,9 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
     return rawExercises;
   }
 
+  /// FIX 2: Data merge — name/baseRange/categoryType from Template,
+  /// weight/reps STRICTLY from History. Never let template overwrite
+  /// history weight/reps with 0.
   List<_ExerciseSnapshot> _hydrateExercisesWithHistory({
     required List<Map<String, dynamic>> templateExercises,
     required List<dynamic> historyExercises,
@@ -222,6 +229,7 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
         .whereType<Map>()
         .map((raw) => Map<String, dynamic>.from(raw))
         .toList(growable: false);
+
     final historyByName = <String, Map<String, dynamic>>{};
     for (final historyData in normalizedHistory) {
       final key = (historyData['name'] ?? '').toString().trim().toLowerCase();
@@ -236,28 +244,23 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
           .toString()
           .trim()
           .toLowerCase();
+
+      // Pick history by name match first, then by index fallback.
       final indexedHistory = i < normalizedHistory.length
           ? normalizedHistory[i]
           : const <String, dynamic>{};
       final historyData = historyByName[templateName] ?? indexedHistory;
 
-      final mappedWeight =
-          historyData['weight'] ?? templateData['weight'] ?? 0.0;
-      final mappedReps = historyData['reps'] ?? templateData['reps'] ?? '';
+      // FIX 2: weight and reps come STRICTLY from history.
+      // Do NOT fall back to template values for weight/reps — that would
+      // zero-out real progress when the template stores 0.
+      final mappedWeight = historyData['weight'] ?? 0.0;
+      final mappedReps = historyData['reps'] ?? '';
 
       final mergedData = <String, dynamic>{
-        ...templateData,
+        // name, baseRange, categoryType: ALWAYS from template
         'name': templateData['name'] ?? historyData['name'] ?? 'Exercise',
         'baseRange': templateData['baseRange'] ?? templateData['base_range'],
-        'weight': mappedWeight,
-        'reps': mappedReps,
-        'sets': templateData['sets'] ?? historyData['sets'] ?? 1,
-        'weightUnit':
-            historyData['weightUnit'] ??
-            historyData['weight_unit'] ??
-            templateData['weightUnit'] ??
-            templateData['weight_unit'] ??
-            'Kg',
         'categoryType':
             templateData['categoryType'] ??
             templateData['category_type'] ??
@@ -265,6 +268,16 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
             historyData['category_type'] ??
             historyData['type'] ??
             'isolation',
+        'sets': templateData['sets'] ?? historyData['sets'] ?? 1,
+        // weight and reps: STRICTLY from history
+        'weight': mappedWeight,
+        'reps': mappedReps,
+        'weightUnit':
+            historyData['weightUnit'] ??
+            historyData['weight_unit'] ??
+            templateData['weightUnit'] ??
+            templateData['weight_unit'] ??
+            'Kg',
       };
 
       hydrated.add(_ExerciseSnapshot.fromMap(mergedData));
@@ -383,7 +396,7 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
             (name) => <String, dynamic>{
               'name': name,
               'sets': 3,
-              'reps': '8-12',
+              'reps': '',
               'weight': 0,
               'weightUnit': 'Kg',
               'categoryType': _looksCompound(name) ? 'compound' : 'isolation',
@@ -435,19 +448,15 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
     required _ExerciseSnapshot exercise,
     required BrutlUser user,
   }) {
-    final baseRange = exercise.baseRangeString?.trim() ?? '';
-    final parts = baseRange.split('-');
-    final lowerLimit = int.tryParse(parts.first.trim()) ?? 8;
-    final upperLimit = int.tryParse(parts.last.trim()) ?? 12;
-    final normalizedUpper = upperLimit < lowerLimit ? lowerLimit : upperLimit;
+    // FIX 4: Parse baseRange from exercise, fallback to 8-12.
+    final parsedRange = _parseBaseRange(exercise.baseRangeString);
+    final lowerLimit = parsedRange.min;
+    final upperLimit = parsedRange.max;
 
     final unit = exercise.weightUnit.trim().isEmpty
         ? user.weightUnit
         : exercise.weightUnit;
-    final startWeight = exercise.weight < 0 ? 0.0 : exercise.weight;
 
-    // Template cards always go into the empty-state path since there is no
-    // real "last week" data behind them.
     final dayNames = [
       'Monday',
       'Tuesday',
@@ -462,18 +471,18 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
     return _TargetCardData(
       name: exercise.name,
       isCompound: exercise.isCompound,
-      lastWeight: startWeight,
+      lastWeight: 0,
       lastReps: 0,
       lastRepsRaw: '',
-      targetWeight: startWeight,
-      targetReps: '$lowerLimit-$normalizedUpper',
+      targetWeight: 0,
+      targetReps: '$lowerLimit-$upperLimit',
       weightUnit: unit,
-      actionLabel: 'Base range: $lowerLimit-$normalizedUpper reps',
+      actionLabel: 'Base range: $lowerLimit-$upperLimit reps',
       aiPayload: _toAiExercisePayload(exercise),
       isFirstSession: true,
       lastWeekDisplay: 'Nothing logged last $currentDayName.',
       targetDisplay:
-          'Start your first session! Target: $lowerLimit-$normalizedUpper reps.',
+          'Start your first session! Target: $lowerLimit-$upperLimit reps.',
     );
   }
 
@@ -515,23 +524,27 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
     return mixed.take(3).toList(growable: false);
   }
 
+  /// FIX 4: The full progression math engine.
   _TargetCardData _toTarget({
     required _ExerciseSnapshot exercise,
     required BrutlUser user,
     required double mappedWeight,
     required dynamic mappedReps,
   }) {
-    final parts = (exercise.baseRangeString?.trim() ?? '').split('-');
-    final lowerLimit = int.tryParse(parts.first.trim()) ?? 8;
-    final upperLimitRaw = int.tryParse(parts.last.trim()) ?? 12;
-    final upperLimit = upperLimitRaw < lowerLimit ? lowerLimit : upperLimitRaw;
+    // FIX 4: Parse baseRange from the template snapshot. Fallback to 8-12.
+    final parsedRange = _parseBaseRange(exercise.baseRangeString);
+    final minLimit = parsedRange.min;
+    final maxLimit = parsedRange.max;
 
+    // FIX 3: Parse reps using the fixed rep parser.
+    final lastTopRep = _ExerciseSnapshot.parseRepValues(mappedReps);
+    final lastWeight = mappedWeight < 0 ? 0.0 : mappedWeight;
     final repsRaw = mappedReps?.toString() ?? '';
-    final lastTopRep = _ExerciseSnapshot._parseRepValues(mappedReps);
-    final lastWeight = mappedWeight;
+
     final weightUnit = exercise.weightUnit.trim().isEmpty
         ? user.weightUnit
         : exercise.weightUnit;
+    final normalizedUnit = weightUnit.trim().toLowerCase();
     final type = exercise.categoryType.trim().toLowerCase();
 
     final dayNames = [
@@ -545,11 +558,8 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
     ];
     final currentDayName = dayNames[(DateTime.now().weekday - 1) % 7];
 
+    // FIX 4 — Branch 0: Empty / first-session state.
     if (lastTopRep <= 0 || lastWeight <= 0) {
-      final lastWeekDisplayString = 'Nothing logged last $currentDayName.';
-      final targetDisplayString =
-          'Start your first session! Target: $lowerLimit-$upperLimit reps.';
-
       return _TargetCardData(
         name: exercise.name,
         isCompound: exercise.isCompound,
@@ -557,33 +567,34 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
         lastReps: 0,
         lastRepsRaw: repsRaw,
         targetWeight: 0,
-        targetReps: '$lowerLimit-$upperLimit',
+        targetReps: '$minLimit-$maxLimit',
         weightUnit: weightUnit,
         actionLabel: 'First Session',
         aiPayload: _toAiExercisePayload(exercise),
         isFirstSession: true,
-        lastWeekDisplay: lastWeekDisplayString,
-        targetDisplay: targetDisplayString,
+        lastWeekDisplay: 'Nothing logged last $currentDayName.',
+        targetDisplay:
+            'Start your first session! Target: $minLimit-$maxLimit reps.',
       );
     }
 
-    final displayLastReps = lastTopRep;
-    final displayLastRepsRaw = repsRaw.isNotEmpty
-        ? repsRaw
-        : '$displayLastReps';
+    // FIX 5: Format lastReps display.
+    final displayLastRepsRaw = repsRaw.isNotEmpty ? repsRaw : '$lastTopRep';
 
-    double targetWeight = lastWeight;
-    String targetReps = '$lowerLimit-$upperLimit';
-    String actionLabel = 'Increase Reps';
+    double targetWeight;
+    String targetReps;
+    String actionLabel;
 
-    if (lastTopRep < upperLimit) {
+    // FIX 4 — Branch 1: Rep progression (lastTopRep < maxLimit).
+    if (lastTopRep < maxLimit) {
       targetWeight = lastWeight;
       final minRep = lastTopRep + 1;
-      final maxRep = math.min(lastTopRep + 2, upperLimit);
+      final maxRep = math.min(lastTopRep + 2, maxLimit);
       targetReps = minRep == maxRep ? '$minRep' : '$minRep-$maxRep';
       actionLabel = 'Increase Reps';
-    } else if (lastTopRep >= upperLimit) {
-      final normalizedUnit = weightUnit.trim().toLowerCase();
+    }
+    // FIX 4 — Branch 2: Weight progression (lastTopRep >= maxLimit).
+    else {
       if (normalizedUnit == 'plates') {
         targetWeight = lastWeight + 1;
       } else if (type.contains('compound')) {
@@ -591,10 +602,11 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
       } else {
         targetWeight = lastWeight + 2.5;
       }
-      targetReps = '$lowerLimit-${lowerLimit + 1}';
+      targetReps = '$minLimit-${minLimit + 1}';
       actionLabel = 'Increase Weight';
     }
 
+    // FIX 5: Format weight — drop .0 for whole numbers.
     final lastWeekDisplayString =
         'Last Week: ${_formatWeight(lastWeight)}$weightUnit x $displayLastRepsRaw';
     final targetDisplayString =
@@ -604,7 +616,7 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
       name: exercise.name,
       isCompound: exercise.isCompound,
       lastWeight: lastWeight,
-      lastReps: displayLastReps,
+      lastReps: lastTopRep,
       lastRepsRaw: displayLastRepsRaw,
       targetWeight: targetWeight,
       targetReps: targetReps,
@@ -642,10 +654,42 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
     return normalized.isEmpty || normalized.contains('rest');
   }
 
+  /// FIX 5: Format weight — drop .0 for whole numbers.
   static String _formatWeight(double value) {
     return value % 1 == 0 ? value.toInt().toString() : value.toString();
   }
+
+  /// Parse a "X-Y" base range string. Fallback to min=8, max=12.
+  static _BaseRange _parseBaseRange(String? raw) {
+    if (raw == null || raw.trim().isEmpty) {
+      return const _BaseRange(min: 8, max: 12);
+    }
+    final parts = raw.trim().split('-');
+    if (parts.length == 2) {
+      final lo = int.tryParse(parts[0].trim());
+      final hi = int.tryParse(parts[1].trim());
+      if (lo != null && hi != null && hi >= lo) {
+        return _BaseRange(min: lo, max: hi);
+      }
+    }
+    // Single number fallback (e.g. "10")
+    final single = int.tryParse(raw.trim());
+    if (single != null && single > 0) {
+      return _BaseRange(min: single, max: single + 2);
+    }
+    return const _BaseRange(min: 8, max: 12);
+  }
 }
+
+// ── _BaseRange ───────────────────────────────────────────────────────────────
+
+class _BaseRange {
+  const _BaseRange({required this.min, required this.max});
+  final int min;
+  final int max;
+}
+
+// ── _ProgressionPayload ──────────────────────────────────────────────────────
 
 class _ProgressionPayload {
   const _ProgressionPayload({required this.targets})
@@ -686,6 +730,7 @@ class _TargetCardData {
   final int lastReps;
   final String lastRepsRaw;
   final double targetWeight;
+  // FIX 5: stored as String.
   final String targetReps;
   final String weightUnit;
   final String actionLabel;
@@ -694,6 +739,8 @@ class _TargetCardData {
   final String lastWeekDisplay;
   final String targetDisplay;
 }
+
+// ── _ExerciseSnapshot ────────────────────────────────────────────────────────
 
 class _ExerciseSnapshot {
   const _ExerciseSnapshot({
@@ -710,7 +757,8 @@ class _ExerciseSnapshot {
   });
 
   factory _ExerciseSnapshot.fromMap(Map<String, dynamic> map) {
-    final topSetReps = _parseRepValues(map['reps']);
+    // FIX 3: Use the fixed rep parser.
+    final topSetReps = parseRepValues(map['reps']);
     final repsRaw = map['reps']?.toString() ?? '';
     final weight = _parseWeight(map['weight'] ?? map['weightDisplay']);
     final sets = _parseInt(map['sets'], fallback: 1);
@@ -728,7 +776,6 @@ class _ExerciseSnapshot {
         ? categoryRaw.trim()
         : (isCompound ? 'compound' : 'isolation');
 
-    // Read optional baseRange field written by the exercise editor
     final baseRangeRaw = map['baseRange'] ?? map['base_range'];
     final baseRangeString = baseRangeRaw?.toString().trim().isNotEmpty == true
         ? baseRangeRaw.toString().trim()
@@ -759,12 +806,11 @@ class _ExerciseSnapshot {
   final int topSetReps;
   final String repsRaw;
   final double estimatedVolume;
-
-  /// Optional "X-Y" string stored on the exercise document (e.g. "5-10").
-  /// When present, overrides the user's profile rep-range settings.
   final String? baseRangeString;
 
-  static int _parseRepValues(dynamic rawReps) {
+  /// FIX 3: Rep parser that correctly handles comma-separated strings
+  /// like "10,8,8,6" — splits by comma, parses each to int, returns max.
+  static int parseRepValues(dynamic rawReps) {
     if (rawReps == null) return 0;
     if (rawReps is num) return rawReps.toInt();
 
@@ -779,21 +825,25 @@ class _ExerciseSnapshot {
     final value = rawReps.toString().trim();
     if (value.isEmpty) return 0;
 
-    final parts = rawReps.toString().split(',');
-    final parsed = parts
-        .map((e) => int.tryParse(e.trim()) ?? 0)
-        .where((e) => e > 0)
-        .toList(growable: false);
-    if (parsed.isNotEmpty) {
-      return parsed.reduce(math.max);
+    // FIX 3: Split by comma first to handle "10,8,8,6" format.
+    final commaParts = value.split(',');
+    if (commaParts.length > 1) {
+      final commaParsed = commaParts
+          .map((e) => int.tryParse(e.trim()) ?? 0)
+          .where((e) => e > 0)
+          .toList(growable: false);
+      if (commaParsed.isNotEmpty) {
+        return commaParsed.reduce(math.max);
+      }
     }
 
-    final fallbackParsed = RegExp(r'\d+')
+    // Handle range strings like "8-12" — take the first (lowest) or max.
+    final allInts = RegExp(r'\d+')
         .allMatches(value)
         .map((m) => int.tryParse(m.group(0) ?? '') ?? 0)
         .where((e) => e > 0)
         .toList(growable: false);
-    return fallbackParsed.isNotEmpty ? fallbackParsed.reduce(math.max) : 0;
+    return allInts.isNotEmpty ? allInts.reduce(math.max) : 0;
   }
 
   static double _parseWeight(dynamic raw) {
@@ -809,7 +859,7 @@ class _ExerciseSnapshot {
   }
 }
 
-// ── _TargetCard (replaces existing widget) ───────────────────────────────────
+// ── _TargetCard ───────────────────────────────────────────────────────────────
 
 class _TargetCard extends StatelessWidget {
   const _TargetCard({required this.item});
@@ -845,7 +895,7 @@ class _TargetCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ── Header row ───────────────────────────────────────────────
+              // ── Header row ──────────────────────────────────────────────
               Row(
                 children: [
                   Expanded(
@@ -918,7 +968,7 @@ class _TargetCard extends StatelessWidget {
               ),
               const SizedBox(height: 6),
 
-              // ── AI button ─────────────────────────────────────────────────
+              // ── AI button ────────────────────────────────────────────────
               Align(
                 alignment: Alignment.centerRight,
                 child: TextButton.icon(
@@ -966,20 +1016,21 @@ class _TargetCard extends StatelessWidget {
     );
   }
 
-  static String _fmtWeight(double targetWeight) => targetWeight % 1 == 0
-      ? targetWeight.toInt().toString()
-      : targetWeight.toString();
+  // FIX 5: Drop .0 for whole numbers.
+  static String _fmtWeight(double v) =>
+      v % 1 == 0 ? v.toInt().toString() : v.toString();
 }
+
+// ── _RecoveryProtocol ─────────────────────────────────────────────────────────
 
 class _RecoveryProtocol extends StatelessWidget {
   const _RecoveryProtocol({this.reason});
-
   final String? reason;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: const [
+    return const Column(
+      children: [
         _RecoveryCard(
           title: 'Mobility',
           subtitle:
@@ -997,7 +1048,7 @@ class _RecoveryProtocol extends StatelessWidget {
         _RecoveryCard(
           title: 'Readiness',
           subtitle:
-              'Log sleep score or muscle soreness before tomorrow’s session.',
+              'Log sleep score or muscle soreness before tomorrow\'s session.',
           icon: Icons.bedtime_rounded,
         ),
       ],
@@ -1073,6 +1124,8 @@ class _RecoveryCard extends StatelessWidget {
     );
   }
 }
+
+// ── _ProgressionSkeleton ──────────────────────────────────────────────────────
 
 class _ProgressionSkeleton extends StatefulWidget {
   const _ProgressionSkeleton();

@@ -162,15 +162,16 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
         .collection('weeks')
         .get();
 
-    final discoveredWeeks = weeksSnap.docs
-        .map((doc) {
-          final match = RegExp(r'^week_(\d+)$').firstMatch(doc.id);
-          if (match == null) return null;
-          return int.tryParse(match.group(1)!);
-        })
-        .whereType<int>()
-        .toList(growable: false)
-      ..sort((a, b) => b.compareTo(a));
+    final discoveredWeeks =
+        weeksSnap.docs
+            .map((doc) {
+              final match = RegExp(r'^week_(\d+)$').firstMatch(doc.id);
+              if (match == null) return null;
+              return int.tryParse(match.group(1)!);
+            })
+            .whereType<int>()
+            .toList(growable: false)
+          ..sort((a, b) => b.compareTo(a));
 
     for (final week in discoveredWeeks) {
       if (currentWeek > 1 && week >= currentWeek) continue;
@@ -376,11 +377,14 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
         : user.isolationRepMax;
     final safeMin = minRep <= 0 ? 1 : minRep;
     final safeMax = maxRep < safeMin ? safeMin : maxRep;
-    final baseReps = ((safeMin + safeMax) / 2).round().clamp(safeMin, safeMax);
+    final baseReps = ((safeMin + safeMax) / 2)
+        .round()
+        .clamp(safeMin, safeMax)
+        .toInt();
     final unit = exercise.weightUnit.trim().isEmpty
         ? user.weightUnit
         : exercise.weightUnit;
-    final startWeight = exercise.weight < 0 ? 0 : exercise.weight;
+    final startWeight = exercise.weight < 0 ? 0.0 : exercise.weight;
 
     return _TargetCardData(
       name: exercise.name,
@@ -471,7 +475,7 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
 
     final room = safeMax - lastTopReps;
     final bump = room >= 2 ? 2 : 1;
-    final targetReps = (lastTopReps + bump).clamp(safeMin, safeMax);
+    final targetReps = (lastTopReps + bump).clamp(safeMin, safeMax).toInt();
 
     return _TargetCardData(
       name: exercise.name,

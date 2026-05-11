@@ -23,6 +23,7 @@ class HomeScreenExShow extends StatefulWidget {
 class _HomeScreenExShowState extends State<HomeScreenExShow> {
   static const String _progressionSplitName = 'home_progression';
   late Future<_ProgressionPayload> _payloadFuture;
+  String _payloadCacheKey = '';
 
   @override
   void initState() {
@@ -31,7 +32,39 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _refreshPayloadIfNeeded();
+  }
+
+  void _refreshPayloadIfNeeded() {
+    final workoutProvider = context.read<WorkoutProvider>();
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    final splitFingerprint = workoutProvider.activeSplitDays
+        .map((day) => day.trim().toLowerCase())
+        .join('|');
+    final nextKey =
+        '$uid|${workoutProvider.selectedWeek}|$splitFingerprint|${DateTime.now().weekday}';
+    if (nextKey == _payloadCacheKey) return;
+    _payloadCacheKey = nextKey;
+    _payloadFuture = _buildPayload();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final splitSignature = context.select<WorkoutProvider, String>((provider) {
+      final splitFingerprint = provider.activeSplitDays
+          .map((day) => day.trim().toLowerCase())
+          .join('|');
+      return '${provider.selectedWeek}|$splitFingerprint';
+    });
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    final nextKey = '$uid|$splitSignature|${DateTime.now().weekday}';
+    if (nextKey != _payloadCacheKey) {
+      _payloadCacheKey = nextKey;
+      _payloadFuture = _buildPayload();
+    }
+
     return FutureBuilder<_ProgressionPayload>(
       future: _payloadFuture,
       builder: (context, snapshot) {
@@ -63,13 +96,9 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
   }
 
   Future<_ProgressionPayload> _buildPayload() async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) {
-      return const _ProgressionPayload.recovery('No signed-in user');
-    }
-
     final workoutProvider = context.read<WorkoutProvider>();
     final userModel = context.read<BrutlUserProvider>().user;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
     final todayIndex = DateTime.now().weekday - 1;
     final splitDays = workoutProvider.activeSplitDays;
     final inBounds = todayIndex >= 0 && todayIndex < splitDays.length;
@@ -79,13 +108,24 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
       return const _ProgressionPayload.recovery('Split says rest day');
     }
 
-    final templateFallback = await _buildTemplateFallbackPayload(
-      uid: uid,
-      todayIndex: todayIndex,
+    final guaranteedFallback = _buildGuaranteedTemplatePayload(
       todayName: todayName,
-      currentWeek: workoutProvider.selectedWeek,
       userModel: userModel,
     );
+    final templateFallback = uid == null || uid.isEmpty
+        ? guaranteedFallback
+        : (await _buildTemplateFallbackPayload(
+                uid: uid,
+                todayIndex: todayIndex,
+                todayName: todayName,
+                currentWeek: workoutProvider.selectedWeek,
+                userModel: userModel,
+              )) ??
+              guaranteedFallback;
+
+    if (uid == null || uid.isEmpty) {
+      return templateFallback;
+    }
 
     try {
       final currentWeek = workoutProvider.selectedWeek;
@@ -96,10 +136,7 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
         dayNumber: dayNumber,
       );
       if (rawExercises.isEmpty) {
-        return templateFallback ??
-            const _ProgressionPayload.recovery(
-              'No exercises on previous week day',
-            );
+        return templateFallback;
       }
 
       final parsed = rawExercises
@@ -111,14 +148,12 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
           .toList(growable: false);
 
       if (parsed.isEmpty) {
-        return templateFallback ??
-            const _ProgressionPayload.recovery('No parseable exercise data');
+        return templateFallback;
       }
 
       final selected = _selectExercises(parsed);
       if (selected.isEmpty) {
-        return templateFallback ??
-            const _ProgressionPayload.recovery('No eligible exercises');
+        return templateFallback;
       }
 
       final targets = selected
@@ -126,15 +161,40 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
           .toList(growable: false);
 
       if (targets.isEmpty) {
-        return templateFallback ??
-            const _ProgressionPayload.recovery('No target calculations');
+        return templateFallback;
       }
 
       return _ProgressionPayload(targets: targets);
     } catch (_) {
-      return templateFallback ??
-          const _ProgressionPayload.recovery('Failed to load progression data');
+      return templateFallback;
     }
+  }
+
+  _ProgressionPayload _buildGuaranteedTemplatePayload({
+    required String todayName,
+    required BrutlUser userModel,
+  }) {
+    final templateExercises = _heuristicTemplateForDay(todayName);
+    final parsed = templateExercises
+        .whereType<Map>()
+        .map((raw) => _ExerciseSnapshot.fromMap(Map<String, dynamic>.from(raw)))
+        .where((e) => e.name.trim().isNotEmpty)
+        .toList(growable: false);
+    final selected = _selectExercises(parsed);
+    final source = selected.isNotEmpty ? selected : parsed;
+    final resolvedSource = source.isNotEmpty
+        ? source
+        : _heuristicTemplateForDay('')
+              .whereType<Map>()
+              .map(
+                (raw) => _ExerciseSnapshot.fromMap(Map<String, dynamic>.from(raw)),
+              )
+              .toList(growable: false);
+    final targets = resolvedSource
+        .take(3)
+        .map((e) => _toTemplateTarget(exercise: e, user: userModel))
+        .toList(growable: false);
+    return _ProgressionPayload(targets: targets);
   }
 
   Future<List<dynamic>> _loadPreviousWeekDayExercises({

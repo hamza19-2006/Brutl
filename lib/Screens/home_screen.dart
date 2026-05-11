@@ -15,7 +15,6 @@ import '../core/theme/constants/ai_prompts.dart';
 import '../providers/health_provider.dart';
 import '../providers/workout_nutrition_provider.dart';
 import '../providers/workout_provider.dart';
-import '../services/step_service.dart';
 import '../widgets/biometric_card.dart';
 import 'calories_history_screen.dart';
 import 'chat/chat_list_screen.dart';
@@ -636,6 +635,7 @@ class _HomeHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final workoutProvider = context.watch<WorkoutProvider>();
+    final stepProvider = context.watch<StepProvider>();
     final now = DateTime.now();
 
     final hour = now.hour;
@@ -736,16 +736,17 @@ class _HomeHeader extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 4),
-              // Live calorie burn from steps
-              StreamBuilder<int>(
-                stream: StepService.instance.todayStepsStream,
-                initialData: StepService.instance.getTodaySteps(),
-                builder: (context, snap) {
-                  final steps = snap.data ?? 0;
-                  final weightKg = workoutProvider.user.weightKg;
-                  final kcal = (steps * (weightKg * 0.0005)).toStringAsFixed(0);
+              Consumer<StepProvider>(
+                builder: (context, liveStepProvider, _) {
+                  final fallbackCalories =
+                      workoutProvider.currentDailyCaloriesBurned;
+                  final liveCalories = liveStepProvider.currentSteps > 0
+                      ? liveStepProvider.caloriesBurned
+                      : (stepProvider.currentSteps > 0
+                            ? stepProvider.caloriesBurned
+                            : fallbackCalories);
                   return Text(
-                    'kcal $kcal 🔥',
+                    'kcal ${liveCalories.round()} 🔥',
                     style: const TextStyle(
                       color: Color(0xFFD0D0D0),
                       fontSize: 18,
@@ -767,56 +768,63 @@ class _HomeHeader extends StatelessWidget {
 class _StatsRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final workoutProvider = context.watch<WorkoutProvider>();
-    final stepProvider = context.watch<StepProvider>();
-    final stepGoal = workoutProvider.user.dailyStepGoal;
-    final steps = stepProvider.currentSteps;
-    final progress = stepGoal > 0
-        ? (steps / stepGoal).clamp(0.0, 1.0).toDouble()
-        : 0.0;
+    return Consumer2<WorkoutProvider, StepProvider>(
+      builder: (context, workoutProvider, stepProvider, _) {
+        final stepGoal = workoutProvider.user.dailyStepGoal;
+        final liveSteps = stepProvider.currentSteps > 0
+            ? stepProvider.currentSteps
+            : workoutProvider.currentDailySteps;
+        final steps = liveSteps < 0 ? 0 : liveSteps;
+        final progress = stepGoal > 0
+            ? (steps / stepGoal).clamp(0.0, 1.0).toDouble()
+            : 0.0;
 
-    final calorieGoal = workoutProvider.user.dailyCalorieGoal;
-    final caloriesBurned = stepProvider.caloriesBurned;
-    final calProgress = calorieGoal > 0
-        ? (caloriesBurned / calorieGoal).clamp(0.0, 1.0)
-        : 0.0;
+        final calorieGoal = workoutProvider.user.dailyCalorieGoal;
+        final caloriesBurned = stepProvider.currentSteps > 0
+            ? stepProvider.caloriesBurned
+            : workoutProvider.currentDailyCaloriesBurned;
+        final calProgress = calorieGoal > 0
+            ? (caloriesBurned / calorieGoal).clamp(0.0, 1.0)
+            : 0.0;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: IntrinsicHeight(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(
-              flex: 6,
-              child: StepsCard(
-                currentSteps: steps,
-                goalSteps: stepGoal,
-                progress: progress,
-                stepsLabel: 'Steps',
-                stepsUnitLabel: 'steps today',
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              flex: 4,
-              child: CaloriesCard(
-                caloriesBurned: caloriesBurned,
-                calorieGoal: calorieGoal,
-                progress: calProgress,
-                caloriesLabel: 'Calories',
-                caloriesUnitLabel: 'kcal burned',
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const CaloriesHistoryScreen(),
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  flex: 6,
+                  child: StepsCard(
+                    currentSteps: steps,
+                    goalSteps: stepGoal,
+                    progress: progress,
+                    stepsLabel: 'Steps',
+                    stepsUnitLabel: 'steps today',
                   ),
                 ),
-              ),
+                const SizedBox(width: 12),
+                Expanded(
+                  flex: 4,
+                  child: CaloriesCard(
+                    caloriesBurned: caloriesBurned,
+                    calorieGoal: calorieGoal,
+                    progress: calProgress,
+                    caloriesLabel: 'Calories',
+                    caloriesUnitLabel: 'kcal burned',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const CaloriesHistoryScreen(),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }

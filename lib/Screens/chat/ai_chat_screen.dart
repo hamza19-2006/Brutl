@@ -1,12 +1,18 @@
-import 'dart:convert';
+import 'dart:typed_data';
 
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
+import 'package:image/image.dart' as img;
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../providers/ai_coach_provider.dart';
+import 'share_meal_screen.dart';
+import 'share_workout_screen.dart';
 
 class AiCoachChatScreen extends StatefulWidget {
   const AiCoachChatScreen({
@@ -494,15 +500,179 @@ class _AttachmentSheet extends StatefulWidget {
 }
 
 class _AttachmentSheetState extends State<_AttachmentSheet> {
-  String _type = 'image';
-  final TextEditingController _jsonController = TextEditingController(
-    text: '{"url":"","caption":""}',
-  );
+  final ImagePicker _imagePicker = ImagePicker();
+  bool _isBusy = false;
 
-  @override
-  void dispose() {
-    _jsonController.dispose();
-    super.dispose();
+  Future<ImageSource?> _pickImageSource() {
+    return showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: AppColors.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(AppSpacing.borderRadiusLarge),
+        ),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.lg,
+            vertical: AppSpacing.md,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(
+                  Icons.photo_camera_rounded,
+                  color: AppColors.textPrimary,
+                ),
+                title: Text('Camera', style: AppTextStyles.bodyMedium()),
+                onTap: () => Navigator.of(sheetContext).pop(ImageSource.camera),
+              ),
+              ListTile(
+                leading: const Icon(
+                  Icons.photo_library_rounded,
+                  color: AppColors.textPrimary,
+                ),
+                title: Text('Gallery', style: AppTextStyles.bodyMedium()),
+                onTap: () =>
+                    Navigator.of(sheetContext).pop(ImageSource.gallery),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Uint8List _compressImage(Uint8List imageBytes) {
+    final decoded = img.decodeImage(imageBytes);
+    if (decoded == null) return imageBytes;
+
+    const maxDimension = 1280;
+    final resized = decoded.width >= decoded.height
+        ? (decoded.width > maxDimension
+              ? img.copyResize(decoded, width: maxDimension)
+              : decoded)
+        : (decoded.height > maxDimension
+              ? img.copyResize(decoded, height: maxDimension)
+              : decoded);
+
+    return Uint8List.fromList(img.encodeJpg(resized, quality: 82));
+  }
+
+  Future<void> _attachImage() async {
+    if (_isBusy) return;
+    final source = await _pickImageSource();
+    if (!mounted || source == null) return;
+
+    setState(() => _isBusy = true);
+    try {
+      final picked = await _imagePicker.pickImage(source: source);
+      if (picked == null) return;
+
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null || uid.isEmpty) {
+        throw StateError('You must be signed in to attach an image.');
+      }
+
+      final rawBytes = await picked.readAsBytes();
+      final compressedBytes = _compressImage(rawBytes);
+      final uuid = DateTime.now().microsecondsSinceEpoch.toString();
+      final storagePath = 'ai_coach_images/$uid/$uuid.jpg';
+      final storageRef = FirebaseStorage.instance.ref().child(storagePath);
+
+      await storageRef.putData(
+        compressedBytes,
+        SettableMetadata(contentType: 'image/jpeg'),
+      );
+      final downloadUrl = await storageRef.getDownloadURL();
+
+      if (!mounted) return;
+      Navigator.of(context).pop(
+        AiCoachAttachment(
+          type: 'image',
+          data: <String, dynamic>{'url': downloadUrl},
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not attach image. Please try again.'),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isBusy = false);
+    }
+  }
+
+  Future<void> _attachWorkout() async {
+    if (_isBusy) return;
+    setState(() => _isBusy = true);
+    try {
+      final payload = await Navigator.of(context).push<Map<String, dynamic>>(
+        MaterialPageRoute<Map<String, dynamic>>(
+          builder: (_) => const ShareWorkoutScreen(),
+        ),
+      );
+      if (!mounted || payload == null) return;
+
+      final exercisesRaw = payload['exercises'] as List<dynamic>? ?? const [];
+      final exercises = exercisesRaw
+          .whereType<Map>()
+          .map(
+            (exercise) => <String, dynamic>{
+              'exerciseName': exercise['exerciseName'],
+              'sets': exercise['sets'],
+              'reps': exercise['reps'],
+              'weight': exercise['weight'],
+              if (exercise['day'] != null) 'day': exercise['day'],
+            },
+          )
+          .toList(growable: false);
+
+      final attachmentData = <String, dynamic>{
+        'title': payload['title'] ?? 'Workout',
+        'shareScope': payload['shareScope'],
+        if (payload['weekNumber'] != null) 'weekNumber': payload['weekNumber'],
+        if (payload['days'] != null) 'days': payload['days'],
+        'exercises': exercises,
+      };
+
+      Navigator.of(context).pop(
+        AiCoachAttachment(type: 'workout', data: attachmentData),
+      );
+    } finally {
+      if (mounted) setState(() => _isBusy = false);
+    }
+  }
+
+  Future<void> _attachMeal() async {
+    if (_isBusy) return;
+    setState(() => _isBusy = true);
+    try {
+      final payload = await Navigator.of(context).push<Map<String, dynamic>>(
+        MaterialPageRoute<Map<String, dynamic>>(
+          builder: (_) => const ShareMealScreen(),
+        ),
+      );
+      if (!mounted || payload == null) return;
+
+      final attachmentData = <String, dynamic>{
+        'name': payload['mealName'] ?? 'Meal',
+        'calories': payload['calories'] ?? 0,
+        'protein': payload['protein'] ?? 0,
+        'carbs': payload['carbs'] ?? 0,
+        'fat': payload['fats'] ?? 0,
+      };
+
+      Navigator.of(context).pop(
+        AiCoachAttachment(type: 'meal', data: attachmentData),
+      );
+    } finally {
+      if (mounted) setState(() => _isBusy = false);
+    }
   }
 
   @override
@@ -518,71 +688,77 @@ class _AttachmentSheetState extends State<_AttachmentSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Attach Data', style: AppTextStyles.headingMedium()),
+          Text('Attach', style: AppTextStyles.headingMedium()),
           const SizedBox(height: AppSpacing.md),
-          DropdownButtonFormField<String>(
-            value: _type,
-            items: const [
-              DropdownMenuItem(value: 'image', child: Text('Image')),
-              DropdownMenuItem(value: 'workout', child: Text('Workout')),
-              DropdownMenuItem(value: 'meal', child: Text('Meal')),
-            ],
-            onChanged: (value) {
-              if (value == null) return;
-              setState(() {
-                _type = value;
-                if (value == 'image') {
-                  _jsonController.text = '{"url":"","caption":""}';
-                } else if (value == 'workout') {
-                  _jsonController.text = '{"title":"","sets":"","reps":""}';
-                } else {
-                  _jsonController.text =
-                      '{"name":"","calories":"","protein":"","carbs":"","fat":""}';
-                }
-              });
-            },
+          _AttachmentSheetOption(
+            icon: Icons.image_outlined,
+            label: 'Image',
+            onTap: _isBusy ? null : _attachImage,
           ),
-          const SizedBox(height: AppSpacing.md),
-          TextField(
-            controller: _jsonController,
-            minLines: 4,
-            maxLines: 8,
-            style: AppTextStyles.bodySmall(color: AppColors.textPrimary),
-            decoration: InputDecoration(
-              hintText: 'JSON attachment payload',
-              hintStyle: AppTextStyles.bodySmall(color: AppColors.textTertiary),
-              filled: true,
-              fillColor: AppColors.backgroundTertiary,
+          const SizedBox(height: AppSpacing.sm),
+          _AttachmentSheetOption(
+            icon: Icons.fitness_center_rounded,
+            label: 'Workout',
+            onTap: _isBusy ? null : _attachWorkout,
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          _AttachmentSheetOption(
+            icon: Icons.restaurant_menu_rounded,
+            label: 'Meal',
+            onTap: _isBusy ? null : _attachMeal,
+          ),
+          if (_isBusy) ...[
+            const SizedBox(height: AppSpacing.md),
+            const SizedBox(
+              width: double.infinity,
+              child: LinearProgressIndicator(color: AppColors.accentPrimary),
             ),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: () {
-                try {
-                  final decoded = jsonDecode(_jsonController.text.trim());
-                  if (decoded is! Map) return;
-                  Navigator.of(context).pop(
-                    AiCoachAttachment(
-                      type: _type,
-                      data: Map<String, dynamic>.from(decoded as Map),
-                    ),
-                  );
-                } catch (_) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Invalid JSON payload')),
-                  );
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.accentPrimary,
-                foregroundColor: AppColors.textPrimary,
-              ),
-              child: const Text('Attach'),
-            ),
-          ),
+          ],
         ],
+      ),
+    );
+  }
+}
+
+class _AttachmentSheetOption extends StatelessWidget {
+  const _AttachmentSheetOption({
+    required this.icon,
+    required this.label,
+    this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AppSpacing.borderRadiusSmall),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.md,
+        ),
+        decoration: BoxDecoration(
+          color: AppColors.backgroundTertiary,
+          borderRadius: BorderRadius.circular(AppSpacing.borderRadiusSmall),
+          border: Border.all(color: AppColors.borderDefault),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: AppColors.accentPrimary, size: 20),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(child: Text(label, style: AppTextStyles.bodyMedium())),
+            const Icon(
+              Icons.chevron_right_rounded,
+              color: AppColors.textTertiary,
+              size: 18,
+            ),
+          ],
+        ),
       ),
     );
   }

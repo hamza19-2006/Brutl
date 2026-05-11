@@ -26,7 +26,7 @@ class WorkoutScreen extends StatefulWidget {
 
 class _WorkoutScreenState extends State<WorkoutScreen> {
   int _caloriesEaten = 0;
-  int _calorieGoal = 2000;
+  int _calorieGoal = 0;
   int _carbs = 0;
   int _carbsGoal = 200;
   int _protein = 0;
@@ -44,11 +44,11 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   }
 
   Future<void> _loadNutrition() async {
-    // BUG 2 & 3 FIX: Sync the user's actual macro targets from WorkoutProvider
-    // into NutritionService before loading today's data, so the goal ring and
-    // hardcoded "2000" are replaced with the real Firestore value.
     final workoutProvider = context.read<WorkoutProvider>();
     final targetKcal = workoutProvider.user.dailyCalorieGoal;
+    if (mounted && targetKcal > 0) {
+      setState(() => _calorieGoal = targetKcal);
+    }
 
     // Derive macro goals proportionally if not yet set in SharedPreferences.
     // These will be overwritten by any explicit values saved in Settings.
@@ -78,9 +78,13 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   void _applyData(NutritionData data) {
     setState(() {
       _caloriesEaten = data.caloriesEaten;
-      // BUG 3 FIX: Use goal from NutritionService (which now reflects the
-      // real Firestore target), not the hardcoded 2000 default.
-      _calorieGoal = data.calorieGoal > 0 ? data.calorieGoal : _calorieGoal;
+      final providerGoal = context
+          .read<WorkoutProvider>()
+          .user
+          .dailyCalorieGoal;
+      _calorieGoal = data.calorieGoal > 0
+          ? data.calorieGoal
+          : (providerGoal > 0 ? providerGoal : _calorieGoal);
       _carbs = data.carbs;
       _carbsGoal = data.carbsGoal;
       _protein = data.protein;
@@ -99,7 +103,6 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
 
   NutritionModel get _builtNutrition => NutritionModel(
     totalCal: _caloriesEaten,
-    // BUG 2 FIX: goal ring now uses the real synced goal, not a stale 2000
     goalCal: _calorieGoal,
     carbs: MacroNutrientModel(consumed: _carbs, goal: _carbsGoal),
     protein: MacroNutrientModel(consumed: _protein, goal: _proteinGoal),

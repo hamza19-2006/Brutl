@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/secrets.dart';
 import '../core/theme/constants/ai_prompts.dart';
@@ -91,6 +92,7 @@ class AiCoachProvider extends ChangeNotifier {
   static const int _pruneBatchSize = 400;
   static const String _geminiModel = 'gemini-1.5-flash-latest';
   static const String _grokModel = 'grok-beta';
+  static const String _localCacheKeyPrefix = 'ai_coach_messages_';
   static final RegExp _summaryTagPattern = RegExp(
     r'\[\[UPDATE_SUMMARY:\s*([\s\S]*?)\]\]',
     caseSensitive: false,
@@ -129,6 +131,11 @@ class AiCoachProvider extends ChangeNotifier {
   String? get error => _error;
 
   String? get _uid => _auth.currentUser?.uid;
+  String? get _localCacheKey {
+    final uid = _uid;
+    if (uid == null || uid.isEmpty) return null;
+    return '$_localCacheKeyPrefix$uid';
+  }
 
   CollectionReference<Map<String, dynamic>>? get _messagesCollection {
     final uid = _uid;
@@ -171,6 +178,9 @@ class AiCoachProvider extends ChangeNotifier {
     _isLoading = true;
     notifyListeners();
 
+    await _loadMessagesFromLocal();
+    notifyListeners();
+
     try {
       if (!_didRunPrune) {
         await _pruneExpiredMessages();
@@ -187,12 +197,28 @@ class AiCoachProvider extends ChangeNotifier {
           .toList(growable: false)
           .reversed
           .toList(growable: false);
+      final cutoff = DateTime.now().subtract(
+        const Duration(days: _retentionDays),
+      );
+      final remoteWindow = parsed
+          .where((message) => !message.timestamp.isBefore(cutoff))
+          .toList(growable: false);
+      final remoteLatest = remoteWindow.length <= _pageSize
+          ? remoteWindow
+          : remoteWindow.sublist(remoteWindow.length - _pageSize);
+      final didChange = !_messageListsEquivalent(_messages, remoteLatest);
 
-      _messages = parsed;
+      if (didChange) {
+        _messages = remoteLatest;
+      }
       _oldestLoadedDoc = querySnapshot.docs.isEmpty
           ? null
           : querySnapshot.docs.last;
       _hasMore = querySnapshot.docs.length == _pageSize;
+      if (didChange) {
+        notifyListeners();
+        await _saveMessagesToLocal();
+      }
     } catch (error) {
       _error = 'Failed to load messages. Please try again.';
       debugPrint('AI_COACH: initial load failed — $error');
@@ -244,6 +270,7 @@ class AiCoachProvider extends ChangeNotifier {
         _messages = <AiCoachMessage>[...olderChunk, ..._messages];
         _oldestLoadedDoc = querySnapshot.docs.last;
         _hasMore = querySnapshot.docs.length == _pageSize;
+        await _saveMessagesToLocal();
       }
     } catch (error) {
       _error = 'Failed to load older messages.';
@@ -285,6 +312,7 @@ class AiCoachProvider extends ChangeNotifier {
 
     try {
       await userDocRef.set(_toFirestoreMessageMap(userMessage));
+      await _saveMessagesToLocal();
 
       final assistantText = await _generateAssistantReply(
         latestUserMessage: userMessage,
@@ -318,6 +346,7 @@ class AiCoachProvider extends ChangeNotifier {
       notifyListeners();
 
       await assistantDocRef.set(_toFirestoreMessageMap(assistantMessage));
+      await _saveMessagesToLocal();
     } catch (error) {
       _error = 'Could not send your message right now.';
       debugPrint('AI_COACH: send failed — $error');
@@ -336,6 +365,128 @@ class AiCoachProvider extends ChangeNotifier {
       'attachmentType': message.attachmentType,
       'attachmentData': message.attachmentData,
     };
+  }
+
+  Future<void> _saveMessagesToLocal() async {
+    final cacheKey = _localCacheKey;
+    if (cacheKey == null) return;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cutoff = DateTime.now().subtract(
+        const Duration(days: _retentionDays),
+      );
+      final retained = _messages
+          .where((message) => !message.timestamp.isBefore(cutoff))
+          .toList(growable: false);
+      final latestWindow = retained.length <= _pageSize
+          ? retained
+          : retained.sublist(retained.length - _pageSize);
+
+      final payload = latestWindow
+          .map(
+            (message) => <String, dynamic>{
+              'id': message.id,
+              'role': message.role,
+              'content': message.content,
+              'timestamp': message.timestamp.toIso8601String(),
+              'attachmentType': message.attachmentType,
+              'attachmentData': message.attachmentData,
+            },
+          )
+          .toList(growable: false);
+
+      await prefs.setString(cacheKey, jsonEncode(payload));
+    } catch (error) {
+      debugPrint('AI_COACH: local save failed — $error');
+    }
+  }
+
+  Future<void> _loadMessagesFromLocal() async {
+    final cacheKey = _localCacheKey;
+    if (cacheKey == null) {
+      _messages = const <AiCoachMessage>[];
+      return;
+    }
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(cacheKey);
+      if (raw == null || raw.trim().isEmpty) {
+        _messages = const <AiCoachMessage>[];
+        return;
+      }
+
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) {
+        _messages = const <AiCoachMessage>[];
+        return;
+      }
+
+      final cutoff = DateTime.now().subtract(
+        const Duration(days: _retentionDays),
+      );
+      final parsed = <AiCoachMessage>[];
+      for (final entry in decoded) {
+        if (entry is! Map) continue;
+        final map = Map<String, dynamic>.from(entry);
+        final parsedTimestamp = DateTime.tryParse(
+          map['timestamp'] as String? ?? '',
+        );
+        final timestamp = parsedTimestamp ?? DateTime.now();
+        if (timestamp.isBefore(cutoff)) continue;
+
+        final rawAttachmentData = map['attachmentData'];
+        Map<String, dynamic>? attachmentData;
+        if (rawAttachmentData is Map) {
+          attachmentData = Map<String, dynamic>.from(rawAttachmentData);
+        }
+
+        final rawId = map['id'] as String?;
+        parsed.add(
+          AiCoachMessage(
+            id: rawId != null && rawId.trim().isNotEmpty
+                ? rawId
+                : 'local_${timestamp.microsecondsSinceEpoch}_${parsed.length}',
+            role: map['role'] as String? ?? 'assistant',
+            content: map['content'] as String? ?? '',
+            timestamp: timestamp,
+            attachmentType: map['attachmentType'] as String?,
+            attachmentData: attachmentData,
+          ),
+        );
+      }
+
+      parsed.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      _messages = parsed.length <= _pageSize
+          ? parsed
+          : parsed.sublist(parsed.length - _pageSize);
+      await _saveMessagesToLocal();
+    } catch (error) {
+      _messages = const <AiCoachMessage>[];
+      debugPrint('AI_COACH: local load failed — $error');
+    }
+  }
+
+  bool _messageListsEquivalent(
+    List<AiCoachMessage> left,
+    List<AiCoachMessage> right,
+  ) {
+    if (identical(left, right)) return true;
+    if (left.length != right.length) return false;
+    for (var i = 0; i < left.length; i++) {
+      final a = left[i];
+      final b = right[i];
+      if (a.id != b.id ||
+          a.role != b.role ||
+          a.content != b.content ||
+          a.timestamp.compareTo(b.timestamp) != 0 ||
+          a.attachmentType != b.attachmentType ||
+          !mapEquals(a.attachmentData, b.attachmentData)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   _AssistantReplyParseResult _parseAssistantReply(String text) {
@@ -382,20 +533,42 @@ class AiCoachProvider extends ChangeNotifier {
     required AiCoachMessage latestUserMessage,
   }) async {
     final conversation = _buildConversationWindow();
-    final geminiReply = await _generateWithGemini(
-      conversation: conversation,
-      latestUserMessage: latestUserMessage,
-    );
-    if (geminiReply != null && geminiReply.trim().isNotEmpty) {
-      return geminiReply;
+    try {
+      final geminiReply = await _generateWithGemini(
+        conversation: conversation,
+        latestUserMessage: latestUserMessage,
+      );
+      if (geminiReply != null && geminiReply.trim().isNotEmpty) {
+        return geminiReply.trim();
+      }
+      throw StateError('Gemini returned empty response');
+    } catch (error) {
+      debugPrint('AI_COACH: Falling back Gemini -> Grok ($error)');
     }
 
-    final grokReply = await _generateWithGrok(conversation: conversation);
-    if (grokReply != null && grokReply.trim().isNotEmpty) {
-      return grokReply;
+    try {
+      final grokReply = await _generateWithGrok(conversation: conversation);
+      if (grokReply != null && grokReply.trim().isNotEmpty) {
+        return grokReply.trim();
+      }
+      throw StateError('Grok returned empty response');
+    } catch (error) {
+      debugPrint('AI_COACH: Falling back Grok -> OpenRouter ($error)');
     }
 
-    throw StateError('All AI providers failed');
+    try {
+      final openRouterReply = await _generateWithOpenRouter(
+        conversation: conversation,
+      );
+      if (openRouterReply != null && openRouterReply.trim().isNotEmpty) {
+        return openRouterReply.trim();
+      }
+      throw StateError('OpenRouter returned empty response');
+    } catch (error) {
+      debugPrint('AI_COACH: OpenRouter failed — $error');
+    }
+
+    return 'Coach is currently offline. Please try again in a moment.';
   }
 
   List<Map<String, String>> _buildConversationWindow() {
@@ -550,6 +723,61 @@ class AiCoachProvider extends ChangeNotifier {
       return message['content'] as String?;
     } catch (error) {
       debugPrint('AI_COACH: Grok failed — $error');
+      return null;
+    }
+  }
+
+  Future<String?> _generateWithOpenRouter({
+    required List<Map<String, String>> conversation,
+  }) async {
+    if (openRouterApiKey.trim().isEmpty) {
+      return null;
+    }
+
+    final payloadMessages = conversation
+        .map(
+          (entry) => <String, String>{
+            'role': entry['role'] == 'assistant' ? 'assistant' : entry['role']!,
+            'content': entry['content'] ?? '',
+          },
+        )
+        .toList(growable: false);
+
+    final body = <String, dynamic>{
+      'model': 'gpt-4o-mini',
+      'messages': payloadMessages,
+      'temperature': 0.6,
+    };
+
+    try {
+      final response = await _httpClient
+          .post(
+            Uri.parse('https://openrouter.ai/api/v1/chat/completions'),
+            headers: <String, String>{
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $openRouterApiKey',
+              'HTTP-Referer': 'https://github.com/hamza19-2006/Brutl',
+              'X-Title': 'Brutl AI Coach',
+            },
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 25));
+
+      if (response.statusCode != 200) {
+        debugPrint('AI_COACH: OpenRouter HTTP ${response.statusCode}');
+        return null;
+      }
+
+      final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+      final choices = decoded['choices'];
+      if (choices is! List || choices.isEmpty) return null;
+      final firstChoice = choices.first;
+      if (firstChoice is! Map) return null;
+      final message = firstChoice['message'];
+      if (message is! Map) return null;
+      return message['content'] as String?;
+    } catch (error) {
+      debugPrint('AI_COACH: OpenRouter failed — $error');
       return null;
     }
   }

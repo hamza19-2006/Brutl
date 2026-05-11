@@ -193,9 +193,9 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
     required int currentWeekNumber,
     required int currentDayId,
   }) async {
-    final targetWeek = currentWeekNumber - 1;
+    int targetWeek = currentWeekNumber - 1;
     if (targetWeek <= 0) {
-      return const <dynamic>[];
+      targetWeek = 4;
     }
 
     final daySnap = await FirebaseFirestore.instance
@@ -568,7 +568,9 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
     }
 
     final displayLastReps = lastTopRep;
-    final displayLastRepsRaw = repsRaw.isNotEmpty ? repsRaw : '$displayLastReps';
+    final displayLastRepsRaw = repsRaw.isNotEmpty
+        ? repsRaw
+        : '$displayLastReps';
 
     double targetWeight = lastWeight;
     String targetReps = '$lowerLimit-$upperLimit';
@@ -964,10 +966,9 @@ class _TargetCard extends StatelessWidget {
     );
   }
 
-  static String _fmtWeight(double targetWeight) =>
-      targetWeight % 1 == 0
-          ? targetWeight.toInt().toString()
-          : targetWeight.toString();
+  static String _fmtWeight(double targetWeight) => targetWeight % 1 == 0
+      ? targetWeight.toInt().toString()
+      : targetWeight.toString();
 }
 
 class _RecoveryProtocol extends StatelessWidget {

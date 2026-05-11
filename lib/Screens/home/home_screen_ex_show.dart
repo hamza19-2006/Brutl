@@ -112,62 +112,167 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
       todayName: todayName,
       userModel: userModel,
     );
-    final templateFallback = uid == null || uid.isEmpty
-        ? guaranteedFallback
-        : (await _buildTemplateFallbackPayload(
-                uid: uid,
-                todayIndex: todayIndex,
-                todayName: todayName,
-                currentWeek: workoutProvider.selectedWeek,
-                userModel: userModel,
-              )) ??
-              guaranteedFallback;
 
     if (uid == null || uid.isEmpty) {
-      return templateFallback;
+      return guaranteedFallback;
     }
 
     try {
-      final currentWeek = workoutProvider.selectedWeek;
-      final dayNumber = todayIndex + 1;
-      final rawExercises = await _loadPreviousWeekDayExercises(
+      final currentWeekNumber = workoutProvider.selectedWeek;
+      final currentDayId = todayIndex + 1;
+      final templateExercises = await _loadTemplateExercisesForToday(
         uid: uid,
-        currentWeek: currentWeek,
-        dayNumber: dayNumber,
+        todayIndex: todayIndex,
+        todayName: todayName,
+        currentWeek: currentWeekNumber,
       );
-      if (rawExercises.isEmpty) {
-        return templateFallback;
+      if (templateExercises.isEmpty) {
+        return guaranteedFallback;
       }
 
-      final parsed = rawExercises
-          .whereType<Map>()
-          .map(
-            (raw) => _ExerciseSnapshot.fromMap(Map<String, dynamic>.from(raw)),
-          )
-          .where((e) => e.name.trim().isNotEmpty)
-          .toList(growable: false);
+      final historyExercises = await _loadPreviousWeekDayExercises(
+        uid: uid,
+        currentWeekNumber: currentWeekNumber,
+        currentDayId: currentDayId,
+      );
 
-      if (parsed.isEmpty) {
-        return templateFallback;
+      if (historyExercises.isEmpty) {
+        final parsedTemplate = templateExercises
+            .map((raw) => _ExerciseSnapshot.fromMap(raw))
+            .where((e) => e.name.trim().isNotEmpty)
+            .toList(growable: false);
+        final selectedTemplate = _selectExercises(parsedTemplate);
+        if (selectedTemplate.isEmpty) {
+          return guaranteedFallback;
+        }
+        final templateTargets = selectedTemplate
+            .map((e) => _toTemplateTarget(exercise: e, user: userModel))
+            .toList(growable: false);
+        if (templateTargets.isNotEmpty) {
+          return _ProgressionPayload(targets: templateTargets);
+        }
+        return guaranteedFallback;
       }
 
-      final selected = _selectExercises(parsed);
+      final hydrated = _hydrateExercisesWithHistory(
+        templateExercises: templateExercises,
+        historyExercises: historyExercises,
+      );
+      if (hydrated.isEmpty) {
+        return guaranteedFallback;
+      }
+
+      final selected = _selectExercises(hydrated);
       if (selected.isEmpty) {
-        return templateFallback;
+        return guaranteedFallback;
       }
 
       final targets = selected
-          .map((e) => _toTarget(exercise: e, user: userModel))
+          .map(
+            (e) => _toTarget(
+              exercise: e,
+              user: userModel,
+              mappedWeight: e.weight,
+              mappedReps: e.repsRaw,
+            ),
+          )
           .toList(growable: false);
 
       if (targets.isEmpty) {
-        return templateFallback;
+        return guaranteedFallback;
       }
 
       return _ProgressionPayload(targets: targets);
     } catch (_) {
-      return templateFallback;
+      return guaranteedFallback;
     }
+  }
+
+  Future<List<dynamic>> _loadPreviousWeekDayExercises({
+    required String uid,
+    required int currentWeekNumber,
+    required int currentDayId,
+  }) async {
+    final targetWeek = currentWeekNumber - 1;
+    if (targetWeek <= 0) {
+      return const <dynamic>[];
+    }
+
+    final daySnap = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('weeks')
+        .doc('week_$targetWeek')
+        .collection('days')
+        .doc('day_$currentDayId')
+        .get();
+
+    final rawExercises =
+        (daySnap.data()?['exercises'] as List<dynamic>?) ?? const <dynamic>[];
+    return rawExercises;
+  }
+
+  List<_ExerciseSnapshot> _hydrateExercisesWithHistory({
+    required List<Map<String, dynamic>> templateExercises,
+    required List<dynamic> historyExercises,
+  }) {
+    if (templateExercises.isEmpty) return const <_ExerciseSnapshot>[];
+
+    final normalizedHistory = historyExercises
+        .whereType<Map>()
+        .map((raw) => Map<String, dynamic>.from(raw))
+        .toList(growable: false);
+    final historyByName = <String, Map<String, dynamic>>{};
+    for (final historyData in normalizedHistory) {
+      final key = (historyData['name'] ?? '').toString().trim().toLowerCase();
+      if (key.isEmpty || historyByName.containsKey(key)) continue;
+      historyByName[key] = historyData;
+    }
+
+    final hydrated = <_ExerciseSnapshot>[];
+    for (var i = 0; i < templateExercises.length; i++) {
+      final templateData = templateExercises[i];
+      final templateName = (templateData['name'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
+      final indexedHistory = i < normalizedHistory.length
+          ? normalizedHistory[i]
+          : const <String, dynamic>{};
+      final historyData = historyByName[templateName] ?? indexedHistory;
+
+      final mappedWeight =
+          historyData['weight'] ?? templateData['weight'] ?? 0.0;
+      final mappedReps = historyData['reps'] ?? templateData['reps'] ?? '';
+
+      final mergedData = <String, dynamic>{
+        ...templateData,
+        'name': templateData['name'] ?? historyData['name'] ?? 'Exercise',
+        'baseRange': templateData['baseRange'] ?? templateData['base_range'],
+        'weight': mappedWeight,
+        'reps': mappedReps,
+        'sets': templateData['sets'] ?? historyData['sets'] ?? 1,
+        'weightUnit':
+            historyData['weightUnit'] ??
+            historyData['weight_unit'] ??
+            templateData['weightUnit'] ??
+            templateData['weight_unit'] ??
+            'Kg',
+        'categoryType':
+            templateData['categoryType'] ??
+            templateData['category_type'] ??
+            historyData['categoryType'] ??
+            historyData['category_type'] ??
+            historyData['type'] ??
+            'isolation',
+      };
+
+      hydrated.add(_ExerciseSnapshot.fromMap(mergedData));
+    }
+
+    return hydrated
+        .where((e) => e.name.trim().isNotEmpty)
+        .toList(growable: false);
   }
 
   _ProgressionPayload _buildGuaranteedTemplatePayload({
@@ -196,106 +301,6 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
         .map((e) => _toTemplateTarget(exercise: e, user: userModel))
         .toList(growable: false);
     return _ProgressionPayload(targets: targets);
-  }
-
-  Future<List<dynamic>> _loadPreviousWeekDayExercises({
-    required String uid,
-    required int currentWeek,
-    required int dayNumber,
-  }) async {
-    final firestore = FirebaseFirestore.instance;
-    final candidates = <int>[];
-    final seen = <int>{};
-
-    void addCandidate(int week) {
-      if (week <= 0 || seen.contains(week)) return;
-      seen.add(week);
-      candidates.add(week);
-    }
-
-    if (currentWeek > 1) {
-      addCandidate(currentWeek - 1);
-    }
-
-    final weeksSnap = await firestore
-        .collection('users')
-        .doc(uid)
-        .collection('weeks')
-        .get();
-
-    final discoveredWeeks =
-        weeksSnap.docs
-            .map((doc) {
-              final match = RegExp(r'^week_(\d+)$').firstMatch(doc.id);
-              if (match == null) return null;
-              return int.tryParse(match.group(1)!);
-            })
-            .whereType<int>()
-            .toList(growable: false)
-          ..sort((a, b) => b.compareTo(a));
-
-    for (final week in discoveredWeeks) {
-      if (currentWeek > 1 && week >= currentWeek) continue;
-      addCandidate(week);
-    }
-
-    for (final week in candidates) {
-      final daySnap = await firestore
-          .collection('users')
-          .doc(uid)
-          .collection('weeks')
-          .doc('week_$week')
-          .collection('days')
-          .doc('day_$dayNumber')
-          .get();
-
-      final rawExercises =
-          (daySnap.data()?['exercises'] as List<dynamic>?) ?? const <dynamic>[];
-      if (rawExercises.isNotEmpty) {
-        return rawExercises;
-      }
-    }
-
-    return const <dynamic>[];
-  }
-
-  Future<_ProgressionPayload?> _buildTemplateFallbackPayload({
-    required String uid,
-    required int todayIndex,
-    required String todayName,
-    required int currentWeek,
-    required BrutlUser userModel,
-  }) async {
-    try {
-      final templateExercises = await _loadTemplateExercisesForToday(
-        uid: uid,
-        todayIndex: todayIndex,
-        todayName: todayName,
-        currentWeek: currentWeek,
-      );
-      if (templateExercises.isEmpty) return null;
-
-      final parsed = templateExercises
-          .whereType<Map>()
-          .map(
-            (raw) => _ExerciseSnapshot.fromMap(Map<String, dynamic>.from(raw)),
-          )
-          .where((e) => e.name.trim().isNotEmpty)
-          .toList(growable: false);
-      if (parsed.isEmpty) return null;
-
-      final selected = _selectExercises(parsed);
-      if (selected.isEmpty) return null;
-
-      final targets = selected
-          .map((e) => _toTemplateTarget(exercise: e, user: userModel))
-          .toList(growable: false);
-      if (targets.isEmpty) return null;
-
-      return _ProgressionPayload(targets: targets);
-    } catch (_) {
-      return null;
-    }
   }
 
   Future<List<Map<String, dynamic>>> _loadTemplateExercisesForToday({
@@ -430,13 +435,11 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
     required _ExerciseSnapshot exercise,
     required BrutlUser user,
   }) {
-    final range = _parseDynamicBaseRange(
-      baseRange: exercise.baseRangeString,
-      isCompound: exercise.isCompound,
-      user: user,
-    );
-    final lowerLimit = range.lower;
-    final upperLimit = range.upper;
+    final baseRange = exercise.baseRangeString?.trim() ?? '';
+    final parts = baseRange.split('-');
+    final lowerLimit = int.tryParse(parts.first.trim()) ?? 8;
+    final upperLimit = int.tryParse(parts.last.trim()) ?? 12;
+    final normalizedUpper = upperLimit < lowerLimit ? lowerLimit : upperLimit;
 
     final unit = exercise.weightUnit.trim().isEmpty
         ? user.weightUnit
@@ -461,14 +464,16 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
       isCompound: exercise.isCompound,
       lastWeight: startWeight,
       lastReps: 0,
+      lastRepsRaw: '',
       targetWeight: startWeight,
-      targetRepsString: '$lowerLimit-$upperLimit',
+      targetReps: '$lowerLimit-$normalizedUpper',
       weightUnit: unit,
-      actionLabel: 'Base range: $lowerLimit-$upperLimit reps',
+      actionLabel: 'Base range: $lowerLimit-$normalizedUpper reps',
       aiPayload: _toAiExercisePayload(exercise),
-      lastWeekDisplayString: 'Nothing logged last $currentDayName.',
-      targetDisplayString:
-          'Start your first session! Target: $lowerLimit-$upperLimit reps.',
+      isFirstSession: true,
+      lastWeekDisplay: 'Nothing logged last $currentDayName.',
+      targetDisplay:
+          'Start your first session! Target: $lowerLimit-$normalizedUpper reps.',
     );
   }
 
@@ -513,93 +518,100 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
   _TargetCardData _toTarget({
     required _ExerciseSnapshot exercise,
     required BrutlUser user,
+    required double mappedWeight,
+    required dynamic mappedReps,
   }) {
-    // ── Step 2A: Resolve dynamic base range ──────────────────────────────────
-    final range = _parseDynamicBaseRange(
-      baseRange: exercise.baseRangeString,
-      isCompound: exercise.isCompound,
-      user: user,
-    );
-    final lowerLimit = range.lower;
-    final upperLimit = range.upper;
+    final parts = (exercise.baseRangeString?.trim() ?? '').split('-');
+    final lowerLimit = int.tryParse(parts.first.trim()) ?? 8;
+    final upperLimitRaw = int.tryParse(parts.last.trim()) ?? 12;
+    final upperLimit = upperLimitRaw < lowerLimit ? lowerLimit : upperLimitRaw;
 
-    final lastTopRep = exercise.topSetReps;
-    final lastWeight = exercise.weight;
+    final repsRaw = mappedReps?.toString() ?? '';
+    final lastTopRep = _ExerciseSnapshot._parseRepValues(mappedReps);
+    final lastWeight = mappedWeight;
     final weightUnit = exercise.weightUnit.trim().isEmpty
         ? user.weightUnit
         : exercise.weightUnit;
+    final type = exercise.categoryType.trim().toLowerCase();
 
-    // ── Branch 0: Empty State — user has no prior data ───────────────────────
-    if (lastTopRep == 0 || lastWeight == 0) {
-      final dayNames = [
-        'Monday',
-        'Tuesday',
-        'Wednesday',
-        'Thursday',
-        'Friday',
-        'Saturday',
-        'Sunday',
-      ];
-      final currentDayName = dayNames[(DateTime.now().weekday - 1) % 7];
+    final dayNames = [
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+      'Sunday',
+    ];
+    final currentDayName = dayNames[(DateTime.now().weekday - 1) % 7];
+
+    if (lastTopRep <= 0 || lastWeight <= 0) {
+      final lastWeekDisplayString = 'Nothing logged last $currentDayName.';
+      final targetDisplayString =
+          'Start your first session! Target: $lowerLimit-$upperLimit reps.';
 
       return _TargetCardData(
         name: exercise.name,
         isCompound: exercise.isCompound,
         lastWeight: 0,
         lastReps: 0,
-        lastRepsRaw: exercise.repsRaw,
+        lastRepsRaw: repsRaw,
         targetWeight: 0,
-        targetRepsString: '$lowerLimit-$upperLimit',
+        targetReps: '$lowerLimit-$upperLimit',
         weightUnit: weightUnit,
         actionLabel: 'First Session',
         aiPayload: _toAiExercisePayload(exercise),
-        lastWeekDisplayString: 'Nothing logged last $currentDayName.',
-        targetDisplayString:
-            'Start your first session! Target: $lowerLimit-$upperLimit reps.',
+        isFirstSession: true,
+        lastWeekDisplay: lastWeekDisplayString,
+        targetDisplay: targetDisplayString,
       );
     }
 
-    // Freeze the "last week" display value BEFORE calculating target
     final displayLastReps = lastTopRep;
+    final displayLastRepsRaw = repsRaw.isNotEmpty ? repsRaw : '$displayLastReps';
 
-    double newTargetWeight;
-    String newTargetRepsString;
-    String actionLabel;
+    double targetWeight = lastWeight;
+    String targetReps = '$lowerLimit-$upperLimit';
+    String actionLabel = 'Increase Reps';
 
-    // ── Branch 1: Rep Progression (below upper limit) ─────────────────────────
     if (lastTopRep < upperLimit) {
-      newTargetWeight = lastWeight;
+      targetWeight = lastWeight;
       final minRep = lastTopRep + 1;
       final maxRep = math.min(lastTopRep + 2, upperLimit);
-      newTargetRepsString = minRep == maxRep ? '$minRep' : '$minRep-$maxRep';
+      targetReps = minRep == maxRep ? '$minRep' : '$minRep-$maxRep';
       actionLabel = 'Increase Reps';
-    }
-    // ── Branch 2: Weight Progression (upper limit reached) ───────────────────
-    else {
-      final unitLower = weightUnit.toLowerCase();
-      if (unitLower.contains('plate')) {
-        newTargetWeight = lastWeight + 1;
-      } else if (exercise.isCompound) {
-        newTargetWeight = lastWeight + 5.0;
+    } else if (lastTopRep >= upperLimit) {
+      final normalizedUnit = weightUnit.trim().toLowerCase();
+      if (normalizedUnit == 'plates') {
+        targetWeight = lastWeight + 1;
+      } else if (type.contains('compound')) {
+        targetWeight = lastWeight + 5.0;
       } else {
-        newTargetWeight = lastWeight + 2.5;
+        targetWeight = lastWeight + 2.5;
       }
-      // Reset reps to bottom of dynamic base range
-      newTargetRepsString = '$lowerLimit-${lowerLimit + 1}';
+      targetReps = '$lowerLimit-${lowerLimit + 1}';
       actionLabel = 'Increase Weight';
     }
+
+    final lastWeekDisplayString =
+        'Last Week: ${_formatWeight(lastWeight)}$weightUnit x $displayLastRepsRaw';
+    final targetDisplayString =
+        'Target Today: ${_formatWeight(targetWeight)}$weightUnit x $targetReps 🎯';
 
     return _TargetCardData(
       name: exercise.name,
       isCompound: exercise.isCompound,
       lastWeight: lastWeight,
       lastReps: displayLastReps,
-      lastRepsRaw: exercise.repsRaw,
-      targetWeight: newTargetWeight,
-      targetRepsString: newTargetRepsString,
+      lastRepsRaw: displayLastRepsRaw,
+      targetWeight: targetWeight,
+      targetReps: targetReps,
       weightUnit: weightUnit,
       actionLabel: actionLabel,
       aiPayload: _toAiExercisePayload(exercise),
+      isFirstSession: false,
+      lastWeekDisplay: lastWeekDisplayString,
+      targetDisplay: targetDisplayString,
     );
   }
 
@@ -628,35 +640,8 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
     return normalized.isEmpty || normalized.contains('rest');
   }
 
-  ({int lower, int upper}) _parseDynamicBaseRange({
-    required String? baseRange,
-    required bool isCompound,
-    required BrutlUser user,
-  }) {
-    if (baseRange != null && baseRange.trim().isNotEmpty) {
-      // Try "X-Y" format
-      final parts = baseRange.trim().split('-');
-      if (parts.length == 2) {
-        final lo = int.tryParse(parts[0].trim());
-        final hi = int.tryParse(parts[1].trim());
-        if (lo != null && hi != null && lo > 0 && hi >= lo) {
-          return (lower: lo, upper: hi);
-        }
-      }
-      // Try single number "X"
-      final single = int.tryParse(baseRange.trim());
-      if (single != null && single > 0) {
-        return (lower: single, upper: single);
-      }
-    }
-    // Fallback to user profile rep ranges
-    final lower = isCompound
-        ? (user.compoundRepMin > 0 ? user.compoundRepMin : 4)
-        : (user.isolationRepMin > 0 ? user.isolationRepMin : 8);
-    final upper = isCompound
-        ? (user.compoundRepMax >= lower ? user.compoundRepMax : 8)
-        : (user.isolationRepMax >= lower ? user.isolationRepMax : 12);
-    return (lower: lower, upper: upper);
+  static String _formatWeight(double value) {
+    return value % 1 == 0 ? value.toInt().toString() : value.toString();
   }
 }
 
@@ -674,8 +659,6 @@ class _ProgressionPayload {
   final String? recoveryReason;
 }
 
-
-
 // ── _TargetCardData ──────────────────────────────────────────────────────────
 
 class _TargetCardData {
@@ -686,13 +669,13 @@ class _TargetCardData {
     required this.lastReps,
     this.lastRepsRaw = '',
     required this.targetWeight,
-    required this.targetRepsString,
+    required this.targetReps,
     required this.weightUnit,
     required this.actionLabel,
     required this.aiPayload,
-    // Empty-state strings (non-null means "first session" mode)
-    this.lastWeekDisplayString,
-    this.targetDisplayString,
+    required this.isFirstSession,
+    required this.lastWeekDisplay,
+    required this.targetDisplay,
   });
 
   final String name;
@@ -701,19 +684,14 @@ class _TargetCardData {
   final int lastReps;
   final String lastRepsRaw;
   final double targetWeight;
-  final String targetRepsString;
+  final String targetReps;
   final String weightUnit;
   final String actionLabel;
   final Map<String, dynamic> aiPayload;
-
-  // When these are non-null, the card is in "first session" empty-state mode.
-  final String? lastWeekDisplayString;
-  final String? targetDisplayString;
-
-  bool get isFirstSession => lastWeekDisplayString != null;
+  final bool isFirstSession;
+  final String lastWeekDisplay;
+  final String targetDisplay;
 }
-
-
 
 class _ExerciseSnapshot {
   const _ExerciseSnapshot({
@@ -722,6 +700,7 @@ class _ExerciseSnapshot {
     required this.sets,
     required this.weight,
     required this.weightUnit,
+    required this.categoryType,
     required this.topSetReps,
     required this.repsRaw,
     required this.estimatedVolume,
@@ -729,8 +708,7 @@ class _ExerciseSnapshot {
   });
 
   factory _ExerciseSnapshot.fromMap(Map<String, dynamic> map) {
-    final reps = _parseRepValues(map['reps']);
-    final topSetReps = reps.isEmpty ? 0 : reps.reduce(math.max);
+    final topSetReps = _parseRepValues(map['reps']);
     final repsRaw = map['reps']?.toString() ?? '';
     final weight = _parseWeight(map['weight'] ?? map['weightDisplay']);
     final sets = _parseInt(map['sets'], fallback: 1);
@@ -744,6 +722,9 @@ class _ExerciseSnapshot {
     final isCompound = isCompoundFlag is bool
         ? isCompoundFlag
         : categoryRaw.trim().toLowerCase().contains('compound');
+    final categoryType = categoryRaw.trim().isNotEmpty
+        ? categoryRaw.trim()
+        : (isCompound ? 'compound' : 'isolation');
 
     // Read optional baseRange field written by the exercise editor
     final baseRangeRaw = map['baseRange'] ?? map['base_range'];
@@ -759,6 +740,7 @@ class _ExerciseSnapshot {
       weightUnit:
           (map['weightUnit'] ?? map['weight_unit'] ?? map['unit'] ?? 'Kg')
               .toString(),
+      categoryType: categoryType,
       topSetReps: topSetReps,
       repsRaw: repsRaw,
       estimatedVolume: estimatedVolume,
@@ -771,6 +753,7 @@ class _ExerciseSnapshot {
   final int sets;
   final double weight;
   final String weightUnit;
+  final String categoryType;
   final int topSetReps;
   final String repsRaw;
   final double estimatedVolume;
@@ -779,34 +762,36 @@ class _ExerciseSnapshot {
   /// When present, overrides the user's profile rep-range settings.
   final String? baseRangeString;
 
-  static List<int> _parseRepValues(dynamic raw) {
-    if (raw is List) {
-      return raw
-          .map((e) => _parseInt(e, fallback: 0))
-          .where((v) => v > 0)
-          .toList(growable: false);
-    }
-    if (raw is num) return <int>[raw.toInt()];
-    if (raw == null) return const <int>[];
+  static int _parseRepValues(dynamic rawReps) {
+    if (rawReps == null) return 0;
+    if (rawReps is num) return rawReps.toInt();
 
-    final str = raw.toString().trim();
-    if (str.isEmpty) return const <int>[];
-
-    if (str.contains(',')) {
-      final parts = str
-          .split(',')
-          .map((s) => int.tryParse(s.trim()))
-          .whereType<int>()
-          .where((v) => v > 0)
+    if (rawReps is List) {
+      final listParsed = rawReps
+          .map((e) => int.tryParse(e.toString().trim()) ?? 0)
+          .where((e) => e > 0)
           .toList(growable: false);
-      if (parts.isNotEmpty) return parts;
+      return listParsed.isNotEmpty ? listParsed.reduce(math.max) : 0;
     }
 
-    return RegExp(r'\d+')
-        .allMatches(str)
-        .map((m) => int.tryParse(m.group(0) ?? '') ?? 0)
-        .where((v) => v > 0)
+    final value = rawReps.toString().trim();
+    if (value.isEmpty) return 0;
+
+    final parts = rawReps.toString().split(',');
+    final parsed = parts
+        .map((e) => int.tryParse(e.trim()) ?? 0)
+        .where((e) => e > 0)
         .toList(growable: false);
+    if (parsed.isNotEmpty) {
+      return parsed.reduce(math.max);
+    }
+
+    final fallbackParsed = RegExp(r'\d+')
+        .allMatches(value)
+        .map((m) => int.tryParse(m.group(0) ?? '') ?? 0)
+        .where((e) => e > 0)
+        .toList(growable: false);
+    return fallbackParsed.isNotEmpty ? fallbackParsed.reduce(math.max) : 0;
   }
 
   static double _parseWeight(dynamic raw) {
@@ -902,48 +887,23 @@ class _TargetCard extends StatelessWidget {
               ),
               const SizedBox(height: 10),
 
-              // ── Last week / target rows ───────────────────────────────────
-              if (item.isFirstSession) ...[
-                // Empty-state mode
-                Text(
-                  item.lastWeekDisplayString!,
-                  style: const TextStyle(
-                    color: Color(0xFF8B8B8B),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                  ),
+              Text(
+                item.lastWeekDisplay,
+                style: const TextStyle(
+                  color: Color(0xFF8B8B8B),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  item.targetDisplayString!,
-                  style: const TextStyle(
-                    color: Color(0xFFFF3D00),
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                  ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                item.targetDisplay,
+                style: const TextStyle(
+                  color: Color(0xFFFF3D00),
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
                 ),
-              ] else ...[
-                // Normal progression mode
-                Text(
-                  'Last Week: ${_fmtWeight(item.lastWeight)}${item.weightUnit}'
-                  ' x ${item.lastRepsRaw.isNotEmpty ? item.lastRepsRaw : '${item.lastReps}'}',
-                  style: const TextStyle(
-                    color: Color(0xFF8B8B8B),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Target Today: ${_fmtWeight(item.targetWeight)}${item.weightUnit}'
-                  ' x ${item.targetRepsString} 🎯',
-                  style: const TextStyle(
-                    color: Color(0xFFFF3D00),
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
+              ),
 
               const SizedBox(height: 6),
               Text(
@@ -967,9 +927,9 @@ class _TargetCard extends StatelessWidget {
                     final targetSets = sets.isNotEmpty ? sets : '1';
                     final draft = item.isFirstSession
                         ? 'Coach, help me with my first session for: '
-                              '${item.name} — ${item.targetRepsString} reps'
+                              '${item.name} — ${item.targetReps} reps'
                         : 'Coach, adjust this target for today: '
-                              '${item.name} - ${targetSets}x${item.targetRepsString}'
+                              '${item.name} - ${targetSets}x${item.targetReps}'
                               ' @ ${_fmtWeight(item.targetWeight)}${item.weightUnit}';
                     await Navigator.of(context).push(
                       MaterialPageRoute<void>(
@@ -1004,8 +964,10 @@ class _TargetCard extends StatelessWidget {
     );
   }
 
-  static String _fmtWeight(double v) =>
-      v % 1 == 0 ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
+  static String _fmtWeight(double targetWeight) =>
+      targetWeight % 1 == 0
+          ? targetWeight.toInt().toString()
+          : targetWeight.toString();
 }
 
 class _RecoveryProtocol extends StatelessWidget {

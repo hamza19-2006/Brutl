@@ -140,6 +140,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 
   void _showAttachmentSheet() {
+    final showStreakShareOption = false;
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppColors.backgroundSecondary,
@@ -180,15 +181,17 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                   _navigateToPRShare();
                 },
               ),
-              const SizedBox(height: AppSpacing.md),
-              _AttachOption(
-                icon: Icons.local_fire_department_rounded,
-                label: 'Share Streak',
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _navigateToStreakShare();
-                },
-              ),
+              if (showStreakShareOption) ...[
+                const SizedBox(height: AppSpacing.md),
+                _AttachOption(
+                  icon: Icons.local_fire_department_rounded,
+                  label: 'Share Streak',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _navigateToStreakShare();
+                  },
+                ),
+              ],
             ],
           ),
         ),
@@ -443,9 +446,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                   canDeleteForEveryone
                       ? '"Delete for me" only hides it from your side. "Delete for everyone" removes it from both sides.'
                       : 'This will hide the message from your side only. The sender will still see it.',
-                  style: AppTextStyles.bodySmall(
-                    color: AppColors.textTertiary,
-                  ),
+                  style: AppTextStyles.bodySmall(color: AppColors.textTertiary),
                 ),
                 const SizedBox(height: AppSpacing.md),
                 _MenuActionTile(
@@ -530,8 +531,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                     //    sender.
                     final serverMessages = raw.where((m) {
                       if (m.isHiddenFor(_myUid)) return false;
-                      if (isFriendBlocked &&
-                          m.senderId == widget.friend.uid) {
+                      if (isFriendBlocked && m.senderId == widget.friend.uid) {
                         return false;
                       }
                       return true;
@@ -645,10 +645,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
               if (isFriendBlocked)
                 _BlockedBanner(
                   friendName: liveFriend.resolvedName,
-                  onUnblock: () => chatProvider.setBlockedFriend(
-                    widget.friend.uid,
-                    false,
-                  ),
+                  onUnblock: () =>
+                      chatProvider.setBlockedFriend(widget.friend.uid, false),
                 )
               else
                 _InputBar(
@@ -1326,6 +1324,25 @@ String _formatSets(dynamic sets) {
   return sets.toString();
 }
 
+String _formatExerciseWeight(dynamic weight, dynamic unit) {
+  final rawWeight = weight?.toString().trim() ?? '';
+  if (rawWeight.isEmpty) return '-';
+
+  final parsedWeight = double.tryParse(rawWeight);
+  final normalizedWeight = parsedWeight == null
+      ? rawWeight
+      : (parsedWeight == parsedWeight.roundToDouble()
+            ? parsedWeight.toStringAsFixed(0)
+            : parsedWeight.toStringAsFixed(1));
+
+  final rawUnit = unit?.toString().trim() ?? '';
+  if (rawUnit.isEmpty ||
+      normalizedWeight.toLowerCase().endsWith(rawUnit.toLowerCase())) {
+    return normalizedWeight;
+  }
+  return '$normalizedWeight $rawUnit';
+}
+
 class _ExerciseShareBubble extends StatelessWidget {
   const _ExerciseShareBubble({required this.payload, required this.isMe});
   final Map<String, dynamic> payload;
@@ -1560,7 +1577,16 @@ class _ExerciseShareBubble extends StatelessWidget {
         headerIcon = Icons.sports_gymnastics;
         final sets = exercises.isNotEmpty ? exercises[0]['sets'] : null;
         final reps = exercises.isNotEmpty ? exercises[0]['reps'] : null;
-        body = _ExerciseBody(sets: sets, reps: reps);
+        final weight = exercises.isNotEmpty ? exercises[0]['weight'] : null;
+        final weightUnit = exercises.isNotEmpty
+            ? exercises[0]['weightUnit']
+            : null;
+        body = _ExerciseBody(
+          sets: sets,
+          reps: reps,
+          weight: weight,
+          weightUnit: weightUnit,
+        );
       default:
         headerIcon = Icons.fitness_center_rounded;
         body = _DayBody(exercises: exercises);
@@ -1606,9 +1632,7 @@ class _ExerciseShareBubble extends StatelessWidget {
             const SizedBox(height: AppSpacing.sm),
             Material(
               color: AppColors.backgroundQuaternary,
-              borderRadius: BorderRadius.circular(
-                AppSpacing.borderRadiusSmall,
-              ),
+              borderRadius: BorderRadius.circular(AppSpacing.borderRadiusSmall),
               child: InkWell(
                 onTap: () => unawaited(_saveToPlan(context, exercises)),
                 borderRadius: BorderRadius.circular(
@@ -1633,8 +1657,8 @@ class _ExerciseShareBubble extends StatelessWidget {
                       ),
                     ),
                   ),
+                ),
               ),
-            ),
             ),
           ],
         ],
@@ -1730,9 +1754,16 @@ class _DayBody extends StatelessWidget {
 // ─── Exercise scope body ──────────────────────────────────────────────────────
 
 class _ExerciseBody extends StatelessWidget {
-  const _ExerciseBody({required this.sets, required this.reps});
+  const _ExerciseBody({
+    required this.sets,
+    required this.reps,
+    required this.weight,
+    required this.weightUnit,
+  });
   final dynamic sets;
   final dynamic reps;
+  final dynamic weight;
+  final dynamic weightUnit;
 
   @override
   Widget build(BuildContext context) {
@@ -1749,6 +1780,11 @@ class _ExerciseBody extends StatelessWidget {
           label: 'Reps',
           value: _formatReps(reps),
           color: AppColors.statusInfo,
+        ),
+        _MacroPill(
+          label: 'Weight',
+          value: _formatExerciseWeight(weight, weightUnit),
+          color: AppColors.statusWarning,
         ),
       ],
     );

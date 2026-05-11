@@ -12,7 +12,7 @@ const String _openRouterApiKey =
 
 // Model IDs
 const String _geminiModel = 'gemini-flash-latest';
-const String _gptModel = 'openai/gpt-4o-mini';
+const String _deepSeekModel = 'deepseek/deepseek-chat';
 
 const String _systemPrompt =
     'You are a precise macro calculator. Analyze this food image. '
@@ -43,11 +43,11 @@ Future<Map<String, int>?> analyzeMeal(Uint8List imageBytes) async {
   var result = await _attemptGemini(optimizedBytes);
   if (result != null) return result;
 
-  // 3. --- FALLBACK: TRY SECONDARY MODEL (GPT-4O-MINI) ---
+  // 3. --- FALLBACK: TRY SECONDARY MODEL (DeepSeek V3) ---
   debugPrint(
-    '--- [AI SCAN] Gemini failed. Attempting GPT-4o-mini Fallback... ---',
+    '--- [AI SCAN] Gemini failed. Attempting DeepSeek V3 Fallback... ---',
   );
-  return await _attemptGPTMini(optimizedBytes);
+  return await _attemptDeepSeek(optimizedBytes);
 }
 
 /// Primary Scan using Gemini 1.5 Flash
@@ -89,15 +89,15 @@ Future<Map<String, int>?> _attemptGemini(Uint8List bytes) async {
   return null;
 }
 
-/// Fallback Scan using GPT-4o-mini via OpenRouter
-Future<Map<String, int>?> _attemptGPTMini(Uint8List bytes) async {
+/// Fallback Scan using DeepSeek V3 via OpenRouter
+Future<Map<String, int>?> _attemptDeepSeek(Uint8List bytes) async {
   if (_openRouterApiKey.isEmpty) return null;
 
   final String url = 'https://openrouter.ai/api/v1/chat/completions';
   final String base64Image = base64Encode(bytes);
 
   final body = {
-    "model": _gptModel,
+    "model": _deepSeekModel,
     "messages": [
       {
         "role": "user",
@@ -126,9 +126,9 @@ Future<Map<String, int>?> _attemptGPTMini(Uint8List bytes) async {
     if (response.statusCode == 200) {
       return _parseResponse(response.body, isGemini: false);
     }
-    debugPrint('--- [GPT-MINI] Failed with status: ${response.statusCode} ---');
+    debugPrint('--- [DEEPSEEK] Failed with status: ${response.statusCode} ---');
   } catch (e) {
-    debugPrint('--- [GPT-MINI] Exception: $e ---');
+    debugPrint('--- [DEEPSEEK] Exception: $e ---');
   }
   return null;
 }

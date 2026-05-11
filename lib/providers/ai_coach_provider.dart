@@ -744,7 +744,7 @@ class AiCoachProvider extends ChangeNotifier {
         .toList(growable: false);
 
     final body = <String, dynamic>{
-      'model': 'gpt-4o-mini',
+      'model': 'deepseek/deepseek-chat',
       'messages': payloadMessages,
       'temperature': 0.6,
     };

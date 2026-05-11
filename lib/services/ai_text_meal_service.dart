@@ -6,7 +6,7 @@ import 'package:http/http.dart' as http;
 import '../config/secrets.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// AI TEXT MEAL SERVICE — 3-Tier Fallback: Grok → Gemini → GPT-4o-mini
+// AI TEXT MEAL SERVICE — 3-Tier Fallback: Grok → Gemini → DeepSeek V3
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const String _systemPrompt =
@@ -16,10 +16,10 @@ const String _systemPrompt =
 
 const String _geminiModel = 'gemini-1.5-flash-latest';
 const String _grokModel = 'grok-beta';
-const String _gptModel = 'openai/gpt-4o-mini';
+const String _deepSeekModel = 'deepseek/deepseek-chat';
 
 /// Analyzes a plain-text food description and returns macro estimates.
-/// Tries Grok first, then Gemini 1.5 Flash, then GPT-4o-mini via OpenRouter.
+/// Tries Grok first, then Gemini 1.5 Flash, then DeepSeek V3 via OpenRouter.
 /// Returns null if all three fail.
 Future<Map<String, int>?> analyzeTextMeal(String foodDescription) async {
   if (foodDescription.trim().isEmpty) return null;
@@ -41,12 +41,12 @@ Future<Map<String, int>?> analyzeTextMeal(String foodDescription) async {
     return geminiResult;
   }
 
-  // Tier 3: GPT-4o-mini via OpenRouter
-  debugPrint('[AI_TEXT] Gemini failed — trying GPT-4o-mini...');
-  final gptResult = await _attemptGPTMini(foodDescription);
-  if (gptResult != null) {
-    debugPrint('[AI_TEXT] GPT-4o-mini succeeded.');
-    return gptResult;
+  // Tier 3: DeepSeek V3 via OpenRouter
+  debugPrint('[AI_TEXT] Gemini failed — trying DeepSeek V3...');
+  final deepSeekResult = await _attemptDeepSeek(foodDescription);
+  if (deepSeekResult != null) {
+    debugPrint('[AI_TEXT] DeepSeek V3 succeeded.');
+    return deepSeekResult;
   }
 
   debugPrint('[AI_TEXT] All three providers failed.');
@@ -144,9 +144,9 @@ Future<Map<String, int>?> _attemptGemini(String food) async {
   }
 }
 
-// ─── Tier 3: GPT-4o-mini via OpenRouter ──────────────────────────────────────
+// ─── Tier 3: DeepSeek V3 via OpenRouter ──────────────────────────────────────
 
-Future<Map<String, int>?> _attemptGPTMini(String food) async {
+Future<Map<String, int>?> _attemptDeepSeek(String food) async {
   const apiKey = openRouterApiKey;
   if (apiKey.isEmpty) {
     debugPrint('[AI_TEXT] OpenRouter API key not set — skipping.');
@@ -162,7 +162,7 @@ Future<Map<String, int>?> _attemptGPTMini(String food) async {
             'Authorization': 'Bearer $apiKey',
           },
           body: jsonEncode({
-            'model': _gptModel,
+            'model': _deepSeekModel,
             'messages': [
               {'role': 'system', 'content': _systemPrompt},
               {'role': 'user', 'content': food},
@@ -173,7 +173,7 @@ Future<Map<String, int>?> _attemptGPTMini(String food) async {
         .timeout(const Duration(seconds: 15));
 
     if (response.statusCode != 200) {
-      debugPrint('[AI_TEXT] GPT-4o-mini HTTP ${response.statusCode}');
+      debugPrint('[AI_TEXT] DeepSeek V3 HTTP ${response.statusCode}');
       return null;
     }
 
@@ -182,7 +182,7 @@ Future<Map<String, int>?> _attemptGPTMini(String food) async {
             as String?;
     return _parseJsonResponse(text);
   } catch (e) {
-    debugPrint('[AI_TEXT] GPT-4o-mini exception: $e');
+    debugPrint('[AI_TEXT] DeepSeek V3 exception: $e');
     return null;
   }
 }

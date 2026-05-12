@@ -876,7 +876,7 @@ class AiCoachProvider extends ChangeNotifier {
         .toList(growable: false);
 
     final body = <String, dynamic>{
-      'model': 'deepseek/deepseek-chat',
+      'model': 'deepseek-v4-flash',
       'messages': payloadMessages,
       'temperature': 0.6,
     };

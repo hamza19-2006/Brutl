@@ -12,7 +12,7 @@ const String _openRouterApiKey =
 
 // Model IDs
 const String _geminiModel = 'gemini-flash-latest';
-const String _deepSeekModel = 'deepseek/deepseek-chat';
+const String _deepSeekModel = 'deepseek-v4-flash';
 
 const String _systemPrompt =
     'You are a precise macro calculator. Analyze this food image. '
@@ -106,7 +106,7 @@ Future<Map<String, int>?> _attemptDeepSeek(Uint8List bytes) async {
           {
             "type": "image_url",
             "image_url": {"url": "data:image/jpeg;base64,$base64Image"},
-            "detail": "low",
+            "detail": "medium",
           },
         ],
       },

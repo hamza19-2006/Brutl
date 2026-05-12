@@ -16,7 +16,7 @@ const String _systemPrompt =
 
 const String _geminiModel = 'gemini-1.5-flash-latest';
 const String _grokModel = 'grok-beta';
-const String _deepSeekModel = 'deepseek/deepseek-chat';
+const String _deepSeekModel = 'deepseek-v4-flash';
 
 /// Analyzes a plain-text food description and returns macro estimates.
 /// Tries Grok first, then Gemini 1.5 Flash, then DeepSeek V3 via OpenRouter.

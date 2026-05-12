@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 
 import '../models/user_model.dart';
 
@@ -33,6 +34,18 @@ class BrutlUserProvider extends ChangeNotifier {
   String? get uid =>
       _auth.currentUser?.uid.isNotEmpty == true ? _auth.currentUser!.uid : null;
 
+  void _notifyUserListenersSafely() {
+    final BrutlUser? safeUser = _user;
+    if (safeUser == null) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (hasListeners) {
+        notifyListeners();
+      }
+    });
+  }
+
   /// Subscribe to the live Firestore document for the signed-in user.
   /// Safe to call multiple times — re-subscribes on auth changes.
   Future<void> bindToCurrentUser() async {
@@ -41,7 +54,7 @@ class BrutlUserProvider extends ChangeNotifier {
       await _docSub?.cancel();
       _docSub = null;
       _user = const BrutlUser(uid: '');
-      notifyListeners();
+      _notifyUserListenersSafely();
       return;
     }
 
@@ -50,7 +63,7 @@ class BrutlUserProvider extends ChangeNotifier {
     }
 
     _isLoading = true;
-    notifyListeners();
+    _notifyUserListenersSafely();
 
     await _docSub?.cancel();
     final docRef = _firestore.collection('users').doc(firebaseUser.uid);
@@ -71,7 +84,7 @@ class BrutlUserProvider extends ChangeNotifier {
       (snap) {
         if (snap.exists && snap.data() != null) {
           _user = BrutlUser.fromJson(snap.data()!);
-          notifyListeners();
+          _notifyUserListenersSafely();
         }
       },
       onError: (Object error) {
@@ -80,14 +93,14 @@ class BrutlUserProvider extends ChangeNotifier {
     );
 
     _isLoading = false;
-    notifyListeners();
+    _notifyUserListenersSafely();
   }
 
   Future<void> clear() async {
     await _docSub?.cancel();
     _docSub = null;
     _user = const BrutlUser(uid: '');
-    notifyListeners();
+    _notifyUserListenersSafely();
   }
 
   /// Optimistic update: mutate locally, then persist patch to Firestore.
@@ -104,7 +117,7 @@ class BrutlUserProvider extends ChangeNotifier {
     final previous = _user;
     final next = mutate(previous);
     _user = next;
-    notifyListeners();
+    _notifyUserListenersSafely();
 
     try {
       await _firestore
@@ -114,7 +127,7 @@ class BrutlUserProvider extends ChangeNotifier {
     } catch (e) {
       debugPrint('BRUTL_USER_PROVIDER: rollback — $e');
       _user = previous;
-      notifyListeners();
+      _notifyUserListenersSafely();
       rethrow;
     }
   }

@@ -1,11 +1,13 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/user_data_models.dart';
+import '../models/brutl_models.dart';
+import '../models/user_data_models.dart' hide ExerciseModel;
 import '../services/database_service.dart';
 import '../services/step_service.dart';
 import 'nutrition_service.dart';
@@ -72,9 +74,10 @@ class WorkoutProvider extends ChangeNotifier {
   double _currentDailyCaloriesBurned = 0;
   bool _isLoading = true;
   bool _isInitialized = false;
+  int _exerciseCacheVersion = 0;
 
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>?
-      _userStreamSubscription;
+  _userStreamSubscription;
 
   // ── Public getters ─────────────────────────────────────────────────────────
 
@@ -83,6 +86,7 @@ class WorkoutProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   int get currentDailySteps => _currentDailySteps;
   double get currentDailyCaloriesBurned => _currentDailyCaloriesBurned;
+  int get exerciseCacheVersion => _exerciseCacheVersion;
 
   String? get highlightedExerciseName => _highlightedExerciseName;
 
@@ -135,8 +139,9 @@ class WorkoutProvider extends ChangeNotifier {
 
     final stepService = StepService.instance;
     _currentDailySteps = stepService.getTodaySteps();
-    _currentDailyCaloriesBurned =
-        stepService.calculateCalories(_currentDailySteps);
+    _currentDailyCaloriesBurned = stepService.calculateCalories(
+      _currentDailySteps,
+    );
 
     final firebaseUser = FirebaseAuth.instance.currentUser;
     if (firebaseUser != null) {
@@ -176,20 +181,23 @@ class WorkoutProvider extends ChangeNotifier {
     Map<String, dynamic> data,
     SharedPreferences prefs,
   ) {
-    final displayName = (data['display_name'] as String?) ??
+    final displayName =
+        (data['display_name'] as String?) ??
         (data['displayName'] as String?) ??
         _user.name;
-    final stepGoal = (data['step_goal'] as num?)?.toInt() ??
+    final stepGoal =
+        (data['step_goal'] as num?)?.toInt() ??
         (data['dailyStepGoal'] as num?)?.toInt() ??
         (data['stepGoal'] as num?)?.toInt() ??
         (data['daily_steps'] as num?)?.toInt() ??
         _user.dailyStepGoal;
-    final calorieGoal = (data['target_calories'] as num?)?.toInt() ??
+    final calorieGoal =
+        (data['target_calories'] as num?)?.toInt() ??
         (data['targetCalories'] as num?)?.toInt() ??
         _user.dailyCalorieGoal;
-    final rawWeight =
-        (data['weight'] as num?)?.toDouble() ?? _user.weightKg;
-    final weightUnit = (data['weight_unit'] as String?) ??
+    final rawWeight = (data['weight'] as num?)?.toDouble() ?? _user.weightKg;
+    final weightUnit =
+        (data['weight_unit'] as String?) ??
         (data['weightUnit'] as String?) ??
         'kg';
     final weightKg = _toKg(rawWeight, weightUnit);
@@ -198,19 +206,20 @@ class WorkoutProvider extends ChangeNotifier {
         (data['currentSteps'] as num?)?.toInt() ?? _currentDailySteps;
     final remoteCalories =
         (data['dailyCaloriesBurned'] as num?)?.toDouble() ??
-            StepService.instance.calculateCalories(remoteCurrentSteps);
+        StepService.instance.calculateCalories(remoteCurrentSteps);
 
-    final remoteSplit = (data['workout_split_template'] as String?) ??
+    final remoteSplit =
+        (data['workout_split_template'] as String?) ??
         (data['workoutSplitTemplate'] as String?) ??
         (data['workoutSplit'] as String?) ??
         (data['split'] as String?) ??
         _selectedWorkoutSplit;
 
-    final customDays = _stringList(
-          data['custom_split_days'] ?? data['customSplitDays'],
-        ) ??
+    final customDays =
+        _stringList(data['custom_split_days'] ?? data['customSplitDays']) ??
         const <String>[];
-    final masterDays = _stringList(
+    final masterDays =
+        _stringList(
           data['workout_master_template'] ?? data['workoutMasterTemplate'],
         ) ??
         const <String>[];
@@ -239,16 +248,17 @@ class WorkoutProvider extends ChangeNotifier {
   Future<void> _loadUser(SharedPreferences prefs) async {
     final firebaseUser = FirebaseAuth.instance.currentUser;
     if (firebaseUser != null) {
-      final remoteUser =
-          await DatabaseService().fetchUserProfile(firebaseUser.uid);
+      final remoteUser = await DatabaseService().fetchUserProfile(
+        firebaseUser.uid,
+      );
       if (remoteUser != null) {
         _user = UserModel(
           id: remoteUser.uid,
           name: remoteUser.displayName.isNotEmpty
               ? remoteUser.displayName
               : (remoteUser.username.isNotEmpty
-                  ? remoteUser.username
-                  : 'Brutl'),
+                    ? remoteUser.username
+                    : 'Brutl'),
           dailyStepGoal: remoteUser.dailySteps,
           dailyCalorieGoal: remoteUser.targetCalories,
           weightKg: _toKg(remoteUser.weight, remoteUser.weightUnit),
@@ -293,11 +303,13 @@ class WorkoutProvider extends ChangeNotifier {
         if (snapshot.exists && snapshot.data() != null) {
           final data = snapshot.data()!;
 
-          final customDays = _stringList(
+          final customDays =
+              _stringList(
                 data['custom_split_days'] ?? data['customSplitDays'],
               ) ??
               const <String>[];
-          final masterDays = _stringList(
+          final masterDays =
+              _stringList(
                 data['workout_master_template'] ??
                     data['workoutMasterTemplate'],
               ) ??
@@ -305,8 +317,8 @@ class WorkoutProvider extends ChangeNotifier {
 
           _selectedWorkoutSplit =
               (data['workout_split_template'] as String?) ??
-                  (data['workoutSplitTemplate'] as String?) ??
-                  _defaultWorkoutSplit;
+              (data['workoutSplitTemplate'] as String?) ??
+              _defaultWorkoutSplit;
 
           if (customDays.isNotEmpty) {
             _customSplitDays = customDays;
@@ -320,9 +332,7 @@ class WorkoutProvider extends ChangeNotifier {
           return;
         }
       } catch (error) {
-        debugPrint(
-          'WORKOUT_PROVIDER: Failed to load workout split — $error',
-        );
+        debugPrint('WORKOUT_PROVIDER: Failed to load workout split — $error');
       }
     }
 
@@ -347,6 +357,134 @@ class WorkoutProvider extends ChangeNotifier {
     _masterTemplate = _customSplitDays;
     _selectedWorkoutSplit = 'Custom';
     notifyListeners();
+  }
+
+  Future<void> pruneExerciseFromLocalDayCache({
+    required String weekId,
+    required String dayId,
+    String? exerciseId,
+    String? exerciseName,
+  }) async {
+    final normalizedId = exerciseId?.trim().toLowerCase() ?? '';
+    final normalizedName = exerciseName?.trim().toLowerCase() ?? '';
+    if (normalizedId.isEmpty && normalizedName.isEmpty) {
+      return;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    final key = _dayExercisePrefsKey(weekId, dayId);
+    final raw = prefs.getString(key);
+    if (raw == null || raw.trim().isEmpty) {
+      return;
+    }
+
+    final decoded = jsonDecode(raw);
+    if (decoded is! List) {
+      return;
+    }
+
+    final pruned = decoded
+        .where((entry) {
+          if (entry is! Map) {
+            return true;
+          }
+          final map = Map<String, dynamic>.from(entry);
+          final currentId = (map['id']?.toString().trim().toLowerCase()) ?? '';
+          final currentName =
+              (map['name']?.toString().trim().toLowerCase()) ?? '';
+          final isIdMatch =
+              normalizedId.isNotEmpty && currentId == normalizedId;
+          final isNameMatch =
+              normalizedName.isNotEmpty && currentName == normalizedName;
+          return !(isIdMatch || isNameMatch);
+        })
+        .toList(growable: false);
+
+    if (pruned.length == decoded.length) {
+      return;
+    }
+
+    await prefs.setString(key, jsonEncode(pruned));
+    _exerciseCacheVersion += 1;
+    notifyListeners();
+  }
+
+  Future<void> clearLocalDayExerciseCache({
+    required String weekId,
+    required String dayId,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = _dayExercisePrefsKey(weekId, dayId);
+    await prefs.setString(key, jsonEncode(const <dynamic>[]));
+    _exerciseCacheVersion += 1;
+    notifyListeners();
+  }
+
+  Future<List<ExerciseModel>> importPreviousWeekExercises({
+    required String uid,
+    required int currentWeek,
+    required int currentDayId,
+  }) async {
+    final normalizedUid = uid.trim();
+    if (normalizedUid.isEmpty || currentWeek <= 0 || currentDayId <= 0) {
+      return const <ExerciseModel>[];
+    }
+
+    var targetWeek = currentWeek - 1;
+    if (currentWeek == 1) {
+      targetWeek = 4;
+    }
+
+    final firestore = FirebaseFirestore.instance;
+    final sourceDayRef = firestore
+        .collection('users')
+        .doc(normalizedUid)
+        .collection('weeks')
+        .doc('week_$targetWeek')
+        .collection('days')
+        .doc('day_$currentDayId');
+
+    final targetDayRef = firestore
+        .collection('users')
+        .doc(normalizedUid)
+        .collection('weeks')
+        .doc('week_$currentWeek')
+        .collection('days')
+        .doc('day_$currentDayId');
+
+    final sourceSnapshot = await sourceDayRef.get();
+    final sourceData = sourceSnapshot.data();
+    final rawExercises =
+        (sourceData?['exercises'] as List<dynamic>?) ?? const <dynamic>[];
+    final copiedExercises = rawExercises
+        .whereType<Map>()
+        .map((entry) => Map<String, dynamic>.from(entry))
+        .toList(growable: false);
+
+    if (copiedExercises.isEmpty) {
+      return const <ExerciseModel>[];
+    }
+
+    final batch = firestore.batch();
+    batch.set(targetDayRef, <String, dynamic>{
+      'exercises': copiedExercises,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    await batch.commit();
+
+    final prefs = await SharedPreferences.getInstance();
+    final cacheKey = _dayExercisePrefsKey(
+      'week_$currentWeek',
+      'day_$currentDayId',
+    );
+    await prefs.setString(cacheKey, jsonEncode(copiedExercises));
+
+    _exerciseCacheVersion += 1;
+    notifyListeners();
+
+    return copiedExercises
+        .map((entry) => ExerciseModel.fromJson(entry))
+        .toList(growable: false);
   }
 
   // ── User mutations ─────────────────────────────────────────────────────────
@@ -427,6 +565,9 @@ class WorkoutProvider extends ChangeNotifier {
         .toList(growable: false);
     return result.isEmpty ? const <String>[] : result;
   }
+
+  String _dayExercisePrefsKey(String weekId, String dayId) =>
+      'exercises_day_${dayId}_week_${weekId}';
 
   // ── Cleanup ────────────────────────────────────────────────────────────────
 

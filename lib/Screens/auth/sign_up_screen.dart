@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
@@ -49,6 +50,9 @@ class _SignUpScreenState extends State<SignUpScreen> {
   String? _verifiedOtpEmail;
   String? _verifiedOtpCode;
   String? _lastAutoVerifiedCode;
+  String? _emailErrorText;
+  int _emailValidationRequestId = 0;
+  final FocusNode _emailFocusNode = FocusNode();
   final FocusNode _passwordFocusNode = FocusNode();
 
   bool get _isAnyLoading =>
@@ -61,9 +65,15 @@ class _SignUpScreenState extends State<SignUpScreen> {
     _verificationCodeController = TextEditingController();
     _passwordController = TextEditingController();
     _confirmPasswordController = TextEditingController();
+    _emailController.addListener(_handleEmailChanged);
     _emailController.addListener(_invalidateOtpVerificationIfNeeded);
     _verificationCodeController.addListener(_invalidateOtpVerificationIfNeeded);
     _verificationCodeController.addListener(_handleOtpAutoVerify);
+    _emailFocusNode.addListener(() {
+      if (!_emailFocusNode.hasFocus) {
+        unawaited(_validateEmailAvailabilityOnBlur());
+      }
+    });
 
     _passwordFocusNode.addListener(() {
       if (_passwordFocusNode.hasFocus) {
@@ -80,6 +90,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
 
   @override
   void dispose() {
+    _emailController.removeListener(_handleEmailChanged);
     _emailController.removeListener(_invalidateOtpVerificationIfNeeded);
     _verificationCodeController.removeListener(
       _invalidateOtpVerificationIfNeeded,
@@ -89,6 +100,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
     _verificationCodeController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
+    _emailFocusNode.dispose();
     _passwordFocusNode.dispose();
     super.dispose();
   }
@@ -110,6 +122,11 @@ class _SignUpScreenState extends State<SignUpScreen> {
 
     if (!_isValidEmail(email)) {
       _showDialog('Please enter a valid email address.', isError: true);
+      return;
+    }
+
+    if (_emailErrorText != null) {
+      _showDialog(_emailErrorText!, isError: true);
       return;
     }
 
@@ -261,6 +278,57 @@ class _SignUpScreenState extends State<SignUpScreen> {
     unawaited(verifyOtp(showSuccessMessage: false));
   }
 
+  void _handleEmailChanged() {
+    if (_emailErrorText == null) {
+      return;
+    }
+    setState(() {
+      _emailErrorText = null;
+    });
+  }
+
+  Future<void> _validateEmailAvailabilityOnBlur() async {
+    final email = _emailController.text.trim().toLowerCase();
+    final requestId = ++_emailValidationRequestId;
+
+    if (email.isEmpty || !_isValidEmail(email)) {
+      if (_emailErrorText != null && mounted) {
+        setState(() {
+          _emailErrorText = null;
+        });
+      }
+      return;
+    }
+
+    try {
+      final signInMethods = await FirebaseAuth.instance
+          .fetchSignInMethodsForEmail(email);
+      if (!mounted || requestId != _emailValidationRequestId) {
+        return;
+      }
+
+      final nextError = signInMethods.isNotEmpty
+          ? 'Email already in use'
+          : null;
+      if (nextError == _emailErrorText) {
+        return;
+      }
+
+      setState(() {
+        _emailErrorText = nextError;
+      });
+    } on FirebaseAuthException {
+      if (!mounted || requestId != _emailValidationRequestId) {
+        return;
+      }
+      if (_emailErrorText != null) {
+        setState(() {
+          _emailErrorText = null;
+        });
+      }
+    }
+  }
+
   Future<void> _sendOtp() async {
     if (_isAnyLoading) {
       return;
@@ -274,6 +342,11 @@ class _SignUpScreenState extends State<SignUpScreen> {
 
     if (!_isValidEmail(email)) {
       _showErrorSnackBar('Please enter a valid email address.');
+      return;
+    }
+
+    if (_emailErrorText != null) {
+      _showErrorSnackBar(_emailErrorText!);
       return;
     }
 
@@ -753,13 +826,23 @@ class _SignUpScreenState extends State<SignUpScreen> {
           height: 52,
           child: TextField(
             controller: _emailController,
+            focusNode: _emailFocusNode,
             keyboardType: TextInputType.emailAddress,
             textInputAction: TextInputAction.next,
             style: AppTextStyles.bodyLarge(color: AppColors.textPrimary),
             decoration: const InputDecoration(hintText: 'Enter your email'),
           ),
         ),
-        const SizedBox(height: AppSpacing.xs),
+        if (_emailErrorText != null)
+          Padding(
+            padding: const EdgeInsets.only(top: AppSpacing.xs),
+            child: Text(
+              _emailErrorText!,
+              style: AppTextStyles.bodySmall(color: AppColors.statusError),
+            ),
+          )
+        else
+          const SizedBox(height: AppSpacing.xs),
         Align(
           alignment: Alignment.centerRight,
           child: TextButton(

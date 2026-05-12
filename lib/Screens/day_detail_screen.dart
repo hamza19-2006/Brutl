@@ -5,8 +5,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:provider/provider.dart';
 
 import '../models/brutl_models.dart';
+import '../providers/workout_provider.dart';
 import '../widgets/exercise_card_widget.dart';
 import '../widgets/exercise_editor_sheet.dart';
 
@@ -33,11 +35,14 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
   List<ExerciseModel> _exercises = [];
   String _dayName = '';
   bool _isSaving = false;
+  bool _isImporting = false;
   bool _isLoadingLocal = true;
 
   // ─── Firestore stream ────────────────────────────────────────────────────────
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>?
   _firestoreSubscription;
+  WorkoutProvider? _workoutProvider;
+  int _lastObservedExerciseCacheVersion = -1;
 
   // ─── SharedPreferences key ──────────────────────────────────────────────────
   String get _prefsKey => 'exercises_day_${widget.dayId}_week_${widget.weekId}';
@@ -63,7 +68,21 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final provider = context.read<WorkoutProvider>();
+    if (identical(provider, _workoutProvider)) {
+      return;
+    }
+    _workoutProvider?.removeListener(_onWorkoutProviderUpdated);
+    _workoutProvider = provider;
+    _lastObservedExerciseCacheVersion = provider.exerciseCacheVersion;
+    provider.addListener(_onWorkoutProviderUpdated);
+  }
+
+  @override
   void dispose() {
+    _workoutProvider?.removeListener(_onWorkoutProviderUpdated);
     _firestoreSubscription?.cancel();
     super.dispose();
   }
@@ -145,18 +164,74 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
 
     if (!mounted) return;
 
+    final shouldReplaceExercises = !_exerciseListsEquivalent(
+      _exercises,
+      serverExercises,
+    );
     setState(() {
       _dayName = resolvedName;
-      // Only replace local list if server has more exercises or differs.
-      // This prevents a race condition where the server responds with
-      // stale data AFTER the user has already added a new exercise locally.
-      if (serverExercises.length >= _exercises.length) {
+      if (shouldReplaceExercises) {
         _exercises = serverExercises;
       }
     });
 
     // Keep SharedPreferences in sync with server truth.
     unawaited(_persistToSharedPreferences(_exercises, resolvedName));
+  }
+
+  void _onWorkoutProviderUpdated() {
+    final provider = _workoutProvider;
+    if (provider == null) return;
+    if (provider.exerciseCacheVersion == _lastObservedExerciseCacheVersion) {
+      return;
+    }
+    _lastObservedExerciseCacheVersion = provider.exerciseCacheVersion;
+    unawaited(_reloadExercisesFromSharedPreferences());
+  }
+
+  Future<void> _reloadExercisesFromSharedPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    final jsonString = prefs.getString(_prefsKey);
+    final loaded = <ExerciseModel>[];
+    if (jsonString != null && jsonString.trim().isNotEmpty) {
+      final decoded = jsonDecode(jsonString);
+      if (decoded is List<dynamic>) {
+        loaded.addAll(
+          decoded.whereType<Map<dynamic, dynamic>>().map(
+            (e) => ExerciseModel.fromJson(Map<String, dynamic>.from(e)),
+          ),
+        );
+      }
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _exercises = loaded;
+    });
+  }
+
+  bool _exerciseListsEquivalent(
+    List<ExerciseModel> left,
+    List<ExerciseModel> right,
+  ) {
+    if (left.length != right.length) {
+      return false;
+    }
+    for (var i = 0; i < left.length; i++) {
+      final a = left[i];
+      final b = right[i];
+      if (a.id != b.id ||
+          a.name != b.name ||
+          a.sets != b.sets ||
+          a.reps != b.reps ||
+          a.weight != b.weight ||
+          a.weightUnit != b.weightUnit ||
+          a.categoryType != b.categoryType ||
+          a.splitName != b.splitName) {
+        return false;
+      }
+    }
+    return true;
   }
 
   // ─── Step 2 + 3: Save exercise — local first, Firestore in background ────────
@@ -192,6 +267,93 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
 
     // --- STEP 3: Fire-and-forget Firestore write (background, no await) ---
     unawaited(_saveExerciseToFirestore(exercise));
+  }
+
+  int _extractNumericId(String value, {required int fallback}) {
+    final direct = int.tryParse(value.trim());
+    if (direct != null && direct > 0) {
+      return direct;
+    }
+    final match = RegExp(r'(\d+)$').firstMatch(value.trim());
+    final parsed = int.tryParse(match?.group(1) ?? '');
+    if (parsed == null || parsed <= 0) {
+      return fallback;
+    }
+    return parsed;
+  }
+
+  Future<void> _importPreviousWeekExercises() async {
+    if (_isImporting || _isSaving) {
+      return;
+    }
+
+    final uid = widget.uid.trim();
+    if (uid.isEmpty) {
+      return;
+    }
+
+    setState(() => _isImporting = true);
+    try {
+      final currentWeek = _extractNumericId(widget.weekId, fallback: 1);
+      final currentDayId = _extractNumericId(widget.dayId, fallback: 1);
+
+      final imported = await context
+          .read<WorkoutProvider>()
+          .importPreviousWeekExercises(
+            uid: uid,
+            currentWeek: currentWeek,
+            currentDayId: currentDayId,
+          );
+
+      if (!mounted) {
+        return;
+      }
+
+      if (imported.isEmpty) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(
+              content: Text(
+                'No exercises found in previous week for this day.',
+              ),
+            ),
+          );
+        return;
+      }
+
+      setState(() {
+        _exercises = List<ExerciseModel>.from(imported);
+      });
+      await _persistToSharedPreferences(
+        List<ExerciseModel>.from(imported),
+        _dayName,
+      );
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('Imported exercises from previous week.'),
+          ),
+        );
+    } catch (error) {
+      debugPrint('DAY_DETAIL: import previous week failed — $error');
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('Import failed. Please try again.')),
+        );
+    } finally {
+      if (mounted) {
+        setState(() => _isImporting = false);
+      }
+    }
   }
 
   // ─── SharedPreferences persistence ──────────────────────────────────────────
@@ -320,6 +482,9 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.uid.trim().isEmpty) {
+      return const SizedBox.shrink();
+    }
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
       appBar: AppBar(
@@ -400,6 +565,11 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
                 fontSize: 13,
               ),
             ),
+            const SizedBox(height: 24),
+            _ImportPreviousDayButton(
+              isLoading: _isImporting,
+              onTap: _importPreviousWeekExercises,
+            ),
           ],
         ),
       ),
@@ -436,9 +606,9 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
       padding: const EdgeInsets.all(16),
       child: Opacity(
         // Step 4: Visually fade button while saving to prevent double-tap.
-        opacity: _isSaving ? 0.55 : 1.0,
+        opacity: (_isSaving || _isImporting) ? 0.55 : 1.0,
         child: ElevatedButton(
-          onPressed: _isSaving
+          onPressed: (_isSaving || _isImporting)
               ? null
               : () async {
                   await showModalBottomSheet<ExerciseModel>(
@@ -476,6 +646,47 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
                 )
               : const Text('Add Exercise'),
         ),
+      ),
+    );
+  }
+}
+
+class _ImportPreviousDayButton extends StatelessWidget {
+  const _ImportPreviousDayButton({
+    required this.onTap,
+    required this.isLoading,
+  });
+
+  final VoidCallback onTap;
+  final bool isLoading;
+
+  @override
+  Widget build(BuildContext context) {
+    return ElevatedButton.icon(
+      onPressed: isLoading ? null : onTap,
+      icon: const Icon(Icons.file_upload_outlined, color: Colors.white),
+      label: isLoading
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(
+                color: Colors.white,
+                strokeWidth: 2,
+              ),
+            )
+          : Text(
+              'Import Previous Week',
+              style: GoogleFonts.poppins(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+                fontSize: 14,
+              ),
+            ),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: Colors.green,
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       ),
     );
   }

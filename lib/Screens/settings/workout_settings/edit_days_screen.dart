@@ -8,7 +8,9 @@ import 'package:provider/provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_text_styles.dart';
+import '../../../models/brutl_models.dart';
 import '../../../providers/workout_provider.dart';
+import '../../../widgets/exercise_editor_sheet.dart';
 import '../widgets/settings_widgets.dart';
 
 class EditDaysScreen extends StatefulWidget {
@@ -338,6 +340,10 @@ class _FirestoreDayRow extends StatelessWidget {
       'exercises': <dynamic>[],
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+    await context.read<WorkoutProvider>().clearLocalDayExerciseCache(
+      weekId: weekId,
+      dayId: dayId,
+    );
 
     if (context.mounted) {
       ScaffoldMessenger.of(context)
@@ -531,132 +537,59 @@ class _FirestoreEditExercisesScreen extends StatelessWidget {
   Future<void> _showAddDialog(
     BuildContext context,
     DocumentReference<Map<String, dynamic>> docRef,
-    List<Map<String, dynamic>> exercises,
+    List<Map<String, dynamic>> _,
   ) async {
-    final nameCtrl = TextEditingController();
-    final setsCtrl = TextEditingController(text: '3');
-    final repsCtrl = TextEditingController(text: '8-12');
-    final weightCtrl = TextEditingController();
-    final formKey = GlobalKey<FormState>();
-
-    await showDialog<void>(
+    await showModalBottomSheet<ExerciseModel>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.backgroundSecondary,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppSpacing.borderRadiusLarge),
-          side: const BorderSide(color: AppColors.borderStrong),
-        ),
-        title: Text('Add Exercise', style: AppTextStyles.headingMedium()),
-        content: SingleChildScrollView(
-          child: Form(
-            key: formKey,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextFormField(
-                  controller: nameCtrl,
-                  autofocus: true,
-                  textCapitalization: TextCapitalization.words,
-                  decoration: const InputDecoration(
-                    hintText: 'Exercise name',
-                    labelText: 'Name',
-                  ),
-                  validator: (v) =>
-                      (v == null || v.trim().isEmpty) ? 'Required' : null,
-                ),
-                const SizedBox(height: AppSpacing.md),
-                TextFormField(
-                  controller: setsCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    hintText: 'e.g. 3',
-                    labelText: 'Sets',
-                  ),
-                  validator: (v) {
-                    final n = int.tryParse((v ?? '').trim());
-                    if (n == null || n <= 0) return 'Enter a positive number';
-                    return null;
-                  },
-                ),
-                const SizedBox(height: AppSpacing.md),
-                TextFormField(
-                  controller: repsCtrl,
-                  decoration: const InputDecoration(
-                    hintText: 'e.g. 8-12 or 10',
-                    labelText: 'Reps',
-                  ),
-                  validator: (v) =>
-                      (v == null || v.trim().isEmpty) ? 'Required' : null,
-                ),
-                const SizedBox(height: AppSpacing.md),
-                TextFormField(
-                  controller: weightCtrl,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  decoration: const InputDecoration(
-                    hintText: 'Optional',
-                    labelText: 'Weight (kg)',
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: Text(
-              'Cancel',
-              style: AppTextStyles.bodyMedium(color: AppColors.textSecondary),
-            ),
-          ),
-          TextButton(
-            onPressed: () async {
-              if (!(formKey.currentState?.validate() ?? false)) return;
-              final newExercise = <String, dynamic>{
-                'id': 'ex_${DateTime.now().microsecondsSinceEpoch}',
-                'name': nameCtrl.text.trim(),
-                'sets': int.tryParse(setsCtrl.text.trim()) ?? 3,
-                'reps': repsCtrl.text.trim(),
-                'weight': weightCtrl.text.trim(),
-                'weightUnit': 'Kg',
-                'categoryType': 'isolation',
-                'splitName': dayName,
-                'isSynced': true,
-              };
-              final updated = <Map<String, dynamic>>[...exercises, newExercise];
-              Navigator.of(ctx).pop();
-              await docRef.set(<String, dynamic>{
-                'exercises': updated,
-                'updatedAt': FieldValue.serverTimestamp(),
-              }, SetOptions(merge: true));
-              if (context.mounted) {
-                ScaffoldMessenger.of(context)
-                  ..hideCurrentSnackBar()
-                  ..showSnackBar(
-                    SnackBar(
-                      content: Text('"${newExercise['name']}" added.'),
-                      backgroundColor: AppColors.statusSuccess,
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
-              }
-            },
-            child: Text(
-              'Add',
-              style: AppTextStyles.headingSmall(color: AppColors.accentPrimary),
-            ),
-          ),
-        ],
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => ExerciseEditorSheet(
+        splitName: dayName,
+        onSave: (exercise) async {
+          final snapshot = await docRef.get();
+          final data = snapshot.data();
+          final rawExercises =
+              (data?['exercises'] as List<dynamic>?) ?? const <dynamic>[];
+
+          final updatedExercises = <Map<String, dynamic>>[];
+          var replaced = false;
+          for (final raw in rawExercises) {
+            if (raw is! Map) {
+              continue;
+            }
+            final map = Map<String, dynamic>.from(raw);
+            if (map['id']?.toString() == exercise.id) {
+              updatedExercises.add(exercise.toJson());
+              replaced = true;
+            } else {
+              updatedExercises.add(map);
+            }
+          }
+
+          if (!replaced) {
+            updatedExercises.add(exercise.toJson());
+          }
+
+          await docRef.set(<String, dynamic>{
+            'exercises': updatedExercises,
+            'updatedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+
+          if (!context.mounted) {
+            return;
+          }
+          ScaffoldMessenger.of(context)
+            ..hideCurrentSnackBar()
+            ..showSnackBar(
+              SnackBar(
+                content: Text('"${exercise.name}" added.'),
+                backgroundColor: AppColors.statusSuccess,
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+        },
       ),
     );
-
-    nameCtrl.dispose();
-    setsCtrl.dispose();
-    repsCtrl.dispose();
-    weightCtrl.dispose();
   }
 
   Future<void> _showRenameDialog(
@@ -768,11 +701,18 @@ class _FirestoreEditExercisesScreen extends StatelessWidget {
 
     if (confirmed != true || !context.mounted) return;
 
+    final deleted = exercises[index];
     final updated = List<Map<String, dynamic>>.from(exercises)..removeAt(index);
     await docRef.set(<String, dynamic>{
       'exercises': updated,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+    await context.read<WorkoutProvider>().pruneExerciseFromLocalDayCache(
+      weekId: weekId,
+      dayId: dayId,
+      exerciseId: deleted['id']?.toString(),
+      exerciseName: deleted['name']?.toString() ?? name,
+    );
 
     if (context.mounted) {
       ScaffoldMessenger.of(context)

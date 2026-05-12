@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -93,6 +94,8 @@ class AiCoachProvider extends ChangeNotifier {
   static const String _geminiModel = 'gemini-1.5-flash-latest';
   static const String _grokModel = 'grok-beta';
   static const String _localCacheKeyPrefix = 'ai_coach_messages_';
+  static const String _localTitleKeyPrefix = 'ai_coach_title_';
+  static const String _defaultChatTitle = 'AI Trainer';
   static final RegExp _summaryTagPattern = RegExp(
     r'\[\[UPDATE_SUMMARY:\s*([\s\S]*?)\]\]',
     caseSensitive: false,
@@ -117,7 +120,9 @@ class AiCoachProvider extends ChangeNotifier {
   bool _isSending = false;
   bool _hasMore = true;
   bool _didRunPrune = false;
+  String? _chatTitleLoadedForUid;
   String? _error;
+  String _chatTitle = _defaultChatTitle;
   DocumentSnapshot<Map<String, dynamic>>? _oldestLoadedDoc;
   Future<void>? _initialLoadFuture;
 
@@ -129,12 +134,31 @@ class AiCoachProvider extends ChangeNotifier {
   bool get isSending => _isSending;
   bool get hasMore => _hasMore;
   String? get error => _error;
+  String get chatTitle => _chatTitle;
+
+  void _notifyChatTitleListenersSafely() {
+    final String? safeChatTitle = _chatTitle;
+    if (safeChatTitle == null) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (hasListeners) {
+        notifyListeners();
+      }
+    });
+  }
 
   String? get _uid => _auth.currentUser?.uid;
   String? get _localCacheKey {
     final uid = _uid;
     if (uid == null || uid.isEmpty) return null;
     return '$_localCacheKeyPrefix$uid';
+  }
+
+  String? get _localTitleKey {
+    final uid = _uid;
+    if (uid == null || uid.isEmpty) return null;
+    return '$_localTitleKeyPrefix$uid';
   }
 
   CollectionReference<Map<String, dynamic>>? get _messagesCollection {
@@ -233,6 +257,114 @@ class AiCoachProvider extends ChangeNotifier {
     _initialLoadFuture = null;
     _isInitialized = false;
     await initialize();
+  }
+
+  Future<void> loadLocalChatTitle() async {
+    final uid = _uid;
+    if (_chatTitleLoadedForUid == uid) {
+      return;
+    }
+    _chatTitleLoadedForUid = uid;
+
+    final titleKey = _localTitleKey;
+    if (titleKey == null) {
+      if (_chatTitle != _defaultChatTitle) {
+        _chatTitle = _defaultChatTitle;
+        _notifyChatTitleListenersSafely();
+      }
+      return;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    final cachedTitle = prefs.getString(titleKey)?.trim();
+    if (cachedTitle == null ||
+        cachedTitle.isEmpty ||
+        cachedTitle == _chatTitle) {
+      return;
+    }
+
+    _chatTitle = cachedTitle;
+    _notifyChatTitleListenersSafely();
+  }
+
+  Future<void> renameLocalChat(String title) async {
+    final nextTitle = title.trim();
+    if (nextTitle.isEmpty) {
+      return;
+    }
+
+    await loadLocalChatTitle();
+    final titleKey = _localTitleKey;
+    if (titleKey == null) {
+      return;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(titleKey, nextTitle);
+    if (_chatTitle == nextTitle) {
+      return;
+    }
+
+    _chatTitle = nextTitle;
+    _notifyChatTitleListenersSafely();
+  }
+
+  Future<void> deleteAiChatHistory() async {
+    Object? serverError;
+    StackTrace? serverStackTrace;
+    try {
+      final messagesCollection = _messagesCollection;
+      if (messagesCollection != null) {
+        while (true) {
+          final snapshot = await messagesCollection
+              .limit(_pruneBatchSize)
+              .get();
+          if (snapshot.docs.isEmpty) {
+            break;
+          }
+          final batch = _firestore.batch();
+          for (final doc in snapshot.docs) {
+            batch.delete(doc.reference);
+          }
+          await batch.commit();
+          if (snapshot.docs.length < _pruneBatchSize) {
+            break;
+          }
+        }
+      }
+
+      final uid = _uid;
+      if (uid != null && uid.isNotEmpty) {
+        final root = _firestore
+            .collection('users')
+            .doc(uid)
+            .collection('ai_coach');
+        await root.doc('messages').delete();
+        await root.doc('summary').delete();
+      }
+    } catch (error, stackTrace) {
+      serverError = error;
+      serverStackTrace = stackTrace;
+    }
+
+    final cacheKey = _localCacheKey;
+    if (cacheKey != null) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(cacheKey);
+    }
+
+    _messages = const <AiCoachMessage>[];
+    _oldestLoadedDoc = null;
+    _hasMore = true;
+    _error = null;
+    _isSending = false;
+    _isLoadingMore = false;
+    _isInitialized = true;
+    notifyListeners();
+
+    if (serverError != null && serverStackTrace != null) {
+      Error.throwWithStackTrace(serverError, serverStackTrace);
+    }
   }
 
   Future<void> loadOlderMessages() async {

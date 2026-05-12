@@ -11,6 +11,7 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../models/chat_models.dart';
+import '../../providers/ai_coach_provider.dart';
 import '../../providers/chat_provider.dart';
 import '../settings/main_settings_screen.dart';
 import 'ai_chat_screen.dart';
@@ -40,6 +41,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
     final chatProvider = context.read<ChatProvider>();
     chatProvider.listenToFriends();
     chatProvider.listenToFriendRequests();
+    unawaited(context.read<AiCoachProvider>().loadLocalChatTitle());
     _searchFocusNode.addListener(() {
       if (mounted) setState(() {});
     });
@@ -95,6 +97,126 @@ class _ChatListScreenState extends State<ChatListScreen> {
   // ---------------------------------------------------------------------------
   // Long-press modal
   // ---------------------------------------------------------------------------
+
+  void _showAiChatContextMenu() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(AppSpacing.borderRadiusLarge),
+        ),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(
+                Icons.edit_rounded,
+                color: AppColors.textPrimary,
+              ),
+              title: Text('Rename Chat', style: AppTextStyles.bodyMedium()),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _showRenameAiChatDialog();
+              },
+            ),
+            ListTile(
+              leading: const Icon(
+                Icons.delete_sweep_rounded,
+                color: AppColors.statusError,
+              ),
+              title: Text(
+                'Delete Chat History',
+                style: AppTextStyles.bodyMedium(color: AppColors.statusError),
+              ),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _showDeleteAiChatDialog();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showRenameAiChatDialog() {
+    final aiProvider = context.read<AiCoachProvider>();
+    final controller = TextEditingController(text: aiProvider.chatTitle);
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.backgroundSecondary,
+        title: Text('Rename Chat', style: AppTextStyles.headingMedium()),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: AppTextStyles.bodyLarge(color: AppColors.textPrimary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text(
+              'Cancel',
+              style: AppTextStyles.bodyMedium(color: AppColors.textSecondary),
+            ),
+          ),
+          TextButton(
+            onPressed: () async {
+              final newName = controller.text.trim();
+              Navigator.of(ctx).pop();
+              if (newName.isEmpty) {
+                return;
+              }
+              await aiProvider.renameLocalChat(newName);
+            },
+            child: Text(
+              'Save',
+              style: AppTextStyles.bodyMedium(color: AppColors.accentPrimary),
+            ),
+          ),
+        ],
+      ),
+    ).whenComplete(controller.dispose);
+  }
+
+  void _showDeleteAiChatDialog() {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.backgroundSecondary,
+        title: Text(
+          'Delete Chat?',
+          style: AppTextStyles.headingMedium(color: AppColors.statusError),
+        ),
+        content: Text(
+          'Are you sure you want to permanently delete this chat history?',
+          style: AppTextStyles.bodyMedium(color: AppColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text(
+              'No',
+              style: AppTextStyles.bodyMedium(color: AppColors.textSecondary),
+            ),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.of(ctx).pop();
+              await context.read<AiCoachProvider>().deleteAiChatHistory();
+            },
+            child: Text(
+              'Yes',
+              style: AppTextStyles.bodyMedium(color: AppColors.statusError),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   void _showFriendContextMenu(FriendModel friend) {
     showModalBottomSheet<void>(
@@ -421,6 +543,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
   @override
   Widget build(BuildContext context) {
     final chatProvider = context.watch<ChatProvider>();
+    final aiChatTitle = context.watch<AiCoachProvider>().chatTitle;
 
     // Filter out blocked friends, then sort: pinned first, then by
     // existing order (Firestore already returns by addedAt desc).
@@ -548,7 +671,12 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 padding: const EdgeInsets.only(top: AppSpacing.sm),
                 itemCount: 1 + visibleFriends.length, // AI + friends
                 itemBuilder: (ctx, index) {
-                  if (index == 0) return _AiChatTile();
+                  if (index == 0) {
+                    return _AiChatTile(
+                      title: aiChatTitle,
+                      onLongPress: _showAiChatContextMenu,
+                    );
+                  }
 
                   final friend = visibleFriends[index - 1];
                   return _FriendChatTile(
@@ -631,6 +759,11 @@ class _BellIcon extends StatelessWidget {
 // =============================================================================
 
 class _AiChatTile extends StatelessWidget {
+  const _AiChatTile({required this.title, required this.onLongPress});
+
+  final String title;
+  final VoidCallback onLongPress;
+
   @override
   Widget build(BuildContext context) {
     return ListTile(
@@ -648,7 +781,7 @@ class _AiChatTile extends StatelessWidget {
           size: 26,
         ),
       ),
-      title: Text('AI Trainer', style: AppTextStyles.headingSmall()),
+      title: Text(title, style: AppTextStyles.headingSmall()),
       subtitle: Text(
         'Ask me anything about fitness',
         style: AppTextStyles.bodySmall(color: AppColors.textTertiary),
@@ -661,6 +794,7 @@ class _AiChatTile extends StatelessWidget {
         context,
         MaterialPageRoute<void>(builder: (_) => const AiChatScreen()),
       ),
+      onLongPress: onLongPress,
     );
   }
 }

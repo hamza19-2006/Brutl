@@ -22,22 +22,8 @@ class HomeScreenExShow extends StatefulWidget {
 
 class _HomeScreenExShowState extends State<HomeScreenExShow> {
   static const String _progressionSplitName = 'home_progression';
-  static const int _totalProgramWeeks = 4;
   late Future<_ProgressionPayload> _payloadFuture;
   String _payloadCacheKey = '';
-
-  /// Returns the user's actual chronological week (1-based, cycling 1..4)
-  /// based on the elapsed days since their program start date.
-  /// Falls back to DateTime.now() if no start date exists (yields week 1).
-  /// NEVER uses the UI tab variable.
-  static int _chronologicalWeek(DateTime? programStartDate) {
-    final startDate = programStartDate ?? DateTime.now();
-    final now = DateTime.now();
-    final daysSinceStart = now.difference(startDate).inDays;
-    final elapsedWeeks = daysSinceStart ~/ 7;
-    final actualWeekNumber = (elapsedWeeks % _totalProgramWeeks) + 1;
-    return actualWeekNumber;
-  }
 
   @override
   void initState() {
@@ -53,13 +39,12 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
 
   void _refreshPayloadIfNeeded() {
     final workoutProvider = context.read<WorkoutProvider>();
-    final userModel = context.read<BrutlUserProvider>().user;
     final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
     final splitFingerprint = workoutProvider.activeSplitDays
         .map((day) => day.trim().toLowerCase())
         .join('|');
     final nextKey =
-        '$uid|${_chronologicalWeek(userModel.createdAt)}|$splitFingerprint|${DateTime.now().weekday}';
+        '$uid|${workoutProvider.selectedWeek}|$splitFingerprint|${DateTime.now().weekday}';
     if (nextKey == _payloadCacheKey) return;
     _payloadCacheKey = nextKey;
     _payloadFuture = _buildPayload();
@@ -67,16 +52,14 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
 
   @override
   Widget build(BuildContext context) {
-    // Only rebuild when the split changes — NEVER when selectedWeek changes.
     final splitSignature = context.select<WorkoutProvider, String>((provider) {
-      return provider.activeSplitDays
+      final splitFingerprint = provider.activeSplitDays
           .map((day) => day.trim().toLowerCase())
           .join('|');
+      return '${provider.selectedWeek}|$splitFingerprint';
     });
-    final userModel = context.read<BrutlUserProvider>().user;
     final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
-    final nextKey =
-        '$uid|${_chronologicalWeek(userModel.createdAt)}|$splitSignature|${DateTime.now().weekday}';
+    final nextKey = '$uid|$splitSignature|${DateTime.now().weekday}';
     if (nextKey != _payloadCacheKey) {
       _payloadCacheKey = nextKey;
       _payloadFuture = _buildPayload();
@@ -95,13 +78,6 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
 
         if (snapshot.data!.isRecovery) {
           return _RecoveryProtocol(reason: snapshot.data?.recoveryReason);
-        }
-
-        // Empty state: user has exercises in split but nothing logged yet
-        if (snapshot.data!.isEmptyState) {
-          return _EmptyStateCard(
-            dayName: snapshot.data!.emptyStateDayName ?? 'this day',
-          );
         }
 
         final items = snapshot.data!.targets;
@@ -142,14 +118,7 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
     }
 
     try {
-      // ── User-relative 4-week mesocycle math ──
-      final startDate = userModel.createdAt ?? DateTime.now();
-      final now = DateTime.now();
-      final daysSinceStart = now.difference(startDate).inDays;
-      final elapsedWeeks = daysSinceStart ~/ 7;
-      final actualWeekNumber = (elapsedWeeks % _totalProgramWeeks) + 1;
-
-      final currentWeekNumber = actualWeekNumber;
+      final currentWeekNumber = workoutProvider.selectedWeek;
       final currentDayId = todayIndex + 1;
 
       final templateExercises = await _loadTemplateExercisesForToday(
@@ -162,7 +131,6 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
         return guaranteedFallback;
       }
 
-      // FIX 1: 4-week loop — never abort when targetWeek <= 0, always loop to 4.
       final historyExercises = await _loadPreviousWeekDayExercises(
         uid: uid,
         currentWeekNumber: currentWeekNumber,
@@ -170,20 +138,21 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
       );
 
       if (historyExercises.isEmpty) {
-        // User has exercises in their split but nothing logged last week.
-        // Check if ANY exercise in the history has actual weight/reps data.
-        // If not, show an empty state instead of confusing boxes.
-        final dayNames = [
-          'Monday',
-          'Tuesday',
-          'Wednesday',
-          'Thursday',
-          'Friday',
-          'Saturday',
-          'Sunday',
-        ];
-        final currentDayName = dayNames[(DateTime.now().weekday - 1) % 7];
-        return _ProgressionPayload.emptyState(currentDayName);
+        final parsedTemplate = templateExercises
+            .map((raw) => _ExerciseSnapshot.fromMap(raw))
+            .where((e) => e.name.trim().isNotEmpty)
+            .toList(growable: false);
+        final selectedTemplate = _selectExercises(parsedTemplate);
+        if (selectedTemplate.isEmpty) {
+          return guaranteedFallback;
+        }
+        final templateTargets = selectedTemplate
+            .map((e) => _toTemplateTarget(exercise: e, user: userModel))
+            .toList(growable: false);
+        if (templateTargets.isNotEmpty) {
+          return _ProgressionPayload(targets: templateTargets);
+        }
+        return guaranteedFallback;
       }
 
       final hydrated = _hydrateExercisesWithHistory(
@@ -215,13 +184,12 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
       }
 
       return _ProgressionPayload(targets: targets);
-    } catch (_) {
+    } catch (e) {
+      debugPrint('HomeScreenExShow Error: $e');
       return guaranteedFallback;
     }
   }
 
-  /// FIX 1: The 4-week loop. targetWeek = currentWeekNumber - 1.
-  /// If targetWeek <= 0, loop to 4. Never abort.
   Future<List<dynamic>> _loadPreviousWeekDayExercises({
     required String uid,
     required int currentWeekNumber,
@@ -241,14 +209,12 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
         .doc('day_$currentDayId')
         .get();
 
-    final rawExercises =
-        (daySnap.data()?['exercises'] as List<dynamic>?) ?? const <dynamic>[];
+    // Prevent casting crashes if exercises is malformed in Firestore
+    final rawData = daySnap.data()?['exercises'];
+    final rawExercises = rawData is List ? rawData : const <dynamic>[];
     return rawExercises;
   }
 
-  /// FIX 2: Data merge — name/baseRange/categoryType from Template,
-  /// weight/reps STRICTLY from History. Never let template overwrite
-  /// history weight/reps with 0.
   List<_ExerciseSnapshot> _hydrateExercisesWithHistory({
     required List<Map<String, dynamic>> templateExercises,
     required List<dynamic> historyExercises,
@@ -262,31 +228,35 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
 
     final historyByName = <String, Map<String, dynamic>>{};
     for (final historyData in normalizedHistory) {
-      final historyKey = (historyData['name'] ?? '')
-          .toString()
-          .trim()
-          .toLowerCase();
-      if (historyKey.isEmpty || historyByName.containsKey(historyKey)) continue;
-      historyByName[historyKey] = historyData;
+      final key = (historyData['name'] ?? '').toString().trim().toLowerCase();
+      if (key.isEmpty || historyByName.containsKey(key)) continue;
+      historyByName[key] = historyData;
     }
 
     final hydrated = <_ExerciseSnapshot>[];
-    for (final templateData in templateExercises) {
-      final templateKey = (templateData['name'] ?? '')
+    for (var i = 0; i < templateExercises.length; i++) {
+      final templateData = templateExercises[i];
+      final templateName = (templateData['name'] ?? '')
           .toString()
           .trim()
           .toLowerCase();
-      final historyData =
-          historyByName[templateKey] ?? const <String, dynamic>{};
 
-      // FIX 2: weight and reps come STRICTLY from history.
-      // Do NOT fall back to template values for weight/reps — that would
-      // zero-out real progress when the template stores 0.
-      final mappedWeight = historyData['weight'] ?? 0.0;
-      final mappedReps = historyData['reps'] ?? '';
+      final indexedHistory = i < normalizedHistory.length
+          ? normalizedHistory[i]
+          : const <String, dynamic>{};
+      final historyData = historyByName[templateName] ?? indexedHistory;
+
+      // Bulletproof Fallbacks: Firestore might save under different keys depending on the sync method
+      final mappedWeight =
+          historyData['weight'] ?? historyData['weightDisplay'] ?? 0.0;
+      final mappedReps =
+          historyData['reps'] ??
+          historyData['repsRaw'] ??
+          historyData['repsDisplay'] ??
+          historyData['topSetReps'] ??
+          '';
 
       final mergedData = <String, dynamic>{
-        // name, baseRange, categoryType: ALWAYS from template
         'name': templateData['name'] ?? historyData['name'] ?? 'Exercise',
         'baseRange': templateData['baseRange'] ?? templateData['base_range'],
         'categoryType':
@@ -297,7 +267,6 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
             historyData['type'] ??
             'isolation',
         'sets': templateData['sets'] ?? historyData['sets'] ?? 1,
-        // weight and reps: STRICTLY from history
         'weight': mappedWeight,
         'reps': mappedReps,
         'weightUnit':
@@ -386,7 +355,8 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
     DocumentReference<Map<String, dynamic>> ref,
   ) async {
     final snap = await ref.get();
-    final raw = (snap.data()?['exercises'] as List<dynamic>?) ?? const [];
+    final rawData = snap.data()?['exercises'];
+    final raw = rawData is List ? rawData : const [];
     return raw
         .whereType<Map>()
         .map((e) => Map<String, dynamic>.from(e))
@@ -476,8 +446,7 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
     required _ExerciseSnapshot exercise,
     required BrutlUser user,
   }) {
-    // Use the user's onboarding rep range (not hardcoded defaults)
-    final parsedRange = _resolveRepRange(exercise: exercise, user: user);
+    final parsedRange = _parseBaseRange(exercise.baseRangeString);
     final lowerLimit = parsedRange.min;
     final upperLimit = parsedRange.max;
 
@@ -512,60 +481,6 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
       targetDisplay:
           'Start your first session! Target: $lowerLimit-$upperLimit reps.',
     );
-  }
-
-  _BaseRange _resolveRepRange({
-    required _ExerciseSnapshot exercise,
-    required BrutlUser user,
-  }) {
-    final isCompound = exercise.isCompound;
-    final userRangeString = _userRangeString(
-      user: user,
-      isCompound: isCompound,
-    );
-
-    String? rangeStr = exercise.baseRangeString;
-    if (rangeStr == null || rangeStr.trim().isEmpty) {
-      rangeStr = userRangeString;
-    }
-
-    final parts = rangeStr.split('-');
-    final fallbackParts = userRangeString.split('-');
-
-    final fallbackLower = int.tryParse(fallbackParts.first.trim()) ?? 8;
-    final fallbackUpper = int.tryParse(fallbackParts.last.trim()) ?? 12;
-
-    int lowerLimit = int.tryParse(parts.first.trim()) ?? fallbackLower;
-    int upperLimit = int.tryParse(parts.last.trim()) ?? fallbackUpper;
-
-    if (lowerLimit <= 0) lowerLimit = fallbackLower;
-    if (upperLimit <= 0) upperLimit = fallbackUpper;
-    if (upperLimit < lowerLimit) upperLimit = lowerLimit;
-
-    return _BaseRange(min: lowerLimit, max: upperLimit);
-  }
-
-  String _userRangeString({required BrutlUser user, required bool isCompound}) {
-    final min = isCompound ? user.compoundRepMin : user.isolationRepMin;
-    final max = isCompound ? user.compoundRepMax : user.isolationRepMax;
-    if (min > 0 && max > 0 && max >= min) {
-      return '$min-$max';
-    }
-    return '';
-  }
-
-  int _parseRepValues(dynamic rawReps) {
-    final repsString = (rawReps ?? '').toString().trim();
-    if (repsString.isEmpty) return 0;
-
-    var maxRep = 0;
-    for (final part in repsString.split(',')) {
-      final parsed = int.tryParse(part.trim()) ?? 0;
-      if (parsed > 0) {
-        maxRep = math.max(maxRep, parsed);
-      }
-    }
-    return maxRep;
   }
 
   static bool _looksCompound(String name) {
@@ -612,19 +527,19 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
     required double mappedWeight,
     required dynamic mappedReps,
   }) {
-    final parsedRange = _resolveRepRange(exercise: exercise, user: user);
-    final lowerLimit = parsedRange.min;
-    final upperLimit = parsedRange.max;
+    final parsedRange = _parseBaseRange(exercise.baseRangeString);
+    final minLimit = parsedRange.min;
+    final maxLimit = parsedRange.max;
 
-    final lastTopRep = _parseRepValues(mappedReps);
+    final lastTopRep = _ExerciseSnapshot.parseRepValues(mappedReps);
     final lastWeight = mappedWeight < 0 ? 0.0 : mappedWeight;
-    final repsRaw = (mappedReps ?? '').toString().trim();
+    final repsRaw = mappedReps?.toString() ?? '';
 
     final weightUnit = exercise.weightUnit.trim().isEmpty
         ? user.weightUnit
         : exercise.weightUnit;
     final normalizedUnit = weightUnit.trim().toLowerCase();
-    final isCompound = exercise.isCompound;
+    final type = exercise.categoryType.trim().toLowerCase();
 
     final dayNames = [
       'Monday',
@@ -637,14 +552,8 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
     ];
     final currentDayName = dayNames[(DateTime.now().weekday - 1) % 7];
 
-    String lastWeekDisplayString;
-    String targetDisplayString;
-    String baseRangeLabel;
-
-    if (lastTopRep <= 0 || lastWeight <= 0) {
-      lastWeekDisplayString = 'Nothing logged last $currentDayName.';
-      targetDisplayString =
-          'Start your first session! Target: $lowerLimit-$upperLimit reps.';
+    // THE BODYWEIGHT BUG FIX: Removed `|| lastWeight <= 0`. Bodyweight exercises have 0 weight!
+    if (lastTopRep <= 0) {
       return _TargetCardData(
         name: exercise.name,
         isCompound: exercise.isCompound,
@@ -652,42 +561,49 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
         lastReps: 0,
         lastRepsRaw: repsRaw,
         targetWeight: 0,
-        targetReps: '$lowerLimit-$upperLimit',
+        targetReps: '$minLimit-$maxLimit',
         weightUnit: weightUnit,
-        actionLabel: 'Base range: $lowerLimit-$upperLimit reps',
+        actionLabel: 'First Session',
         aiPayload: _toAiExercisePayload(exercise),
         isFirstSession: true,
-        lastWeekDisplay: lastWeekDisplayString,
-        targetDisplay: targetDisplayString,
+        lastWeekDisplay: 'Nothing logged last $currentDayName.',
+        targetDisplay:
+            'Start your first session! Target: $minLimit-$maxLimit reps.',
       );
     }
 
     final displayLastRepsRaw = repsRaw.isNotEmpty ? repsRaw : '$lastTopRep';
 
     double targetWeight;
-    String targetRepsString;
+    String targetReps;
+    String actionLabel;
 
-    if (lastTopRep < upperLimit) {
+    if (lastTopRep < maxLimit) {
       targetWeight = lastWeight;
       final minRep = lastTopRep + 1;
-      final maxRep = math.min(lastTopRep + 2, upperLimit);
-      targetRepsString = minRep == maxRep ? '$minRep' : '$minRep-$maxRep';
+      final maxRep = math.min(lastTopRep + 2, maxLimit);
+      targetReps = minRep == maxRep ? '$minRep' : '$minRep-$maxRep';
+      actionLabel = 'Increase Reps';
     } else {
       if (normalizedUnit == 'plates') {
-        targetWeight = lastWeight + 1.0;
-      } else if (isCompound) {
+        targetWeight = lastWeight + 1;
+      } else if (type.contains('compound')) {
         targetWeight = lastWeight + 5.0;
       } else {
         targetWeight = lastWeight + 2.5;
       }
-      targetRepsString = '$lowerLimit-${lowerLimit + 1}';
+      targetReps = '$minLimit-${minLimit + 1}';
+      actionLabel = 'Increase Weight';
     }
 
-    lastWeekDisplayString =
-        'Last week you did ${_formatWeight(lastWeight)}$weightUnit x $displayLastRepsRaw reps';
-    targetDisplayString =
-        'Target today: ${_formatWeight(targetWeight)}$weightUnit x $targetRepsString reps 🎯';
-    baseRangeLabel = 'Base range: $lowerLimit-$upperLimit reps';
+    // UI POLISH: Format 0kg cleanly as "Bodyweight" instead of "0Kg"
+    final lastWeekDisplayString = lastWeight > 0
+        ? 'Last Week: ${_formatWeight(lastWeight)}$weightUnit x $displayLastRepsRaw'
+        : 'Last Week: Bodyweight x $displayLastRepsRaw';
+
+    final targetDisplayString = targetWeight > 0
+        ? 'Target Today: ${_formatWeight(targetWeight)}$weightUnit x $targetReps 🎯'
+        : 'Target Today: Bodyweight x $targetReps 🎯';
 
     return _TargetCardData(
       name: exercise.name,
@@ -696,9 +612,9 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
       lastReps: lastTopRep,
       lastRepsRaw: displayLastRepsRaw,
       targetWeight: targetWeight,
-      targetReps: targetRepsString,
+      targetReps: targetReps,
       weightUnit: weightUnit,
-      actionLabel: baseRangeLabel,
+      actionLabel: actionLabel,
       aiPayload: _toAiExercisePayload(exercise),
       isFirstSession: false,
       lastWeekDisplay: lastWeekDisplayString,
@@ -732,15 +648,28 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
   }
 
   static String _formatWeight(double value) {
-    if (value % 1 == 0) return value.toInt().toString();
-    return value
-        .toStringAsFixed(2)
-        .replaceFirst(RegExp(r'0+$'), '')
-        .replaceFirst(RegExp(r'\.$'), '');
+    return value % 1 == 0 ? value.toInt().toString() : value.toString();
+  }
+
+  static _BaseRange _parseBaseRange(String? raw) {
+    if (raw == null || raw.trim().isEmpty) {
+      return const _BaseRange(min: 8, max: 12);
+    }
+    final parts = raw.trim().split('-');
+    if (parts.length == 2) {
+      final lo = int.tryParse(parts[0].trim());
+      final hi = int.tryParse(parts[1].trim());
+      if (lo != null && hi != null && hi >= lo) {
+        return _BaseRange(min: lo, max: hi);
+      }
+    }
+    final single = int.tryParse(raw.trim());
+    if (single != null && single > 0) {
+      return _BaseRange(min: single, max: single + 2);
+    }
+    return const _BaseRange(min: 8, max: 12);
   }
 }
-
-// ── _BaseRange ───────────────────────────────────────────────────────────────
 
 class _BaseRange {
   const _BaseRange({required this.min, required this.max});
@@ -748,35 +677,19 @@ class _BaseRange {
   final int max;
 }
 
-// ── _ProgressionPayload ──────────────────────────────────────────────────────
-
 class _ProgressionPayload {
   const _ProgressionPayload({required this.targets})
     : isRecovery = false,
-      recoveryReason = null,
-      isEmptyState = false,
-      emptyStateDayName = null;
+      recoveryReason = null;
 
   const _ProgressionPayload.recovery(this.recoveryReason)
     : targets = const <_TargetCardData>[],
-      isRecovery = true,
-      isEmptyState = false,
-      emptyStateDayName = null;
-
-  const _ProgressionPayload.emptyState(this.emptyStateDayName)
-    : targets = const <_TargetCardData>[],
-      isRecovery = false,
-      recoveryReason = null,
-      isEmptyState = true;
+      isRecovery = true;
 
   final List<_TargetCardData> targets;
   final bool isRecovery;
   final String? recoveryReason;
-  final bool isEmptyState;
-  final String? emptyStateDayName;
 }
-
-// ── _TargetCardData ──────────────────────────────────────────────────────────
 
 class _TargetCardData {
   const _TargetCardData({
@@ -801,7 +714,6 @@ class _TargetCardData {
   final int lastReps;
   final String lastRepsRaw;
   final double targetWeight;
-  // FIX 5: stored as String.
   final String targetReps;
   final String weightUnit;
   final String actionLabel;
@@ -810,8 +722,6 @@ class _TargetCardData {
   final String lastWeekDisplay;
   final String targetDisplay;
 }
-
-// ── _ExerciseSnapshot ────────────────────────────────────────────────────────
 
 class _ExerciseSnapshot {
   const _ExerciseSnapshot({
@@ -828,7 +738,6 @@ class _ExerciseSnapshot {
   });
 
   factory _ExerciseSnapshot.fromMap(Map<String, dynamic> map) {
-    // FIX 3: Use the fixed rep parser.
     final topSetReps = parseRepValues(map['reps']);
     final repsRaw = map['reps']?.toString() ?? '';
     final weight = _parseWeight(map['weight'] ?? map['weightDisplay']);
@@ -879,8 +788,6 @@ class _ExerciseSnapshot {
   final double estimatedVolume;
   final String? baseRangeString;
 
-  /// FIX 3: Rep parser that correctly handles comma-separated strings
-  /// like "10,8,8,6" — splits by comma, parses each to int, returns max.
   static int parseRepValues(dynamic rawReps) {
     if (rawReps == null) return 0;
     if (rawReps is num) return rawReps.toInt();
@@ -896,7 +803,6 @@ class _ExerciseSnapshot {
     final value = rawReps.toString().trim();
     if (value.isEmpty) return 0;
 
-    // FIX 3: Split by comma first to handle "10,8,8,6" format.
     final commaParts = value.split(',');
     if (commaParts.length > 1) {
       final commaParsed = commaParts
@@ -908,7 +814,6 @@ class _ExerciseSnapshot {
       }
     }
 
-    // Handle range strings like "8-12" — take the first (lowest) or max.
     final allInts = RegExp(r'\d+')
         .allMatches(value)
         .map((m) => int.tryParse(m.group(0) ?? '') ?? 0)
@@ -929,8 +834,6 @@ class _ExerciseSnapshot {
     return int.tryParse(raw?.toString() ?? '') ?? fallback;
   }
 }
-
-// ── _TargetCard ───────────────────────────────────────────────────────────────
 
 class _TargetCard extends StatelessWidget {
   const _TargetCard({required this.item});
@@ -966,7 +869,6 @@ class _TargetCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ── Header row ──────────────────────────────────────────────
               Row(
                 children: [
                   Expanded(
@@ -1009,7 +911,6 @@ class _TargetCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 10),
-
               Text(
                 item.lastWeekDisplay,
                 style: const TextStyle(
@@ -1027,7 +928,6 @@ class _TargetCard extends StatelessWidget {
                   fontWeight: FontWeight.w700,
                 ),
               ),
-
               const SizedBox(height: 6),
               Text(
                 item.actionLabel,
@@ -1038,8 +938,6 @@ class _TargetCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 6),
-
-              // ── AI button ────────────────────────────────────────────────
               Align(
                 alignment: Alignment.centerRight,
                 child: TextButton.icon(
@@ -1053,7 +951,7 @@ class _TargetCard extends StatelessWidget {
                               '${item.name} — ${item.targetReps} reps'
                         : 'Coach, adjust this target for today: '
                               '${item.name} - ${targetSets}x${item.targetReps}'
-                              ' @ ${_HomeScreenExShowState._formatWeight(item.targetWeight)}${item.weightUnit}';
+                              ' @ ${_fmtWeight(item.targetWeight)}${item.weightUnit}';
                     await Navigator.of(context).push(
                       MaterialPageRoute<void>(
                         builder: (_) => AiCoachChatScreen(
@@ -1086,93 +984,10 @@ class _TargetCard extends StatelessWidget {
       ),
     );
   }
+
+  static String _fmtWeight(double v) =>
+      v % 1 == 0 ? v.toInt().toString() : v.toString();
 }
-
-// ── _EmptyStateCard ──────────────────────────────────────────────────────────
-
-class _EmptyStateCard extends StatelessWidget {
-  const _EmptyStateCard({required this.dayName});
-  final String dayName;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
-      decoration: BoxDecoration(
-        color: const Color(0xFF131313),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFF2A2A2A), width: 1),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x22000000),
-            blurRadius: 12,
-            offset: Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 64,
-            height: 64,
-            decoration: BoxDecoration(
-              color: const Color(0x22FF3D00),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: const Icon(
-              Icons.fitness_center_rounded,
-              color: Color(0xFFFF3D00),
-              size: 32,
-            ),
-          ),
-          const SizedBox(height: 20),
-          Text(
-            'No exercises logged last $dayName',
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 17,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 10),
-          const Text(
-            'Start your first session to unlock\nprogressive overload tracking!',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Color(0xFF8B8B8B),
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-              height: 1.5,
-            ),
-          ),
-          const SizedBox(height: 20),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFFFF3D00), Color(0xFFFF6D00)],
-              ),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Text(
-              'Go to Workout →',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── _RecoveryProtocol ─────────────────────────────────────────────────────────
 
 class _RecoveryProtocol extends StatelessWidget {
   const _RecoveryProtocol({this.reason});
@@ -1275,8 +1090,6 @@ class _RecoveryCard extends StatelessWidget {
     );
   }
 }
-
-// ── _ProgressionSkeleton ──────────────────────────────────────────────────────
 
 class _ProgressionSkeleton extends StatefulWidget {
   const _ProgressionSkeleton();

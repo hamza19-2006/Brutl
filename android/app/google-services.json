@@ -1,6 +1,7 @@
 {
   "project_info": {
     "project_number": "900881984780",
+    "firebase_url": "https://zorapp-dc8c5-default-rtdb.asia-southeast1.firebasedatabase.app",
     "project_id": "zorapp-dc8c5",
     "storage_bucket": "zorapp-dc8c5.firebasestorage.app"
   },
@@ -35,7 +36,7 @@
         "appinvite_service": {
           "other_platform_oauth_client": [
             {
-              "client_id": "900881984780-odtphur89flt2rlggop7cpre7q1d482i.apps.googleusercontent.com",
+              "client_id": "900881984780-3ebjosib5fq6u1u84ojfcpt71qd4jpmg.apps.googleusercontent.com",
               "client_type": 3
             }
           ]

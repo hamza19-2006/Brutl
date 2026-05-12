@@ -30,6 +30,7 @@ class BrutlUser {
     this.isProfileComplete = false,
     this.photoUrl = '',
     this.usernameChangedAt,
+    this.createdAt,
   });
 
   final String uid;
@@ -59,6 +60,7 @@ class BrutlUser {
   final bool isProfileComplete;
   final String photoUrl;
   final DateTime? usernameChangedAt;
+  final DateTime? createdAt;
 
   BrutlUser copyWith({
     String? uid,
@@ -88,6 +90,7 @@ class BrutlUser {
     bool? isProfileComplete,
     String? photoUrl,
     DateTime? usernameChangedAt,
+    DateTime? createdAt,
   }) {
     return BrutlUser(
       uid: uid ?? this.uid,
@@ -117,6 +120,7 @@ class BrutlUser {
       isProfileComplete: isProfileComplete ?? this.isProfileComplete,
       photoUrl: photoUrl ?? this.photoUrl,
       usernameChangedAt: usernameChangedAt ?? this.usernameChangedAt,
+      createdAt: createdAt ?? this.createdAt,
     );
   }
 
@@ -150,6 +154,8 @@ class BrutlUser {
       'photo_url': photoUrl,
       if (usernameChangedAt != null)
         'username_changed_at': usernameChangedAt!.toUtc().toIso8601String(),
+      if (createdAt != null)
+        'created_at': createdAt!.toUtc().toIso8601String(),
     };
   }
 
@@ -196,6 +202,9 @@ class BrutlUser {
           '',
       usernameChangedAt: _parseTimestamp(
         json['username_changed_at'] ?? json['usernameChangedAt'],
+      ),
+      createdAt: _parseTimestamp(
+        json['created_at'] ?? json['createdAt'],
       ),
     );
   }

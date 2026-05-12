@@ -43,6 +43,7 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
     final splitFingerprint = workoutProvider.activeSplitDays
         .map((day) => day.trim().toLowerCase())
         .join('|');
+    // Using selectedWeek allows you to time-travel and test upcoming weeks!
     final nextKey =
         '$uid|${workoutProvider.selectedWeek}|$splitFingerprint|${DateTime.now().weekday}';
     if (nextKey == _payloadCacheKey) return;
@@ -78,6 +79,13 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
 
         if (snapshot.data!.isRecovery) {
           return _RecoveryProtocol(reason: snapshot.data?.recoveryReason);
+        }
+
+        // Beautiful Empty State Fallback
+        if (snapshot.data!.isEmptyState) {
+          return _EmptyStateCard(
+            dayName: snapshot.data!.emptyStateDayName ?? 'this day',
+          );
         }
 
         final items = snapshot.data!.targets;
@@ -137,22 +145,48 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
         currentDayId: currentDayId,
       );
 
+      // The flawless First Session Builder (No short circuits!)
       if (historyExercises.isEmpty) {
         final parsedTemplate = templateExercises
             .map((raw) => _ExerciseSnapshot.fromMap(raw))
             .where((e) => e.name.trim().isNotEmpty)
             .toList(growable: false);
+
         final selectedTemplate = _selectExercises(parsedTemplate);
+
         if (selectedTemplate.isEmpty) {
-          return guaranteedFallback;
+          final dayNames = [
+            'Monday',
+            'Tuesday',
+            'Wednesday',
+            'Thursday',
+            'Friday',
+            'Saturday',
+            'Sunday',
+          ];
+          final currentDayName = dayNames[(DateTime.now().weekday - 1) % 7];
+          return _ProgressionPayload.emptyState(currentDayName);
         }
+
         final templateTargets = selectedTemplate
             .map((e) => _toTemplateTarget(exercise: e, user: userModel))
             .toList(growable: false);
+
         if (templateTargets.isNotEmpty) {
           return _ProgressionPayload(targets: templateTargets);
         }
-        return guaranteedFallback;
+
+        final dayNames = [
+          'Monday',
+          'Tuesday',
+          'Wednesday',
+          'Thursday',
+          'Friday',
+          'Saturday',
+          'Sunday',
+        ];
+        final currentDayName = dayNames[(DateTime.now().weekday - 1) % 7];
+        return _ProgressionPayload.emptyState(currentDayName);
       }
 
       final hydrated = _hydrateExercisesWithHistory(
@@ -197,7 +231,7 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
   }) async {
     int targetWeek = currentWeekNumber - 1;
     if (targetWeek <= 0) {
-      targetWeek = 4;
+      targetWeek = 4; // The infinite mesocycle loop!
     }
 
     final daySnap = await FirebaseFirestore.instance
@@ -209,7 +243,6 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
         .doc('day_$currentDayId')
         .get();
 
-    // Prevent casting crashes if exercises is malformed in Firestore
     final rawData = daySnap.data()?['exercises'];
     final rawExercises = rawData is List ? rawData : const <dynamic>[];
     return rawExercises;
@@ -246,7 +279,7 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
           : const <String, dynamic>{};
       final historyData = historyByName[templateName] ?? indexedHistory;
 
-      // Bulletproof Fallbacks: Firestore might save under different keys depending on the sync method
+      // Bulletproof Fallbacks: Hunts down your numbers no matter how Firestore saves them
       final mappedWeight =
           historyData['weight'] ?? historyData['weightDisplay'] ?? 0.0;
       final mappedReps =
@@ -552,7 +585,7 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
     ];
     final currentDayName = dayNames[(DateTime.now().weekday - 1) % 7];
 
-    // THE BODYWEIGHT BUG FIX: Removed `|| lastWeight <= 0`. Bodyweight exercises have 0 weight!
+    // THE BODYWEIGHT BUG FIX: We only check if lastTopRep <= 0.
     if (lastTopRep <= 0) {
       return _TargetCardData(
         name: exercise.name,
@@ -596,7 +629,7 @@ class _HomeScreenExShowState extends State<HomeScreenExShow> {
       actionLabel = 'Increase Weight';
     }
 
-    // UI POLISH: Format 0kg cleanly as "Bodyweight" instead of "0Kg"
+    // UI POLISH: Clean format for 0kg (Bodyweight) exercises
     final lastWeekDisplayString = lastWeight > 0
         ? 'Last Week: ${_formatWeight(lastWeight)}$weightUnit x $displayLastRepsRaw'
         : 'Last Week: Bodyweight x $displayLastRepsRaw';
@@ -680,15 +713,27 @@ class _BaseRange {
 class _ProgressionPayload {
   const _ProgressionPayload({required this.targets})
     : isRecovery = false,
-      recoveryReason = null;
+      recoveryReason = null,
+      isEmptyState = false,
+      emptyStateDayName = null;
 
   const _ProgressionPayload.recovery(this.recoveryReason)
     : targets = const <_TargetCardData>[],
-      isRecovery = true;
+      isRecovery = true,
+      isEmptyState = false,
+      emptyStateDayName = null;
+
+  const _ProgressionPayload.emptyState(this.emptyStateDayName)
+    : targets = const <_TargetCardData>[],
+      isRecovery = false,
+      recoveryReason = null,
+      isEmptyState = true;
 
   final List<_TargetCardData> targets;
   final bool isRecovery;
   final String? recoveryReason;
+  final bool isEmptyState;
+  final String? emptyStateDayName;
 }
 
 class _TargetCardData {
@@ -987,6 +1032,88 @@ class _TargetCard extends StatelessWidget {
 
   static String _fmtWeight(double v) =>
       v % 1 == 0 ? v.toInt().toString() : v.toString();
+}
+
+class _EmptyStateCard extends StatelessWidget {
+  const _EmptyStateCard({required this.dayName});
+  final String dayName;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+      decoration: BoxDecoration(
+        color: const Color(0xFF131313),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFF2A2A2A), width: 1),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x22000000),
+            blurRadius: 12,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(
+              color: const Color(0x22FF3D00),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Icon(
+              Icons.fitness_center_rounded,
+              color: Color(0xFFFF3D00),
+              size: 32,
+            ),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            'No exercises logged last $dayName',
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'Start your first session to unlock\nprogressive overload tracking!',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Color(0xFF8B8B8B),
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              height: 1.5,
+            ),
+          ),
+          const SizedBox(height: 20),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFFFF3D00), Color(0xFFFF6D00)],
+              ),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Text(
+              'Go to Workout →',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _RecoveryProtocol extends StatelessWidget {

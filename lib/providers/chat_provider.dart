@@ -703,7 +703,7 @@ class ChatProvider extends ChangeNotifier {
   }
 
   // -----------------------------------------------------------------------
-  // Fitness USP shares (PR / Streak / Challenge)
+  // Fitness USP shares (PR )
   // -----------------------------------------------------------------------
 
   /// Sends a Personal Record bubble. The optional [previousBest] enables a
@@ -727,97 +727,6 @@ class ChatProvider extends ChangeNotifier {
       ...?previousBestEntry,
       'achievedAt': Timestamp.fromDate(DateTime.now()),
     });
-  }
-
-  /// Sends a streak bubble (workout, calorie or generic streak).
-  Future<void> sendStreakMessage(
-    String chatId, {
-    required int streakDays,
-    required String streakType, // 'workout' | 'calories' | 'general'
-    String? note,
-  }) async {
-    await sendWidgetMessage(chatId, 'streak_share', <String, dynamic>{
-      'streakDays': streakDays,
-      'streakType': streakType,
-      if (note?.isNotEmpty ?? false) 'note': note,
-      'sharedAt': Timestamp.fromDate(DateTime.now()),
-    });
-  }
-
-  /// Real-time stream for a single challenge document.
-  Stream<DocumentSnapshot<Map<String, dynamic>>> challengeStream(
-    String chatId,
-    String challengeId,
-  ) {
-    return _db
-        .collection('chats')
-        .doc(chatId)
-        .collection('challenges')
-        .doc(challengeId)
-        .snapshots();
-  }
-
-  /// Increments the current user's progress on a challenge by [delta].
-  /// Negative deltas are allowed for corrections. The status field flips to
-  /// `completed` automatically when both participants reach the target.
-  Future<void> incrementChallengeProgress(
-    String chatId,
-    String challengeId,
-    int delta,
-  ) async {
-    if (_uid.isEmpty || delta == 0) return;
-    final ref = _db
-        .collection('chats')
-        .doc(chatId)
-        .collection('challenges')
-        .doc(challengeId);
-
-    try {
-      await _db.runTransaction<void>((tx) async {
-        final snap = await tx.get(ref);
-        if (!snap.exists) return;
-        final data = snap.data() ?? const <String, dynamic>{};
-
-        final progressRaw =
-            (data['progress'] as Map<dynamic, dynamic>?) ?? const {};
-        final progress = <String, dynamic>{};
-        progressRaw.forEach((key, value) {
-          progress[key.toString()] = Map<String, dynamic>.from(
-            (value as Map<dynamic, dynamic>?) ?? const {},
-          );
-        });
-
-        final myProgress = Map<String, dynamic>.from(
-          (progress[_uid] as Map<String, dynamic>?) ??
-              <String, dynamic>{'currentValue': 0},
-        );
-        final current = (myProgress['currentValue'] as num?)?.toInt() ?? 0;
-        final next = (current + delta).clamp(0, 1 << 30);
-        myProgress['currentValue'] = next;
-        myProgress['lastUpdated'] = FieldValue.serverTimestamp();
-        progress[_uid] = myProgress;
-
-        // Auto-complete when both participants hit the target.
-        final target = (data['targetValue'] as num?)?.toInt() ?? 0;
-        var allComplete = target > 0;
-        for (final entry in progress.entries) {
-          final v =
-              (entry.value as Map<String, dynamic>)['currentValue'] as num?;
-          if ((v?.toInt() ?? 0) < target) {
-            allComplete = false;
-            break;
-          }
-        }
-
-        tx.update(ref, <String, dynamic>{
-          'progress': progress,
-          if (allComplete) 'status': 'completed',
-        });
-      });
-    } catch (error, stackTrace) {
-      debugPrint('Failed to update challenge progress: $error');
-      debugPrintStack(stackTrace: stackTrace);
-    }
   }
 
   // -----------------------------------------------------------------------
@@ -1089,12 +998,6 @@ class ChatProvider extends ChangeNotifier {
         final weight = message.payload['weight'];
         final unit = message.payload['unit'] as String? ?? 'kg';
         return '🏆 PR: $exercise ${weight ?? ''}$unit';
-      case 'streak_share':
-        final days = message.payload['streakDays'] ?? 0;
-        return '🔥 $days-day streak';
-      case 'challenge':
-        final title = message.payload['title'] as String? ?? 'Challenge';
-        return '⚡ Challenge: $title';
       default:
         final text = (message.payload['text'] as String? ?? '').trim();
         if (text.length <= 80) return text;

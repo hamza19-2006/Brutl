@@ -66,4 +66,7 @@ final class AppColors {
 
   /// Functional info state.
   static const Color statusInfo = Color(0xFF3B82F6);
+
+  /// Elevated surface shadow (20% black).
+  static const Color elevatedShadow = Color(0x33000000);
 }

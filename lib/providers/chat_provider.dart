@@ -13,6 +13,7 @@ class ChatProvider extends ChangeNotifier {
   // Use a lower ceiling to leave headroom and avoid accidental overflows.
   static const int _maxBatchOps = 450;
   static const String _sharedDayCachePrefix = 'chat_shared_day_cache_v1';
+  static const String _reactionCachePrefix = 'reaction_cache_';
 
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -48,6 +49,8 @@ class ChatProvider extends ChangeNotifier {
   final List<MessageModel> _optimisticMessages = [];
   List<MessageModel> get optimisticMessages =>
       List.unmodifiable(_optimisticMessages);
+  final Map<String, String> _localReactionByMessageId = <String, String>{};
+  bool _reactionCacheHydrated = false;
   int _totalUnreadCount = 0;
   int get totalUnreadCount => _totalUnreadCount;
 
@@ -742,50 +745,104 @@ class ChatProvider extends ChangeNotifier {
     String messageId,
     String emoji,
   ) async {
-    if (_uid.isEmpty || emoji.isEmpty) return;
-    final msgRef = _db
-        .collection('chats')
-        .doc(chatId)
-        .collection('messages')
-        .doc(messageId);
+    if (_uid.isEmpty || chatId.isEmpty || messageId.isEmpty || emoji.isEmpty) {
+      return;
+    }
+    final currentEmoji = _localReactionByMessageId[messageId];
+    final nextEmoji = currentEmoji == emoji ? '' : emoji;
 
+    if (nextEmoji.isEmpty) {
+      _localReactionByMessageId.remove(messageId);
+    } else {
+      _localReactionByMessageId[messageId] = nextEmoji;
+    }
+    notifyListeners();
+
+    unawaited(_persistReactionToLocalCache(messageId, nextEmoji));
+  }
+
+  MessageModel applyLocalReaction(MessageModel message) {
+    if (_uid.isEmpty) return message;
+    return message.copyWith(
+      reactions: _mergedReactionsWithLocalCache(message.id, message.reactions),
+    );
+  }
+
+  Future<void> initializeReactionCache() => _ensureReactionCacheHydrated();
+
+  String _reactionCacheKey(String messageId) =>
+      '$_reactionCachePrefix$messageId';
+
+  Future<void> _ensureReactionCacheHydrated() async {
+    if (_reactionCacheHydrated) return;
+    var hasHydratedEntries = false;
     try {
-      await _db.runTransaction<void>((tx) async {
-        final snap = await tx.get(msgRef);
-        if (!snap.exists) return;
-        final data = snap.data() ?? const <String, dynamic>{};
-        final raw = (data['reactions'] as Map<dynamic, dynamic>?) ?? const {};
-
-        final current = <String, List<String>>{};
-        raw.forEach((key, value) {
-          if (value is List) {
-            current[key.toString()] = value.map((e) => e.toString()).toList();
-          }
-        });
-
-        // Remove this UID from every emoji first (one reaction per user).
-        for (final key in current.keys.toList()) {
-          current[key] = current[key]!.where((u) => u != _uid).toList();
-          if (current[key]!.isEmpty) current.remove(key);
-        }
-
-        // Was the user already on this emoji? `current` no longer has them, so
-        // we determine 'toggle off' by comparing against the original list.
-        final originalList =
-            (raw[emoji] as List?)?.map((e) => e.toString()).toList() ??
-            const <String>[];
-        final wasReacted = originalList.contains(_uid);
-
-        if (!wasReacted) {
-          current[emoji] = [...(current[emoji] ?? const <String>[]), _uid];
-        }
-
-        tx.update(msgRef, <String, dynamic>{'reactions': current});
-      });
+      final prefs = await SharedPreferences.getInstance();
+      for (final key in prefs.getKeys()) {
+        if (!key.startsWith(_reactionCachePrefix)) continue;
+        final messageId = key.substring(_reactionCachePrefix.length);
+        if (messageId.isEmpty) continue;
+        final emoji = prefs.getString(key);
+        if (emoji == null || emoji.isEmpty) continue;
+        _localReactionByMessageId[messageId] = emoji;
+        hasHydratedEntries = true;
+      }
     } catch (error, stackTrace) {
-      debugPrint('Failed to toggle reaction on $messageId: $error');
+      debugPrint('Failed to hydrate local reaction cache: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    } finally {
+      _reactionCacheHydrated = true;
+      if (hasHydratedEntries) {
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<void> _persistReactionToLocalCache(
+    String messageId,
+    String emoji,
+  ) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = _reactionCacheKey(messageId);
+      if (emoji.isEmpty) {
+        await prefs.remove(key);
+      } else {
+        await prefs.setString(key, emoji);
+      }
+    } catch (error, stackTrace) {
+      debugPrint('Failed to persist reaction cache for $messageId: $error');
       debugPrintStack(stackTrace: stackTrace);
     }
+  }
+
+  Map<String, List<String>> _mergedReactionsWithLocalCache(
+    String messageId,
+    Map<String, List<String>> source,
+  ) {
+    final merged = <String, List<String>>{};
+    source.forEach((key, value) {
+      merged[key] = List<String>.from(value);
+    });
+
+    for (final key in merged.keys.toList()) {
+      final filtered = merged[key]!.where((uid) => uid != _uid).toList();
+      if (filtered.isEmpty) {
+        merged.remove(key);
+      } else {
+        merged[key] = filtered;
+      }
+    }
+
+    final localEmoji = _localReactionByMessageId[messageId];
+    if (localEmoji != null && localEmoji.isNotEmpty) {
+      final existing = List<String>.from(merged[localEmoji] ?? const []);
+      if (!existing.contains(_uid)) {
+        existing.add(_uid);
+      }
+      merged[localEmoji] = existing;
+    }
+    return merged;
   }
 
   /// Soft-deletes a message authored by the current user for everyone in the

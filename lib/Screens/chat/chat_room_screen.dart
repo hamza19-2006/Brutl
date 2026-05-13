@@ -49,6 +49,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     _myUid = FirebaseAuth.instance.currentUser?.uid ?? '';
     _chatId = buildChatId(_myUid, widget.friend.uid);
     unawaited(context.read<ChatProvider>().markChatAsRead(_chatId));
+    unawaited(context.read<ChatProvider>().initializeReactionCache());
   }
 
   @override
@@ -492,7 +493,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                 child: StreamBuilder<List<MessageModel>>(
                   stream: chatProvider.messagesStream(_chatId),
                   builder: (ctx, snap) {
-                    final raw = snap.data ?? [];
+                    final raw = (snap.data ?? [])
+                        .map(chatProvider.applyLocalReaction)
+                        .toList();
                     // 1) Hide any message the user has personally
                     //    "Deleted for me" (deletedFor contains my uid).
                     // 2) Defence-in-depth: when this user has blocked the
@@ -738,6 +741,13 @@ class _MessageBubble extends StatelessWidget {
   final bool isPending;
   final VoidCallback onLongPress;
   final ValueChanged<String> onReactionTap;
+  // Lift the chip upward so it straddles the bubble's bottom border radius.
+  // -10 places roughly half the chip over the bubble edge and half below it.
+  static const double _reactionChipOverlapOffset = -10;
+  // 6 default bottom padding + 8 extra reserve for the overlapping chip.
+  static const double _bubbleBottomPaddingWithReaction = 14;
+  // Reserve width beside timestamp/status to avoid overlap with reaction chip.
+  static const double _reactionMetaReserve = 40;
 
   @override
   Widget build(BuildContext context) {
@@ -810,6 +820,8 @@ class _MessageBubble extends StatelessWidget {
         message.isReply &&
         !isDeleted &&
         (message.replyToPreview ?? '').isNotEmpty;
+    final hasFloatingReaction = !isDeleted && message.hasReactions;
+    final metaSidePadding = hasFloatingReaction ? _reactionMetaReserve : 0.0;
 
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -824,18 +836,18 @@ class _MessageBubble extends StatelessWidget {
           constraints: BoxConstraints(
             maxWidth: MediaQuery.of(context).size.width * 0.82,
           ),
-          child: Column(
-            crossAxisAlignment: isMe
-                ? CrossAxisAlignment.end
-                : CrossAxisAlignment.start,
+          child: Stack(
+            clipBehavior: Clip.none,
             children: [
               Container(
                 padding: useSolidBubble
-                    ? const EdgeInsets.fromLTRB(
+                    ? EdgeInsets.fromLTRB(
                         AppSpacing.md,
                         AppSpacing.sm,
                         AppSpacing.md,
-                        6,
+                        hasFloatingReaction
+                            ? _bubbleBottomPaddingWithReaction
+                            : 6,
                       )
                     : null,
                 decoration: useSolidBubble
@@ -864,11 +876,17 @@ class _MessageBubble extends StatelessWidget {
                           ],
                           content,
                           const SizedBox(height: 4),
-                          _BubbleMeta(
-                            time: message.timestamp,
-                            isMe: isMe,
-                            isPending: isPending,
-                            status: message.status,
+                          Padding(
+                            padding: EdgeInsets.only(
+                              left: isMe ? 0 : metaSidePadding,
+                              right: isMe ? metaSidePadding : 0,
+                            ),
+                            child: _BubbleMeta(
+                              time: message.timestamp,
+                              isMe: isMe,
+                              isPending: isPending,
+                              status: message.status,
+                            ),
                           ),
                         ],
                       )
@@ -888,7 +906,11 @@ class _MessageBubble extends StatelessWidget {
                             ],
                             content,
                             Padding(
-                              padding: const EdgeInsets.only(top: 4, right: 4),
+                              padding: EdgeInsets.only(
+                                top: 4,
+                                left: isMe ? 0 : metaSidePadding,
+                                right: (isMe ? metaSidePadding : 0) + 4,
+                              ),
                               child: Align(
                                 alignment: isMe
                                     ? Alignment.centerRight
@@ -905,12 +927,17 @@ class _MessageBubble extends StatelessWidget {
                         ),
                       ),
               ),
-              if (!isDeleted && message.hasReactions)
-                _ReactionChips(
-                  reactions: message.reactions,
-                  myUid: myUid,
-                  isMe: isMe,
-                  onTap: onReactionTap,
+              if (hasFloatingReaction)
+                Positioned(
+                  bottom: _reactionChipOverlapOffset,
+                  right: isMe ? 10 : null,
+                  left: isMe ? null : 10,
+                  child: _ReactionChips(
+                    reactions: message.reactions,
+                    myUid: myUid,
+                    isMe: isMe,
+                    onTap: onReactionTap,
+                  ),
                 ),
             ],
           ),
@@ -1065,8 +1092,12 @@ class _ReactionChips extends StatelessWidget {
     final entries = reactions.entries.where((e) => e.value.isNotEmpty).toList();
     if (entries.isEmpty) return const SizedBox.shrink();
 
-    return Padding(
-      padding: const EdgeInsets.only(top: 2, left: 4, right: 4),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(AppSpacing.borderRadiusFull),
+      ),
       child: Wrap(
         alignment: isMe ? WrapAlignment.end : WrapAlignment.start,
         spacing: 4,
@@ -1080,12 +1111,12 @@ class _ReactionChips extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   color: entry.value.contains(myUid)
-                      ? AppColors.accentSoft
-                      : AppColors.backgroundTertiary,
+                      ? AppColors.backgroundSecondary.withOpacity(0.20)
+                      : AppColors.backgroundSecondary.withOpacity(0.12),
                   border: Border.all(
                     color: entry.value.contains(myUid)
-                        ? AppColors.accentPrimary
-                        : AppColors.borderSubtle,
+                        ? AppColors.borderSubtle.withOpacity(0.5)
+                        : AppColors.borderSubtle.withOpacity(0.2),
                   ),
                   borderRadius: BorderRadius.circular(
                     AppSpacing.borderRadiusFull,

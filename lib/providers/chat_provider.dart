@@ -744,67 +744,6 @@ class ChatProvider extends ChangeNotifier {
     });
   }
 
-  /// Creates a challenge document under
-  /// `chats/{chatId}/challenges/{challengeId}` and posts a referencing bubble
-  /// in the chat. Both participants can later update their own progress via
-  /// [incrementChallengeProgress].
-  Future<void> startChallenge(
-    String chatId,
-    String friendUid, {
-    required String title,
-    required String type, // 'workout' | 'calories' | 'steps' | 'consistency'
-    required int durationDays,
-    required int targetValue,
-  }) async {
-    if (_uid.isEmpty || friendUid.isEmpty) return;
-
-    final challengeRef = _db
-        .collection('chats')
-        .doc(chatId)
-        .collection('challenges')
-        .doc();
-    final now = DateTime.now();
-    final endDate = now.add(Duration(days: durationDays));
-    final participants = _participantsFromChatId(chatId);
-
-    final challengeDoc = <String, dynamic>{
-      'title': title,
-      'type': type,
-      'durationDays': durationDays,
-      'targetValue': targetValue,
-      'startDate': Timestamp.fromDate(now),
-      'endDate': Timestamp.fromDate(endDate),
-      'participants': participants,
-      'createdBy': _uid,
-      'status': 'active',
-      'progress': <String, dynamic>{
-        _uid: <String, dynamic>{'currentValue': 0, 'lastUpdated': null},
-        friendUid: <String, dynamic>{'currentValue': 0, 'lastUpdated': null},
-      },
-    };
-
-    try {
-      await challengeRef.set(challengeDoc);
-    } catch (error, stackTrace) {
-      debugPrint('Failed to create challenge doc: $error');
-      debugPrintStack(stackTrace: stackTrace);
-      return;
-    }
-
-    // The chat bubble references the challenge by id so the bubble can
-    // subscribe to live progress updates.
-    await sendWidgetMessage(chatId, 'challenge', <String, dynamic>{
-      'challengeId': challengeRef.id,
-      'title': title,
-      'type': type,
-      'durationDays': durationDays,
-      'targetValue': targetValue,
-      'startDate': Timestamp.fromDate(now),
-      'endDate': Timestamp.fromDate(endDate),
-      'createdBy': _uid,
-    });
-  }
-
   /// Real-time stream for a single challenge document.
   Stream<DocumentSnapshot<Map<String, dynamic>>> challengeStream(
     String chatId,

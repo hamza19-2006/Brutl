@@ -16,7 +16,6 @@ import '../../providers/chat_provider.dart';
 import '../../providers/workout_provider.dart';
 import 'share_meal_screen.dart';
 import 'share_pr_screen.dart';
-import 'share_streak_screen.dart';
 import 'share_workout_screen.dart';
 
 class ChatRoomScreen extends StatefulWidget {
@@ -140,7 +139,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 
   void _showAttachmentSheet() {
-    final showStreakShareOption = false;
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppColors.backgroundSecondary,
@@ -181,17 +179,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                   _navigateToPRShare();
                 },
               ),
-              if (showStreakShareOption) ...[
-                const SizedBox(height: AppSpacing.md),
-                _AttachOption(
-                  icon: Icons.local_fire_department_rounded,
-                  label: 'Share Streak',
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _navigateToStreakShare();
-                  },
-                ),
-              ],
             ],
           ),
         ),
@@ -248,24 +235,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         unit: payload['unit'] as String,
         reps: payload['reps'] as int,
         previousBest: (payload['previousBest'] as num?)?.toDouble(),
-      );
-      if (mounted) _scrollToBottom();
-    }
-  }
-
-  Future<void> _navigateToStreakShare() async {
-    final payload = await Navigator.push<Map<String, dynamic>>(
-      context,
-      MaterialPageRoute<Map<String, dynamic>>(
-        builder: (_) => const ShareStreakScreen(),
-      ),
-    );
-    if (payload != null && mounted) {
-      await context.read<ChatProvider>().sendStreakMessage(
-        _chatId,
-        streakDays: payload['streakDays'] as int,
-        streakType: payload['streakType'] as String,
-        note: payload['note'] as String?,
       );
       if (mounted) _scrollToBottom();
     }

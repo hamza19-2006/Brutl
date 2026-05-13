@@ -50,8 +50,8 @@ class _ShareWorkoutScreenState extends State<ShareWorkoutScreen>
 
     final provider = context.read<WorkoutProvider>();
     final totalWeeks = provider.totalProgramWeeks;
-    final dayNames = provider.customSplitDays;
-    final totalDays = dayNames.length;
+    final splitDays = provider.activeSplitDays;
+    final totalDays = splitDays.length;
 
     final db = FirebaseFirestore.instance;
     final result = <int, List<_DayData>>{};
@@ -62,7 +62,7 @@ class _ShareWorkoutScreenState extends State<ShareWorkoutScreen>
 
       for (var d = 0; d < totalDays; d++) {
         final dayId = 'day_${d + 1}';
-        final dayName = dayNames[d];
+        final dayName = splitDays[d];
 
         try {
           final snap = await db
@@ -79,6 +79,19 @@ class _ShareWorkoutScreenState extends State<ShareWorkoutScreen>
           final exercises = rawExercises
               .whereType<Map>()
               .map((e) => Map<String, dynamic>.from(e))
+              .where((exercise) {
+                // Backward-compatible support for legacy and current payload
+                // key shapes while the exercise schema converges.
+                // Canonical key is `splitName`; `split_name` is legacy.
+                // TODO(data-migration): remove `split_name` fallback after
+                // all stored exercise payloads are migrated.
+                final splitName =
+                    (exercise['splitName'] ?? exercise['split_name'] ?? dayName)
+                        .toString()
+                        .trim();
+                if (splitName.isEmpty) return true;
+                return splitName.toLowerCase() == dayName.toLowerCase();
+              })
               .toList();
 
           days.add(
@@ -294,9 +307,14 @@ class _ShareWorkoutScreenState extends State<ShareWorkoutScreen>
               controller: _tabController,
               children: [
                 _WeekTab(weekMap: _weekMap, onShare: _shareWeek),
-                _DayTab(weekMap: _weekMap, onShare: _shareDay),
+                _DayTab(
+                  weekMap: _weekMap,
+                  userDays: context.read<WorkoutProvider>().activeSplitDays,
+                  onShare: _shareDay,
+                ),
                 _ExerciseTab(
                   weekMap: _weekMap,
+                  userDays: context.read<WorkoutProvider>().activeSplitDays,
                   onShowPicker: _showExercisePicker,
                 ),
               ],
@@ -371,9 +389,14 @@ class _WeekTab extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _DayTab extends StatelessWidget {
-  const _DayTab({required this.weekMap, required this.onShare});
+  const _DayTab({
+    required this.weekMap,
+    required this.userDays,
+    required this.onShare,
+  });
 
   final Map<int, List<_DayData>> weekMap;
+  final List<String> userDays;
   final void Function(String dayName, List<Map<String, dynamic>> exercises)
   onShare;
 
@@ -393,7 +416,19 @@ class _DayTab extends StatelessWidget {
       }
     }
 
-    final uniqueDays = bestByName.values.toList();
+    final orderedDays = userDays
+        .map((name) => bestByName[name.trim().toLowerCase()])
+        .whereType<_DayData>()
+        .toList(growable: false);
+    final remainingDays = bestByName.entries
+        .where(
+          (entry) => !orderedDays.any(
+            (day) => day.dayName.trim().toLowerCase() == entry.key,
+          ),
+        )
+        .map((entry) => entry.value)
+        .toList(growable: false);
+    final uniqueDays = <_DayData>[...orderedDays, ...remainingDays];
 
     return ListView.separated(
       padding: const EdgeInsets.all(AppSpacing.lg),
@@ -419,9 +454,14 @@ class _DayTab extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _ExerciseTab extends StatelessWidget {
-  const _ExerciseTab({required this.weekMap, required this.onShowPicker});
+  const _ExerciseTab({
+    required this.weekMap,
+    required this.userDays,
+    required this.onShowPicker,
+  });
 
   final Map<int, List<_DayData>> weekMap;
+  final List<String> userDays;
   final void Function(String dayName, List<Map<String, dynamic>> exercises)
   onShowPicker;
 
@@ -441,7 +481,19 @@ class _ExerciseTab extends StatelessWidget {
       }
     }
 
-    final uniqueDays = bestByName.values.toList();
+    final orderedDays = userDays
+        .map((name) => bestByName[name.trim().toLowerCase()])
+        .whereType<_DayData>()
+        .toList(growable: false);
+    final remainingDays = bestByName.entries
+        .where(
+          (entry) => !orderedDays.any(
+            (day) => day.dayName.trim().toLowerCase() == entry.key,
+          ),
+        )
+        .map((entry) => entry.value)
+        .toList(growable: false);
+    final uniqueDays = <_DayData>[...orderedDays, ...remainingDays];
 
     if (uniqueDays.isEmpty) {
       return Center(

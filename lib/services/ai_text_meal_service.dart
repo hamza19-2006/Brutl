@@ -41,11 +41,11 @@ Future<Map<String, int>?> analyzeTextMeal(String foodDescription) async {
     return geminiResult;
   }
 
-  // Tier 3: DeepSeek V3 via OpenRouter
-  debugPrint('[AI_TEXT] Gemini failed — trying DeepSeek V3...');
+  // Tier 3: DeepSeek V4 flash via OpenRouter
+  debugPrint('[AI_TEXT] Gemini failed — trying DeepSeek V4 flash ...');
   final deepSeekResult = await _attemptDeepSeek(foodDescription);
   if (deepSeekResult != null) {
-    debugPrint('[AI_TEXT] DeepSeek V3 succeeded.');
+    debugPrint('[AI_TEXT] DeepSeek V4 flash  succeeded.');
     return deepSeekResult;
   }
 
@@ -144,7 +144,7 @@ Future<Map<String, int>?> _attemptGemini(String food) async {
   }
 }
 
-// ─── Tier 3: DeepSeek V3 via OpenRouter ──────────────────────────────────────
+// ─── Tier 3: DeepSeek V4 flash via OpenRouter ──────────────────────────────────────
 
 Future<Map<String, int>?> _attemptDeepSeek(String food) async {
   const apiKey = openRouterApiKey;
@@ -173,7 +173,7 @@ Future<Map<String, int>?> _attemptDeepSeek(String food) async {
         .timeout(const Duration(seconds: 15));
 
     if (response.statusCode != 200) {
-      debugPrint('[AI_TEXT] DeepSeek V3 HTTP ${response.statusCode}');
+      debugPrint('[AI_TEXT] DeepSeek V4 flash HTTP ${response.statusCode}');
       return null;
     }
 
@@ -182,7 +182,7 @@ Future<Map<String, int>?> _attemptDeepSeek(String food) async {
             as String?;
     return _parseJsonResponse(text);
   } catch (e) {
-    debugPrint('[AI_TEXT] DeepSeek V3 exception: $e');
+    debugPrint('[AI_TEXT] DeepSeek V4 flash exception: $e');
     return null;
   }
 }

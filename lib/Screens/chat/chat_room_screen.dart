@@ -1458,14 +1458,14 @@ class _ExerciseShareBubble extends StatelessWidget {
         .doc(dayId);
 
     try {
-      final daySnapshot = await dayDocRef.get();
-      final rawExistingExercises =
-          (daySnapshot.data()?['exercises'] as List<dynamic>?) ??
-          const <dynamic>[];
-      final existingExercises = rawExistingExercises
-          .whereType<Map>()
-          .map((e) => Map<String, dynamic>.from(e))
-          .toList();
+      final chatProvider = context.read<ChatProvider>();
+      final existingExercises = await chatProvider
+          .loadSharedDayExercisesWithCache(
+            uid: uid,
+            weekId: weekId,
+            dayId: dayId,
+            dayDocRef: dayDocRef,
+          );
 
       final batch = FirebaseFirestore.instance.batch();
       batch.set(dayDocRef, <String, dynamic>{
@@ -1719,31 +1719,23 @@ class _DayBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final preview = exercises.take(3).toList();
+    if (exercises.isEmpty) {
+      return Text(
+        'No exercises in this workout',
+        style: AppTextStyles.labelSmall(color: AppColors.textTertiary),
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Text(
-          '${exercises.length} Exercise${exercises.length == 1 ? '' : 's'}',
-          style: AppTextStyles.bodySmall(color: AppColors.textSecondary),
-        ),
-        if (preview.isNotEmpty) const SizedBox(height: 6),
-        for (final ex in preview)
+        for (final ex in exercises)
           Padding(
-            padding: const EdgeInsets.only(bottom: 2),
+            padding: const EdgeInsets.only(bottom: 4),
             child: Text(
-              ex['exerciseName'] as String? ?? '',
-              style: AppTextStyles.labelSmall(color: AppColors.textTertiary),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        if (exercises.length > 3)
-          Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: Text(
-              '+ ${exercises.length - 3} more',
-              style: AppTextStyles.labelSmall(color: AppColors.textTertiary),
+              '• ${(ex['exerciseName'] as String? ?? ex['name'] as String? ?? '').trim()}',
+              style: AppTextStyles.bodySmall(color: AppColors.textSecondary),
             ),
           ),
       ],

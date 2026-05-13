@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/chat_models.dart';
 
@@ -10,6 +12,7 @@ class ChatProvider extends ChangeNotifier {
   // Firestore batch writes support up to 500 operations.
   // Use a lower ceiling to leave headroom and avoid accidental overflows.
   static const int _maxBatchOps = 450;
+  static const String _sharedDayCachePrefix = 'chat_shared_day_cache_v1';
 
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -564,6 +567,130 @@ class ChatProvider extends ChangeNotifier {
         debugPrintStack(stackTrace: stackTrace);
       }
     }
+  }
+
+  String _sharedDayCacheKey({
+    required String uid,
+    required String weekId,
+    required String dayId,
+  }) => '$_sharedDayCachePrefix:$uid:$weekId:$dayId';
+
+  List<Map<String, dynamic>> _decodeExercises(String? raw) {
+    if (raw == null || raw.isEmpty) return const <Map<String, dynamic>>[];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return const <Map<String, dynamic>>[];
+      return decoded
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    } catch (_) {
+      return const <Map<String, dynamic>>[];
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getCachedSharedDayExercises({
+    required String uid,
+    required String weekId,
+    required String dayId,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = _sharedDayCacheKey(uid: uid, weekId: weekId, dayId: dayId);
+    return _decodeExercises(prefs.getString(key));
+  }
+
+  Future<void> _setCachedSharedDayExercises({
+    required String uid,
+    required String weekId,
+    required String dayId,
+    required List<Map<String, dynamic>> exercises,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = _sharedDayCacheKey(uid: uid, weekId: weekId, dayId: dayId);
+    await prefs.setString(key, jsonEncode(exercises));
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchSharedDayExercisesFromFirestore({
+    required DocumentReference<Map<String, dynamic>> dayDocRef,
+  }) async {
+    final snap = await dayDocRef.get();
+    final raw = (snap.data()?['exercises'] as List<dynamic>?) ?? const [];
+    return raw
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+  }
+
+  bool _exerciseListsEqual(
+    List<Map<String, dynamic>> first,
+    List<Map<String, dynamic>> second,
+  ) {
+    if (identical(first, second)) return true;
+    if (first.length != second.length) return false;
+    for (var i = 0; i < first.length; i++) {
+      if (jsonEncode(first[i]) != jsonEncode(second[i])) return false;
+    }
+    return true;
+  }
+
+  Future<void> _syncSharedDayCacheInBackground({
+    required String uid,
+    required String weekId,
+    required String dayId,
+    required DocumentReference<Map<String, dynamic>> dayDocRef,
+    required List<Map<String, dynamic>> currentCached,
+  }) async {
+    try {
+      final remote = await _fetchSharedDayExercisesFromFirestore(
+        dayDocRef: dayDocRef,
+      );
+      if (!_exerciseListsEqual(remote, currentCached)) {
+        await _setCachedSharedDayExercises(
+          uid: uid,
+          weekId: weekId,
+          dayId: dayId,
+          exercises: remote,
+        );
+      }
+    } catch (_) {
+      // Silent background sync.
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> loadSharedDayExercisesWithCache({
+    required String uid,
+    required String weekId,
+    required String dayId,
+    required DocumentReference<Map<String, dynamic>> dayDocRef,
+  }) async {
+    final cached = await getCachedSharedDayExercises(
+      uid: uid,
+      weekId: weekId,
+      dayId: dayId,
+    );
+
+    unawaited(
+      _syncSharedDayCacheInBackground(
+        uid: uid,
+        weekId: weekId,
+        dayId: dayId,
+        dayDocRef: dayDocRef,
+        currentCached: cached,
+      ),
+    );
+
+    if (cached.isNotEmpty) return cached;
+
+    final remote = await _fetchSharedDayExercisesFromFirestore(
+      dayDocRef: dayDocRef,
+    );
+    await _setCachedSharedDayExercises(
+      uid: uid,
+      weekId: weekId,
+      dayId: dayId,
+      exercises: remote,
+    );
+    return remote;
   }
 
   Future<void> setTypingStatus(String chatId, bool isTyping) async {

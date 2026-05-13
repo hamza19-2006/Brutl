@@ -12,23 +12,11 @@ import '../services/database_service.dart';
 import '../services/step_service.dart';
 import 'nutrition_service.dart';
 
-/// Brutl `WorkoutProvider`
-/// -------------------------------------------------------------------------
-/// Exercises NEVER live in this provider. They live ONLY in Firestore at:
-///
-///   users/{uid}/weeks/week_{n}/days/day_{n}    fields: exercises, updatedAt
-///
-/// This provider only owns:
-///   * The user dashboard meta (name, step / calorie goals, weight, etc.)
-///   * The selected week (1..N) and total program weeks
-///   * The split day-name list (e.g. ['Push', 'Pull', 'Legs'])
-///   * UI state (highlighted exercise, last-workout insights for Home)
-///
-/// All exercise reads/writes are performed by the screens that need them
-/// directly against Firestore using `merge: true` + `updatedAt`.
 class WorkoutProvider extends ChangeNotifier {
   static const String _userPrefsKey = 'brutl_user_model';
   static const String _splitPrefsKey = 'brutl_workout_split';
+  // ── NEW: key to persist when the user started week 1 ──
+  static const String _programStartDateKey = 'brutl_program_start_date';
   static const String _defaultWorkoutSplit = 'Upper/Lower';
 
   // ── State ──────────────────────────────────────────────────────────────────
@@ -40,11 +28,16 @@ class WorkoutProvider extends ChangeNotifier {
     weightKg: 70.0,
   );
 
-  int _selectedWeek = 1;
+  // ── CHANGED: _selectedWeek is now the UI-only override; real week comes
+  //    from _computeCurrentWeek(). Starts at 0 meaning "use auto".
+  int _selectedWeek = 0;
   final int _totalProgramWeeks = 4;
   String _selectedWorkoutSplit = _defaultWorkoutSplit;
   List<String> _masterTemplate = const <String>[];
   List<String> _customSplitDays = const <String>[];
+
+  // ── NEW: when the user's program started (week 1, day 1) ──
+  DateTime? _programStartDate;
 
   final HomeUiModel _homeUi = const HomeUiModel(
     brandName: 'Brutl',
@@ -90,7 +83,11 @@ class WorkoutProvider extends ChangeNotifier {
 
   String? get highlightedExerciseName => _highlightedExerciseName;
 
-  int get selectedWeek => _selectedWeek;
+  // ── CHANGED: selectedWeek returns the auto-computed week unless the user
+  //    has explicitly overridden it via selectWeek().
+  int get selectedWeek =>
+      _selectedWeek > 0 ? _selectedWeek : _computeCurrentWeek();
+
   int get totalProgramWeeks => _totalProgramWeeks;
   String get selectedWorkoutSplit => _selectedWorkoutSplit;
 
@@ -102,6 +99,21 @@ class WorkoutProvider extends ChangeNotifier {
       return List<String>.unmodifiable(_customSplitDays);
     }
     return List<String>.unmodifiable(_masterTemplate);
+  }
+
+  // ── NEW: returns the real current week (1-4 loop) based on program start ──
+  int get currentWeekAuto => _computeCurrentWeek();
+
+  int _computeCurrentWeek() {
+    final startDate = _programStartDate;
+    if (startDate == null) return 1;
+    final daysSinceStart = DateTime.now()
+        .difference(startDate)
+        .inDays
+        .clamp(0, 999999);
+    // Week 1 = days 0-6, Week 2 = days 7-13, etc. Loops every 4 weeks.
+    final weekIndex = (daysSinceStart ~/ 7) % _totalProgramWeeks;
+    return weekIndex + 1; // 1-based
   }
 
   // ── Home strings ───────────────────────────────────────────────────────────
@@ -136,6 +148,7 @@ class WorkoutProvider extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await _loadUser(prefs);
     await _loadWorkoutSplit(prefs);
+    await _loadProgramStartDate(prefs);
 
     final stepService = StepService.instance;
     _currentDailySteps = stepService.getTodaySteps();
@@ -166,12 +179,79 @@ class WorkoutProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Force-reload the user metadata + split day list. Called by login and
-  /// onboarding flows so the Home screen never paints stale defaults.
   Future<void> loadUserData() async {
     final prefs = await SharedPreferences.getInstance();
     await _loadUser(prefs);
     await _loadWorkoutSplit(prefs);
+    await _loadProgramStartDate(prefs);
+    notifyListeners();
+  }
+
+  // ── NEW: load/save program start date ──────────────────────────────────────
+
+  Future<void> _loadProgramStartDate(SharedPreferences prefs) async {
+    // 1. Try local prefs first (fast)
+    final storedStr = prefs.getString(_programStartDateKey);
+    if (storedStr != null) {
+      _programStartDate = DateTime.tryParse(storedStr);
+      if (_programStartDate != null) return;
+    }
+
+    // 2. Try Firestore
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) {
+      _programStartDate ??= DateTime.now();
+      return;
+    }
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .get();
+      final data = doc.data();
+      if (data != null) {
+        final raw =
+            data['program_start_date'] ??
+            data['programStartDate'] ??
+            data['created_at'] ??
+            data['createdAt'];
+        DateTime? parsed;
+        if (raw is Timestamp) {
+          parsed = raw.toDate();
+        } else if (raw is String) {
+          parsed = DateTime.tryParse(raw);
+        }
+        if (parsed != null) {
+          _programStartDate = parsed;
+          await prefs.setString(_programStartDateKey, parsed.toIso8601String());
+          return;
+        }
+      }
+    } catch (e) {
+      debugPrint('WORKOUT_PROVIDER: could not load program start date — $e');
+    }
+
+    // 3. Fallback: treat today as start of the current week block
+    //    so the user's current week stays correct.
+    _programStartDate ??= DateTime.now();
+  }
+
+  // ── NEW: called by onboarding / split-change to record week-1 start ───────
+  Future<void> setProgramStartDate(DateTime date) async {
+    _programStartDate = date;
+    _selectedWeek = 0; // reset override so auto kicks in
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_programStartDateKey, date.toIso8601String());
+
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      unawaited(
+        FirebaseFirestore.instance.collection('users').doc(uid).set(
+          <String, dynamic>{'program_start_date': Timestamp.fromDate(date)},
+          SetOptions(merge: true),
+        ),
+      );
+    }
     notifyListeners();
   }
 
@@ -240,6 +320,27 @@ class WorkoutProvider extends ChangeNotifier {
     } else if (masterDays.isNotEmpty) {
       _customSplitDays = masterDays;
       _masterTemplate = masterDays;
+    }
+
+    // Also sync program start date if Firestore has it
+    final rawStart =
+        data['program_start_date'] ??
+        data['programStartDate'] ??
+        data['created_at'] ??
+        data['createdAt'];
+    if (rawStart != null && _programStartDate == null) {
+      DateTime? parsed;
+      if (rawStart is Timestamp) {
+        parsed = rawStart.toDate();
+      } else if (rawStart is String) {
+        parsed = DateTime.tryParse(rawStart);
+      }
+      if (parsed != null) {
+        _programStartDate = parsed;
+        unawaited(
+          prefs.setString(_programStartDateKey, parsed.toIso8601String()),
+        );
+      }
     }
 
     unawaited(prefs.setString(_userPrefsKey, _user.toRawJson()));
@@ -342,20 +443,29 @@ class WorkoutProvider extends ChangeNotifier {
 
   // ── Week selection ─────────────────────────────────────────────────────────
 
+  // CHANGED: selectWeek now sets an explicit override. When the user
+  // navigates away and comes back the auto week is used again.
   void selectWeek(int week) {
     if (_selectedWeek == week) return;
     _selectedWeek = week;
     notifyListeners();
   }
 
-  // ── Split mutation (used by SplitChangeScreen) ─────────────────────────────
+  // ── NEW: reset to auto week (call when leaving Workout tab) ───────────────
+  void resetToAutoWeek() {
+    if (_selectedWeek == 0) return;
+    _selectedWeek = 0;
+    notifyListeners();
+  }
 
-  /// Replaces the active split with [newDayNames]. Writing to Firestore is
-  /// the caller's responsibility — this method only updates in-memory state.
+  // ── Split mutation ─────────────────────────────────────────────────────────
+
   void wipeAndReplaceSplit(List<String> newDayNames) {
     _customSplitDays = List<String>.unmodifiable(newDayNames);
     _masterTemplate = _customSplitDays;
     _selectedWorkoutSplit = 'Custom';
+    // Reset program start to today so week 1 begins fresh
+    unawaited(setProgramStartDate(DateTime.now()));
     notifyListeners();
   }
 
@@ -509,9 +619,6 @@ class WorkoutProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Synchronously updates local calorie/macro targets so Home and Workout
-  /// screens repaint immediately, then fans out to NutritionService and
-  /// SharedPreferences without blocking the UI.
   void updateOptimisticMacros(
     int newKcal,
     int newCarbs,
@@ -542,7 +649,6 @@ class WorkoutProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Public alias used by the settings macros flow.
   void forceUpdateMacros(
     int newKcal,
     int newCarbs,

@@ -172,6 +172,8 @@ class BrutlUser {
           (json['country'] as String?) ??
           (json['user_country'] as String?) ??
           (json['userCountry'] as String?) ??
+          (json['countryCode'] as String?) ??
+          (json['country_code'] as String?) ??
           '',
       gender: json['gender'] as String? ?? 'Other',
       age: (json['age'] as num?)?.toInt() ?? 0,

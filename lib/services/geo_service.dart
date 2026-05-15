@@ -125,6 +125,7 @@ class GeoService {
   }) {
     return userRef.set(<String, dynamic>{
       'countryCode': countryCode,
+      'country': countryName(countryCode),
     }, SetOptions(merge: true));
   }
 

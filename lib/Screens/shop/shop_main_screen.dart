@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../providers/brutl_user_provider.dart';
+import '../../services/geo_service.dart';
 import 'brutl_products_screen.dart';
 import 'diet_workout_screen.dart';
 
@@ -9,7 +10,9 @@ class ShopMainScreen extends StatelessWidget {
   const ShopMainScreen({super.key});
 
   bool _isPakistan(String country) {
-    return country.trim().toLowerCase() == 'pakistan';
+    final normalized = country.trim();
+    return normalized.toLowerCase() == 'pakistan' ||
+        GeoService.isPakistan(normalized);
   }
 
   @override

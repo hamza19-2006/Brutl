@@ -5,7 +5,6 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../providers/brutl_user_provider.dart';
-import '../../models/user_model.dart';
 import '../../services/geo_service.dart';
 import 'edit_age_screen.dart';
 import 'edit_body_fat_screen.dart';
@@ -35,7 +34,7 @@ class PersonalStatsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final user = context.watch<BrutlUserProvider>().user;
-    final countryCode = (user as dynamic).countryCode as String? ?? '';
+    final country = user.country;
 
     return Scaffold(
       backgroundColor: AppColors.backgroundPrimary,
@@ -57,7 +56,7 @@ class PersonalStatsScreen extends StatelessWidget {
                     showChevron: false,
                     enabled: false,
                   ),
-                  _CountryTile(countryCode: countryCode),
+                  _CountryTile(country: country),
                   SettingsTileWidget(
                     title: 'Height',
                     trailingText: _formatHeight(user.height),
@@ -132,13 +131,18 @@ class PersonalStatsScreen extends StatelessWidget {
 }
 
 class _CountryTile extends StatelessWidget {
-  const _CountryTile({required this.countryCode});
+  const _CountryTile({required this.country});
 
-  final String countryCode;
+  final String country;
 
   @override
   Widget build(BuildContext context) {
-    final countryName = GeoService.countryName(countryCode);
+    final trimmed = country.trim();
+    final countryName = trimmed.isEmpty
+        ? '—'
+        : trimmed.length == 2
+        ? GeoService.countryName(trimmed)
+        : trimmed;
     return Padding(
       padding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.lg,

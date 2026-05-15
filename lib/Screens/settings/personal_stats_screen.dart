@@ -5,6 +5,8 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../providers/brutl_user_provider.dart';
+import '../../models/user_model.dart';
+import '../../services/geo_service.dart';
 import 'edit_age_screen.dart';
 import 'edit_body_fat_screen.dart';
 import 'edit_height_screen.dart';
@@ -33,6 +35,7 @@ class PersonalStatsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final user = context.watch<BrutlUserProvider>().user;
+    final countryCode = (user as dynamic).countryCode as String? ?? '';
 
     return Scaffold(
       backgroundColor: AppColors.backgroundPrimary,
@@ -54,6 +57,7 @@ class PersonalStatsScreen extends StatelessWidget {
                     showChevron: false,
                     enabled: false,
                   ),
+                  _CountryTile(countryCode: countryCode),
                   SettingsTileWidget(
                     title: 'Height',
                     trailingText: _formatHeight(user.height),
@@ -65,8 +69,7 @@ class PersonalStatsScreen extends StatelessWidget {
                   ),
                   SettingsTileWidget(
                     title: 'Weight',
-                    trailingText:
-                        _formatWeight(user.weight, user.weightUnit),
+                    trailingText: _formatWeight(user.weight, user.weightUnit),
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
                         builder: (_) => const EditWeightScreen(),
@@ -107,11 +110,7 @@ class PersonalStatsScreen extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: AppSpacing.xxl),
-              SettingsActionBoxWidget(
-                children: [
-                  _MacrosTile(),
-                ],
-              ),
+              SettingsActionBoxWidget(children: [_MacrosTile()]),
               const SizedBox(height: AppSpacing.xl),
             ],
           ),
@@ -132,15 +131,65 @@ class PersonalStatsScreen extends StatelessWidget {
   }
 }
 
+class _CountryTile extends StatelessWidget {
+  const _CountryTile({required this.countryCode});
+
+  final String countryCode;
+
+  @override
+  Widget build(BuildContext context) {
+    final countryName = GeoService.countryName(countryCode);
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.lg,
+        vertical: AppSpacing.md + 2,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Text(
+              'Country',
+              style: AppTextStyles.bodyLarge(color: AppColors.textPrimary),
+            ),
+          ),
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        countryName,
+                        textAlign: TextAlign.right,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.bodyMedium(
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _MacrosTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final user = context.watch<BrutlUserProvider>().user;
     return InkWell(
       borderRadius: BorderRadius.circular(AppSpacing.borderRadiusSmall),
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute<void>(builder: (_) => const EditMacrosScreen()),
-      ),
+      onTap: () => Navigator.of(
+        context,
+      ).push(MaterialPageRoute<void>(builder: (_) => const EditMacrosScreen())),
       child: Padding(
         padding: const EdgeInsets.symmetric(
           horizontal: AppSpacing.lg,

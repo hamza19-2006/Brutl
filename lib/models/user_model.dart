@@ -6,6 +6,7 @@ class BrutlUser {
     required this.uid,
     this.displayName = '',
     this.username = '',
+    this.country = '',
     this.gender = 'Other',
     this.age = 0,
     this.height = 0.0,
@@ -36,6 +37,7 @@ class BrutlUser {
   final String uid;
   final String displayName;
   final String username;
+  final String country;
   final String gender;
   final int age;
   final double height;
@@ -66,6 +68,7 @@ class BrutlUser {
     String? uid,
     String? displayName,
     String? username,
+    String? country,
     String? gender,
     int? age,
     double? height,
@@ -96,6 +99,7 @@ class BrutlUser {
       uid: uid ?? this.uid,
       displayName: displayName ?? this.displayName,
       username: username ?? this.username,
+      country: country ?? this.country,
       gender: gender ?? this.gender,
       age: age ?? this.age,
       height: height ?? this.height,
@@ -129,6 +133,7 @@ class BrutlUser {
       'uid': uid,
       'display_name': displayName,
       'username': username,
+      'country': country,
       'gender': gender,
       'age': age,
       'height': height,
@@ -154,8 +159,7 @@ class BrutlUser {
       'photo_url': photoUrl,
       if (usernameChangedAt != null)
         'username_changed_at': usernameChangedAt!.toUtc().toIso8601String(),
-      if (createdAt != null)
-        'created_at': createdAt!.toUtc().toIso8601String(),
+      if (createdAt != null) 'created_at': createdAt!.toUtc().toIso8601String(),
     };
   }
 
@@ -164,6 +168,11 @@ class BrutlUser {
       uid: json['uid'] as String? ?? '',
       displayName: json['display_name'] as String? ?? '',
       username: json['username'] as String? ?? '',
+      country:
+          (json['country'] as String?) ??
+          (json['user_country'] as String?) ??
+          (json['userCountry'] as String?) ??
+          '',
       gender: json['gender'] as String? ?? 'Other',
       age: (json['age'] as num?)?.toInt() ?? 0,
       height: (json['height'] as num?)?.toDouble() ?? 0.0,
@@ -197,15 +206,11 @@ class BrutlUser {
       targetFats: (json['target_fats'] as num?)?.toInt() ?? 60,
       isProfileComplete: json['is_profile_complete'] as bool? ?? false,
       photoUrl:
-          (json['photo_url'] as String?) ??
-          (json['photoUrl'] as String?) ??
-          '',
+          (json['photo_url'] as String?) ?? (json['photoUrl'] as String?) ?? '',
       usernameChangedAt: _parseTimestamp(
         json['username_changed_at'] ?? json['usernameChangedAt'],
       ),
-      createdAt: _parseTimestamp(
-        json['created_at'] ?? json['createdAt'],
-      ),
+      createdAt: _parseTimestamp(json['created_at'] ?? json['createdAt']),
     );
   }
 

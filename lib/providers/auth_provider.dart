@@ -3,6 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
+import '../services/geo_service.dart';
+
 @immutable
 class GoogleAuthResult {
   const GoogleAuthResult._({
@@ -33,9 +35,20 @@ class GoogleAuthResult {
 }
 
 class BrutlAuthProvider extends ChangeNotifier {
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final GoogleSignIn _googleSignIn = GoogleSignIn.instance;
+  BrutlAuthProvider({
+    FirebaseAuth? auth,
+    FirebaseFirestore? firestore,
+    GoogleSignIn? googleSignIn,
+    GeoService? geoService,
+  }) : _auth = auth ?? FirebaseAuth.instance,
+       _firestore = firestore ?? FirebaseFirestore.instance,
+       _googleSignIn = googleSignIn ?? GoogleSignIn.instance,
+       _geoService = geoService ?? GeoService();
+
+  final FirebaseAuth _auth;
+  final FirebaseFirestore _firestore;
+  final GoogleSignIn _googleSignIn;
+  final GeoService _geoService;
 
   bool isLoading = false;
   String? errorMessage;
@@ -59,6 +72,18 @@ class BrutlAuthProvider extends ChangeNotifier {
         email: email.trim(),
         password: password,
       );
+      final user = _auth.currentUser;
+      if (user != null) {
+        final userDoc = await _firestore
+            .collection('users')
+            .doc(user.uid)
+            .get();
+        final existingCode = (userDoc.data()?['countryCode'] as String?)
+            ?.trim();
+        if (existingCode == null || existingCode.isEmpty) {
+          await _ensureCountryCode(user.uid);
+        }
+      }
       return true;
     } on FirebaseAuthException catch (error) {
       _setError(_mapAuthException(error));
@@ -93,6 +118,7 @@ class BrutlAuthProvider extends ChangeNotifier {
               'created_at': FieldValue.serverTimestamp(),
               'createdAt': FieldValue.delete(),
             }, SetOptions(merge: true));
+        await _ensureCountryCode(user.uid);
       }
       return true;
     } on FirebaseAuthException catch (error) {
@@ -162,6 +188,12 @@ class BrutlAuthProvider extends ChangeNotifier {
               'lastSignInAt': FieldValue.delete(),
               'createdAt': FieldValue.delete(),
             }, SetOptions(merge: true));
+
+        final existingCountry = (existingDoc.data()?['countryCode'] as String?)
+            ?.trim();
+        if (existingCountry == null || existingCountry.isEmpty) {
+          await _ensureCountryCode(user.uid);
+        }
 
         return GoogleAuthResult.success(isNewUser: isNewUser);
       }
@@ -284,6 +316,14 @@ class BrutlAuthProvider extends ChangeNotifier {
         return 'Invalid phone number format.';
       default:
         return error.message ?? 'Authentication failed. Please try again.';
+    }
+  }
+
+  Future<void> _ensureCountryCode(String uid) async {
+    try {
+      await _geoService.ensureCountryCodeForUser(uid: uid);
+    } catch (error) {
+      debugPrint('AUTH_PROVIDER: failed to ensure country code — $error');
     }
   }
 }

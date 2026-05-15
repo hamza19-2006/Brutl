@@ -33,7 +33,6 @@ class StepProvider extends ChangeNotifier {
   bool _isListening = false;
   int _currentSteps = 0;
   int _previousSteps = -1; // for deduplication
-  int _lastSyncedSteps = -1;
   String? _sensorError;
 
   // ─── Permission state ────────────────────────────────────────────────────
@@ -82,7 +81,8 @@ class StepProvider extends ChangeNotifier {
   double get caloriesBurned {
     final weight = _userWeightKg > 0 ? _userWeightKg : 70.0;
     final normalizedWeightFactor = weight / 70.0;
-    final estimatedCalories = todaysDisplaySteps * 0.04 * normalizedWeightFactor;
+    final estimatedCalories =
+        todaysDisplaySteps * 0.04 * normalizedWeightFactor;
     return estimatedCalories.clamp(0, 5000).toDouble();
   }
 
@@ -162,7 +162,7 @@ class StepProvider extends ChangeNotifier {
   // ─── Sensor listening ───────────────────────────────────────────────────
 
   Future<void> _startSensorListening() async {
-    await _sensorService.initialize(onDailyReset: _resetDailyStatsInFirebase);
+    await _sensorService.initialize();
 
     _sensorError = _sensorService.sensorError;
     _isListening = _sensorService.isListening;
@@ -196,24 +196,6 @@ class StepProvider extends ChangeNotifier {
     );
   }
 
-  Future<void> _resetDailyStatsInFirebase() async {
-    try {
-      final uid = FirebaseAuth.instance.currentUser?.uid;
-      if (uid == null) return;
-
-      await FirebaseFirestore.instance.collection('users').doc(uid).set({
-        'currentSteps': 0,
-        'dailyCaloriesBurned': 0,
-        'lastStepResetDate': DateTime.now().toIso8601String(),
-      }, SetOptions(merge: true));
-      debugPrint('BRUTL_STEPS: Firebase daily counters reset at midnight.');
-    } catch (error) {
-      debugPrint(
-        'BRUTL_STEPS: Failed to reset Firebase daily counters — $error',
-      );
-    }
-  }
-
   void _onStepsUpdated(int steps) {
     // Only notify if the value actually changed.
     if (steps == _previousSteps) return;
@@ -224,31 +206,9 @@ class StepProvider extends ChangeNotifier {
     // Persist to local history for the steps chart.
     final today = StepSensorService.dateStampFor(DateTime.now());
     unawaited(_localStorage.saveDailySteps(today, _currentSteps));
-    unawaited(_syncDailyStatsToFirebase());
 
     debugPrint('BRUTL_STEPS: UI updated — steps=$_currentSteps');
     notifyListeners();
-  }
-
-  Future<void> _syncDailyStatsToFirebase() async {
-    if (_currentSteps == _lastSyncedSteps) return;
-    if (_lastSyncedSteps >= 0 &&
-        (_currentSteps - _lastSyncedSteps).abs() < 25) {
-      return;
-    }
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-
-    try {
-      final calories = caloriesBurned.round().clamp(0, 5000);
-      await FirebaseFirestore.instance.collection('users').doc(uid).set({
-        'currentSteps': _currentSteps,
-        'dailyCaloriesBurned': calories,
-      }, SetOptions(merge: true));
-      _lastSyncedSteps = _currentSteps;
-    } catch (error) {
-      debugPrint('BRUTL_STEPS: Failed to sync daily stats — $error');
-    }
   }
 
   // ─── Manual refresh (app resume from background) ────────────────────────

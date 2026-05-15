@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
 import '../models/user_model.dart';
+import '../services/geo_service.dart';
 
 /// Single source-of-truth Provider for the canonical [BrutlUser] document.
 ///
@@ -18,12 +19,17 @@ import '../models/user_model.dart';
 ///    listeners are notified again, and the [Exception] is rethrown so
 ///    the calling screen can show a `SnackBar`.
 class BrutlUserProvider extends ChangeNotifier {
-  BrutlUserProvider({FirebaseFirestore? firestore, FirebaseAuth? auth})
-    : _firestore = firestore ?? FirebaseFirestore.instance,
-      _auth = auth ?? FirebaseAuth.instance;
+  BrutlUserProvider({
+    FirebaseFirestore? firestore,
+    FirebaseAuth? auth,
+    GeoService? geoService,
+  }) : _firestore = firestore ?? FirebaseFirestore.instance,
+       _auth = auth ?? FirebaseAuth.instance,
+       _geoService = geoService ?? GeoService();
 
   final FirebaseFirestore _firestore;
   final FirebaseAuth _auth;
+  final GeoService _geoService;
 
   BrutlUser _user = const BrutlUser(uid: '');
   bool _isLoading = false;
@@ -78,6 +84,19 @@ class BrutlUserProvider extends ChangeNotifier {
     } catch (e) {
       debugPrint('BRUTL_USER_PROVIDER: initial fetch failed — $e');
       _user = BrutlUser(uid: firebaseUser.uid);
+    }
+
+    // If country is missing, trigger background detection.
+    // The snapshot listener below will pick up the Firestore update.
+    if (_user.country.trim().isEmpty) {
+      unawaited(
+        _geoService
+            .ensureCountryCodeForUser(uid: firebaseUser.uid)
+            .catchError((Object e) {
+          debugPrint('BRUTL_USER_PROVIDER: geo detection failed — $e');
+          return null;
+        }),
+      );
     }
 
     _docSub = docRef.snapshots().listen(

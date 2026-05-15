@@ -20,6 +20,7 @@ import '../widgets/biometric_card.dart';
 import 'calories_history_screen.dart';
 import 'chat/chat_list_screen.dart';
 import 'home/home_screen_ex_show.dart';
+import 'shop/shop_main_screen.dart';
 import 'steps_history_screen.dart';
 import 'workout_screen.dart';
 
@@ -550,7 +551,7 @@ class _HomeScreenState extends State<HomeScreen> {
         children: const [
           _HomeTab(),
           WorkoutScreen(showBottomNavigationBar: false),
-          _ShopPlaceholder(),
+          ShopMainScreen(),
           ChatListScreen(),
         ],
       ),

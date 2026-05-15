@@ -9,7 +9,6 @@ import 'diet_workout_screen.dart';
 class ShopMainScreen extends StatelessWidget {
   const ShopMainScreen({super.key});
 
-  // FIX 1: Change to String? to accept null values without crashing
   bool _isPakistan(String? country) {
     if (country == null || country.trim().isEmpty) {
       return false; // Safely return false if country is unknown
@@ -22,9 +21,7 @@ class ShopMainScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final user = context.watch<BrutlUserProvider>().user;
-
-    // FIX 2: Use the null-aware operator (?.) in case 'user' itself is null
-    final isPakistanUser = _isPakistan(user?.country);
+    final isPakistanUser = _isPakistan(user.country);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Shop')),

@@ -5,16 +5,14 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../config/secrets.dart';
 
 class GeoService {
   GeoService({FirebaseFirestore? firestore, http.Client? httpClient})
     : _firestore = firestore ?? FirebaseFirestore.instance,
       _httpClient = httpClient ?? http.Client();
 
-  static const String _ipInfoToken = String.fromEnvironment(
-    'ipinfotoken',
-    defaultValue: '',
-  );
+  static const String _ipInfoToken = ipinfotoken;
   static const String _countryCodePrefsPrefix = 'country_code_';
 
   final FirebaseFirestore _firestore;

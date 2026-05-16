@@ -284,9 +284,9 @@ class WorkoutProvider extends ChangeNotifier {
 
     final remoteCurrentSteps =
         (data['currentSteps'] as num?)?.toInt() ?? _currentDailySteps;
-    final remoteCalories =
-        (data['dailyCaloriesBurned'] as num?)?.toDouble() ??
-        StepService.instance.calculateCalories(remoteCurrentSteps);
+    final remoteCalories = StepService.instance.calculateCalories(
+      remoteCurrentSteps,
+    );
 
     final remoteSplit =
         (data['workout_split_template'] as String?) ??

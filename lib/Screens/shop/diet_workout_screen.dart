@@ -307,6 +307,14 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
         _showDownload = true;
       }
     });
+    if (plan == null || plan.trim().isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('Plan generation failed. Please try again.')),
+        );
+    }
   }
 
   Future<void> _simulateWorkoutGeneration() async {
@@ -357,6 +365,14 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
         _showWorkoutDownload = true;
       }
     });
+    if (plan == null || plan.trim().isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('Plan generation failed. Please try again.')),
+        );
+    }
   }
 
   Future<void> _generateAndSavePdf() async {

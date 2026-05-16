@@ -6,7 +6,7 @@ import 'package:http/http.dart' as http;
 import '../config/secrets.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// AI TEXT MEAL SERVICE — 2-Tier Fallback: Gemini → DeepSeek V4 flash
+// AI TEXT MEAL SERVICE — 2-Tier Fallback: Gemini → DeepSeek V3
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const String _systemPrompt =

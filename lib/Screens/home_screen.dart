@@ -3,25 +3,21 @@ import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../config/secrets.dart';
-import '../core/theme/app_colors.dart';
 import '../core/theme/constants/ai_coach.dart';
 import '../providers/health_provider.dart';
 import '../providers/nutrition_service.dart';
-import '../providers/workout_nutrition_provider.dart';
 import '../providers/workout_provider.dart';
 import '../widgets/biometric_card.dart';
 import 'calories_history_screen.dart';
 import 'chat/chat_list_screen.dart';
 import 'home/home_screen_ex_show.dart';
 import 'shop/shop_main_screen.dart';
-import 'steps_history_screen.dart';
 import 'workout_screen.dart';
 
 // ─── AI Coach models (kept here so nothing else needs to import them) ─────────

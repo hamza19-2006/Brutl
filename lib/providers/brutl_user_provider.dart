@@ -203,11 +203,10 @@ class BrutlUserProvider extends ChangeNotifier {
     required String displayUnit,
   }) {
     return applyOptimistic(
-      mutate: (u) => u.copyWith(weight: valueKg, weightUnit: 'kg'),
+      mutate: (u) => u.copyWith(weight: valueKg, weightUnit: displayUnit),
       firestorePatch: <String, dynamic>{
         'weight': valueKg,
-        'weight_unit': 'kg',
-        'weight_display_unit': displayUnit,
+        'weight_unit': displayUnit,
       },
     );
   }

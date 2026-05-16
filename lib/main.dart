@@ -11,6 +11,7 @@ import 'Screens/home_screen.dart' hide AiCoachProvider;
 import 'Screens/onboarding/onboarding_screen.dart';
 import 'core/theme/app_theme.dart';
 import 'services/firebase_bootstrap.dart';
+import 'services/step_sensor_service.dart';
 import 'services/step_service.dart';
 import 'providers/auth_provider.dart';
 import 'providers/auth_validation_provider.dart';
@@ -103,6 +104,7 @@ class _AppWarmupGateState extends State<AppWarmupGate>
         // Refresh steps on resume so today's bar is immediately correct
         if (stepRef != null) unawaited(stepRef.refreshSteps());
         unawaited(StepService.instance.checkAndResetIfNewDay());
+        unawaited(StepSensorService.instance.checkAndResetIfNewDay());
         break;
       case AppLifecycleState.inactive:
       case AppLifecycleState.paused:

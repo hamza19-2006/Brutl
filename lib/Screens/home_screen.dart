@@ -743,13 +743,7 @@ class _HomeHeader extends StatelessWidget {
                   // MODULE 1 FIX — read the strictly-computed steps so the
                   // calorie text can never derive from the raw hardware
                   // counter (e.g. 20,836 → 833 kcal).
-                  final fallbackCalories =
-                      workoutProvider.currentDailyCaloriesBurned;
-                  final liveCalories = liveStepProvider.todaysDisplaySteps > 0
-                      ? liveStepProvider.caloriesBurned
-                      : (stepProvider.todaysDisplaySteps > 0
-                            ? stepProvider.caloriesBurned
-                            : fallbackCalories);
+                  final liveCalories = liveStepProvider.caloriesBurned;
                   return Text(
                     'kcal ${liveCalories.round()} 🔥',
                     style: const TextStyle(
@@ -827,10 +821,9 @@ class _StatsRowState extends State<_StatsRow> {
         // MODULE 1 FIX — always read the computed `todaysDisplaySteps`
         // (raw hardware counter − daily baseline). Never bind the UI to
         // raw pedometer events.
-        final liveSteps = stepProvider.todaysDisplaySteps > 0
-            ? stepProvider.todaysDisplaySteps
-            : workoutProvider.currentDailySteps;
-        final steps = liveSteps < 0 ? 0 : liveSteps;
+        final steps = stepProvider.todaysDisplaySteps < 0
+            ? 0
+            : stepProvider.todaysDisplaySteps;
         final progress = stepGoal > 0
             ? (steps / stepGoal).clamp(0.0, 1.0).toDouble()
             : 0.0;

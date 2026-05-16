@@ -154,7 +154,7 @@ class _CountryTile extends StatelessWidget {
           Expanded(
             child: Text(
               'Country',
-              style: AppTextStyles.bodyLarge(color: AppColors.textPrimary),
+              style: AppTextStyles.bodyLarge(color: AppColors.textTertiary),
             ),
           ),
           Flexible(

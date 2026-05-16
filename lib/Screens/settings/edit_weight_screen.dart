@@ -27,8 +27,13 @@ class _EditWeightScreenState extends State<EditWeightScreen> {
   void initState() {
     super.initState();
     final user = context.read<BrutlUserProvider>().user;
+    _unit = user.weightUnit.isEmpty ? _kg : user.weightUnit.toLowerCase();
     if (user.weight > 0) {
-      _ctrl.text = user.weight.toStringAsFixed(1);
+      if (_unit == _lbs) {
+        _ctrl.text = (user.weight / 0.45359237).toStringAsFixed(1);
+      } else {
+        _ctrl.text = user.weight.toStringAsFixed(1);
+      }
     }
   }
 

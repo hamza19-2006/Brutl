@@ -35,6 +35,19 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
     'Home Gym (Dumbbells only)',
     'Bodyweight',
   ];
+  static const List<String> _splitOptions = <String>[
+    'Push Pull Legs',
+    'Bro Split',
+    'Push Pull Leg Upper Lower',
+    'Upper Lower',
+    'Custom',
+  ];
+  static const Map<String, List<String>> _splitDayPresets = <String, List<String>>{
+    'Push Pull Legs': <String>['Chest & Triceps', 'Back & Biceps', 'Leg & Shoulders', 'Chest & Triceps', 'Back & Biceps', 'Leg & Shoulders', 'Rest Day'],
+    'Bro Split': <String>['Chest', 'Back', 'Arms', 'Shoulder', 'Legs', 'Rest Day', 'Rest Day'],
+    'Push Pull Leg Upper Lower': <String>['Chest & Triceps', 'Back & Biceps', 'Leg & Shoulders', 'Rest Day', 'Upper Day', 'Lower Day', 'Rest Day'],
+    'Upper Lower': <String>['Upper A', 'Lower A', 'Rest Day', 'Upper B', 'Lower B', 'Rest Day', 'Rest Day'],
+  };
 
   late final TabController _tabController;
 
@@ -65,11 +78,12 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
   bool _showDownload = false;
   bool _isHydrated = false;
   String _workoutGoal = 'Body Recomp';
-  int _workoutDaysPerWeek = 4;
+  int _workoutDaysPerWeek = 7;
   String _experienceLevel = 'Beginner';
   String _equipmentAccess = 'Full Gym';
   bool _isWorkoutGenerating = false;
   bool _showWorkoutDownload = false;
+  String _selectedWorkoutSplit = 'Push Pull Legs';
 
   @override
   void initState() {
@@ -100,10 +114,12 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
     _proteinController.text = user.targetProtein.toString();
     _fatController.text = user.targetFats.toString();
     _workoutAgeController.text = user.age > 0 ? user.age.toString() : '';
-    _workoutSplitNameController.text =
-        user.workoutSplitTemplate.trim().isNotEmpty
-        ? user.workoutSplitTemplate
-        : 'PPL Split';
+
+    final savedTemplate = user.workoutSplitTemplate.trim();
+    _selectedWorkoutSplit = _resolveSplitOption(savedTemplate);
+    _workoutSplitNameController.text = _selectedWorkoutSplit == 'Custom' && savedTemplate.isNotEmpty
+        ? savedTemplate
+        : _selectedWorkoutSplit;
 
     if (_goalOptions.contains(user.bodyGoal)) {
       _workoutGoal = user.bodyGoal;
@@ -122,17 +138,25 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
       _otherGoalController.text = user.bodyGoal;
     }
 
-    final initialDayNames = user.customSplitDays.isNotEmpty
-        ? user.customSplitDays
-        : List<String>.generate(
-            _workoutDaysPerWeek,
-            (int index) => 'Day ${index + 1}',
-          );
-    _workoutDaysPerWeek = initialDayNames.length.clamp(1, 7);
-    _syncWorkoutDayControllers(
-      _workoutDaysPerWeek,
-      seededValues: initialDayNames,
-    );
+    if (_selectedWorkoutSplit == 'Custom') {
+      final initialDayNames = user.customSplitDays.isNotEmpty
+          ? user.customSplitDays
+          : List<String>.generate(
+              _workoutDaysPerWeek,
+              (int index) => 'Day ${index + 1}',
+            );
+      _workoutDaysPerWeek = initialDayNames.length.clamp(1, 7);
+      _syncWorkoutDayControllers(
+        _workoutDaysPerWeek,
+        seededValues: initialDayNames,
+      );
+    } else {
+      _workoutDaysPerWeek = 7;
+      _syncWorkoutDayControllers(
+        7,
+        seededValues: _splitDayPresets[_selectedWorkoutSplit]!,
+      );
+    }
     _isHydrated = true;
   }
 
@@ -164,15 +188,17 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
   void _syncWorkoutDayControllers(
     int targetCount, {
     List<String>? seededValues,
+    bool forceSeed = false,
   }) {
     final preservedValues = _dayNameControllers
         .map((TextEditingController controller) => controller.text)
         .toList();
     final nextValues = List<String>.generate(targetCount, (int index) {
-      if (seededValues != null &&
-          index < seededValues.length &&
-          seededValues[index].trim().isNotEmpty) {
-        return seededValues[index].trim();
+      if (seededValues != null && index < seededValues.length) {
+        if (forceSeed) return seededValues[index];
+        if (seededValues[index].trim().isNotEmpty) {
+          return seededValues[index].trim();
+        }
       }
       if (index < preservedValues.length &&
           preservedValues[index].trim().isNotEmpty) {
@@ -193,6 +219,43 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
         _dayNameControllers[index].text = nextValues[index];
       }
     }
+  }
+
+  String _resolveSplitOption(String template) {
+    if (_splitOptions.contains(template)) return template;
+    final lower = template.toLowerCase();
+    if (lower.contains('push pull leg upper lower')) {
+      return 'Push Pull Leg Upper Lower';
+    }
+    if (lower.contains('push pull leg') || lower.contains('ppl')) {
+      return 'Push Pull Legs';
+    }
+    if (lower.contains('bro')) return 'Bro Split';
+    if (lower.contains('upper lower')) return 'Upper Lower';
+    return 'Custom';
+  }
+
+  void _onWorkoutSplitChanged(String? value) {
+    if (value == null) return;
+    setState(() {
+      _selectedWorkoutSplit = value;
+      _workoutSplitNameController.text = value;
+      _showWorkoutDownload = false;
+
+      if (value == 'Custom') {
+        _syncWorkoutDayControllers(
+          _workoutDaysPerWeek,
+          seededValues: List<String>.generate(_workoutDaysPerWeek, (_) => ''),
+          forceSeed: true,
+        );
+      } else {
+        _workoutDaysPerWeek = 7;
+        _syncWorkoutDayControllers(
+          7,
+          seededValues: _splitDayPresets[value]!,
+        );
+      }
+    });
   }
 
   Future<void> _simulateGenerate() async {
@@ -265,13 +328,16 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
       ),
     );
 
-    final directory = await getApplicationDocumentsDirectory();
-    final file = File('${directory.path}/diet_plan.pdf');
+    final directory = await _resolveWorkoutDownloadDirectory();
+    final safeTimestamp = DateTime.now().millisecondsSinceEpoch;
+    final file = File('${directory.path}/diet_plan_$safeTimestamp.pdf');
     await file.writeAsBytes(await doc.save());
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text('Saved PDF to ${file.path}')));
+      ..showSnackBar(
+        SnackBar(content: Text('Diet Plan saved to ${file.path}')),
+      );
   }
 
   Future<Directory> _resolveWorkoutDownloadDirectory() async {
@@ -916,12 +982,77 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
     );
   }
 
+  Widget _buildAIBanner({required String title, required String subtitle}) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.backgroundTertiary,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.borderAccent),
+        boxShadow: const <BoxShadow>[
+          BoxShadow(
+            color: AppColors.accentGlow,
+            blurRadius: 12,
+            spreadRadius: 1,
+          ),
+        ],
+      ),
+      child: Row(
+        children: <Widget>[
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: const BoxDecoration(
+              color: AppColors.accentSoft,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.auto_awesome,
+              color: AppColors.accentPrimary,
+              size: 24,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.normal,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildDietPlanForm() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
+          _buildAIBanner(
+            title: 'Build Your AI-Powered Diet Plan',
+            subtitle:
+                'Let Brutl AI craft the perfect nutrition strategy based on your macros and body metrics.',
+          ),
+          const SizedBox(height: 20),
           DropdownButtonFormField<String>(
             value: _goal,
             decoration: const InputDecoration(labelText: 'Goal'),
@@ -960,25 +1091,37 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
           TextField(
             controller: _weightController,
             keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: 'Weight'),
+            decoration: const InputDecoration(
+              labelText: 'Weight',
+              suffixText: 'kg / lbs',
+            ),
           ),
           const SizedBox(height: 10),
           TextField(
             controller: _heightController,
             keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: 'Height'),
+            decoration: const InputDecoration(
+              labelText: 'Height',
+              suffixText: 'cm',
+            ),
           ),
           const SizedBox(height: 10),
           TextField(
             controller: _bodyFatController,
             keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: 'Body Fat %'),
+            decoration: const InputDecoration(
+              labelText: 'Body Fat %',
+              suffixText: '%',
+            ),
           ),
           const SizedBox(height: 10),
           TextField(
             controller: _stepsController,
             keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: 'Steps Goal'),
+            decoration: const InputDecoration(
+              labelText: 'Steps Goal',
+              suffixText: 'steps',
+            ),
           ),
           const SizedBox(height: 14),
           DropdownButtonFormField<int>(
@@ -1042,25 +1185,37 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
           TextField(
             controller: _kcalController,
             keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: 'Kcal'),
+            decoration: const InputDecoration(
+              labelText: 'Kcal',
+              suffixText: 'kcal',
+            ),
           ),
           const SizedBox(height: 10),
           TextField(
             controller: _carbsController,
             keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: 'Carbs'),
+            decoration: const InputDecoration(
+              labelText: 'Carbs',
+              suffixText: 'g Carbs',
+            ),
           ),
           const SizedBox(height: 10),
           TextField(
             controller: _proteinController,
             keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: 'Protein'),
+            decoration: const InputDecoration(
+              labelText: 'Protein',
+              suffixText: 'g Protein',
+            ),
           ),
           const SizedBox(height: 10),
           TextField(
             controller: _fatController,
             keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: 'Fat'),
+            decoration: const InputDecoration(
+              labelText: 'Fat',
+              suffixText: 'g Fat',
+            ),
           ),
           const SizedBox(height: 14),
           DropdownButtonFormField<String>(
@@ -1089,21 +1244,37 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
             ),
           ),
           const SizedBox(height: 24),
-          ElevatedButton(
+          ElevatedButton.icon(
             onPressed: _isGenerating ? null : _simulateGenerate,
-            child: _isGenerating
+            icon: _isGenerating
                 ? const SizedBox(
                     width: 20,
                     height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                    child: CircularProgressIndicator(
+                      color: Colors.white,
+                      strokeWidth: 2,
+                    ),
                   )
-                : const Text('Generate with AI'),
+                : const Icon(Icons.auto_awesome_rounded),
+            label: Text(
+              _isGenerating ? 'Analyzing Stats...' : 'Generate with AI',
+            ),
+            style: ElevatedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+            ),
           ),
           if (_showDownload) ...<Widget>[
             const SizedBox(height: 12),
-            OutlinedButton(
+            ElevatedButton.icon(
               onPressed: _generateAndSavePdf,
-              child: const Text('Download PDF'),
+              icon: const Icon(Icons.download_rounded),
+              label: const Text('Download PDF'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.statusSuccess,
+                foregroundColor: AppColors.backgroundPrimary,
+                shadowColor: AppColors.statusSuccess.withOpacity(0.4),
+                elevation: 0,
+              ),
             ),
           ],
         ],
@@ -1122,69 +1293,60 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            Container(
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                gradient: context.brutl.gradients.subtleSurface,
-                borderRadius: BorderRadius.circular(context.brutl.radius.lg),
-                border: Border.all(color: colors.borderAccent),
-                boxShadow: <BoxShadow>[
-                  context.brutl.shadows.highlightedCardGlow,
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    'Build your AI-powered workout split',
-                    style: context.textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  SizedBox(height: spacing.sm),
-                  Text(
-                    'Custom plan for $displayName with editable stats, dynamic day names, and a branded PDF export.',
-                    style: context.textTheme.bodyMedium?.copyWith(
-                      color: colors.textSecondary,
-                    ),
-                  ),
-                ],
-              ),
+            _buildAIBanner(
+              title: 'Build Your AI-Powered Workout Plan',
+              subtitle:
+                  'Generate a custom training split optimized for your specific goals and equipment.',
             ),
             SizedBox(height: spacing.lg),
             _buildWorkoutSection(
               title: 'Split Setup',
               child: Column(
                 children: <Widget>[
-                  TextField(
-                    controller: _workoutSplitNameController,
+                  DropdownButtonFormField<String>(
+                    value: _selectedWorkoutSplit,
                     decoration: const InputDecoration(
-                      labelText: 'Workout Split Name',
+                      labelText: 'Workout Split',
                     ),
-                  ),
-                  SizedBox(height: spacing.md),
-                  DropdownButtonFormField<int>(
-                    value: _workoutDaysPerWeek,
-                    decoration: const InputDecoration(
-                      labelText: 'Days per Week',
-                    ),
-                    items: List<int>.generate(7, (int index) => index + 1)
+                    items: _splitOptions
                         .map(
-                          (int day) => DropdownMenuItem<int>(
-                            value: day,
-                            child: Text('$day'),
+                          (String option) => DropdownMenuItem<String>(
+                            value: option,
+                            child: Text(option),
                           ),
                         )
                         .toList(),
-                    onChanged: (int? value) {
-                      if (value == null) return;
-                      setState(() {
-                        _workoutDaysPerWeek = value;
-                        _syncWorkoutDayControllers(value);
-                        _showWorkoutDownload = false;
-                      });
-                    },
+                    onChanged: (String? value) => _onWorkoutSplitChanged(value),
                   ),
+                  if (_selectedWorkoutSplit == 'Custom') ...<Widget>[
+                    SizedBox(height: spacing.md),
+                    DropdownButtonFormField<int>(
+                      value: _workoutDaysPerWeek,
+                      decoration: const InputDecoration(
+                        labelText: 'Days per Week',
+                      ),
+                      items: List<int>.generate(7, (int index) => index + 1)
+                          .map(
+                            (int day) => DropdownMenuItem<int>(
+                              value: day,
+                              child: Text('$day'),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (int? value) {
+                        if (value == null) return;
+                        setState(() {
+                          _workoutDaysPerWeek = value;
+                          _syncWorkoutDayControllers(
+                            value,
+                            seededValues: List<String>.generate(value, (_) => ''),
+                            forceSeed: true,
+                          );
+                          _showWorkoutDownload = false;
+                        });
+                      },
+                    ),
+                  ],
                   SizedBox(height: spacing.md),
                   ...List<Widget>.generate(_dayNameControllers.length, (
                     int index,
@@ -1309,7 +1471,10 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
                     keyboardType: const TextInputType.numberWithOptions(
                       decimal: true,
                     ),
-                    decoration: const InputDecoration(labelText: 'Weight'),
+                    decoration: const InputDecoration(
+                      labelText: 'Weight',
+                      suffixText: 'kg / lbs',
+                    ),
                     onChanged: (_) {
                       if (_showWorkoutDownload) {
                         setState(() => _showWorkoutDownload = false);
@@ -1322,7 +1487,10 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
                     keyboardType: const TextInputType.numberWithOptions(
                       decimal: true,
                     ),
-                    decoration: const InputDecoration(labelText: 'Height'),
+                    decoration: const InputDecoration(
+                      labelText: 'Height',
+                      suffixText: 'cm',
+                    ),
                     onChanged: (_) {
                       if (_showWorkoutDownload) {
                         setState(() => _showWorkoutDownload = false);
@@ -1333,7 +1501,10 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
                   TextField(
                     controller: _workoutAgeController,
                     keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'Age'),
+                    decoration: const InputDecoration(
+                      labelText: 'Age',
+                      suffixText: 'years',
+                    ),
                     onChanged: (_) {
                       if (_showWorkoutDownload) {
                         setState(() => _showWorkoutDownload = false);

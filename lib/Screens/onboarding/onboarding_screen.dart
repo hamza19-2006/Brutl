@@ -560,7 +560,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       age: _getAgeYears(),
       height: _getHeightCm(),
       heightUnit: 'cm',
-      weight: double.tryParse(_weightCtrl.text) ?? 0.0,
+      weight: _getWeightKg(),
       weightUnit: _weightUnit,
       bodyFatString: _bodyFatString ?? '',
       bodyFatAverage: bodyFatAverage ?? 0.0,
@@ -1072,7 +1072,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           _buildSegmentedControl(
             value: _weightUnit,
             options: ['kg', 'lbs'],
-            onChanged: (v) => setState(() => _weightUnit = v),
+            onChanged: (v) {
+              if (v != _weightUnit) {
+                final raw = double.tryParse(_weightCtrl.text.trim());
+                if (raw != null && raw > 0) {
+                  final converted =
+                      v == 'lbs' ? raw / 0.45359237 : raw * 0.45359237;
+                  _weightCtrl.text = converted.toStringAsFixed(1);
+                }
+              }
+              setState(() => _weightUnit = v);
+            },
           ),
           const SizedBox(height: 20),
           _buildGlassField(

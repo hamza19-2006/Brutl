@@ -331,13 +331,30 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
     final directory = await _resolveWorkoutDownloadDirectory();
     final safeTimestamp = DateTime.now().millisecondsSinceEpoch;
     final file = File('${directory.path}/diet_plan_$safeTimestamp.pdf');
-    await file.writeAsBytes(await doc.save());
-    if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        const SnackBar(content: Text('Diet Plan saved to Downloads')),
-      );
+
+    try {
+      await file.writeAsBytes(await doc.save());
+      final exists = await file.exists();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              exists
+                  ? 'Diet Plan saved to Downloads'
+                  : 'Save failed — file not found',
+            ),
+          ),
+        );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(content: Text('Save failed: $e')),
+        );
+    }
   }
 
   Future<Directory> _resolveWorkoutDownloadDirectory() async {
@@ -601,13 +618,30 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
     final directory = await _resolveWorkoutDownloadDirectory();
     final safeTimestamp = DateTime.now().millisecondsSinceEpoch;
     final file = File('${directory.path}/workout_plan_$safeTimestamp.pdf');
-    await file.writeAsBytes(await document.save());
-    if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        const SnackBar(content: Text('Workout Plan saved to Downloads')),
-      );
+
+    try {
+      await file.writeAsBytes(await document.save());
+      final exists = await file.exists();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              exists
+                  ? 'Workout Plan saved to Downloads'
+                  : 'Save failed — file not found',
+            ),
+          ),
+        );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(content: Text('Save failed: $e')),
+        );
+    }
   }
 
   List<_WorkoutDayPlan> _buildWorkoutPlan({

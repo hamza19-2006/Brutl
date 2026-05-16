@@ -336,7 +336,7 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
-        SnackBar(content: Text('Diet Plan saved to ${file.path}')),
+        const SnackBar(content: Text('Diet Plan saved to Downloads')),
       );
   }
 
@@ -1124,9 +1124,17 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
             ),
           ),
           const SizedBox(height: 14),
+          const Text(
+            'Workout Days per Week',
+            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 6),
           DropdownButtonFormField<int>(
             value: _workoutDays,
-            decoration: const InputDecoration(labelText: 'Workout Days'),
+            decoration: const InputDecoration(
+              hintText: 'Select workout days',
+              border: OutlineInputBorder(),
+            ),
             items: List<int>.generate(7, (int index) => index + 1)
                 .map(
                   (int day) =>
@@ -1218,9 +1226,17 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
             ),
           ),
           const SizedBox(height: 14),
+          const Text(
+            'Diet Plan Duration',
+            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 6),
           DropdownButtonFormField<String>(
             value: _duration,
-            decoration: const InputDecoration(labelText: 'Plan Duration'),
+            decoration: const InputDecoration(
+              hintText: 'Select plan duration',
+              border: OutlineInputBorder(),
+            ),
             items: const <String>['7 Days', '30 Days']
                 .map(
                   (String duration) => DropdownMenuItem<String>(

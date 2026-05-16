@@ -8,7 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/secrets.dart';
-import '../core/theme/constants/ai_prompts.dart';
+import '../core/theme/constants/ai_coach.dart';
 
 @immutable
 class AiCoachAttachment {
@@ -91,8 +91,6 @@ class AiCoachProvider extends ChangeNotifier {
   static const int _pageSize = 20;
   static const int _retentionDays = 14;
   static const int _pruneBatchSize = 400;
-  static const String _geminiModel = 'gemini-1.5-flash-latest';
-  static const String _grokModel = 'grok-beta';
   static const String _localCacheKeyPrefix = 'ai_coach_messages_';
   static const String _localTitleKeyPrefix = 'ai_coach_title_';
   static const String _defaultChatTitle = 'AI Trainer';
@@ -666,29 +664,6 @@ class AiCoachProvider extends ChangeNotifier {
   }) async {
     final conversation = _buildConversationWindow();
     try {
-      final geminiReply = await _generateWithGemini(
-        conversation: conversation,
-        latestUserMessage: latestUserMessage,
-      );
-      if (geminiReply != null && geminiReply.trim().isNotEmpty) {
-        return geminiReply.trim();
-      }
-      throw StateError('Gemini returned empty response');
-    } catch (error) {
-      debugPrint('AI_COACH: Falling back Gemini -> Grok ($error)');
-    }
-
-    try {
-      final grokReply = await _generateWithGrok(conversation: conversation);
-      if (grokReply != null && grokReply.trim().isNotEmpty) {
-        return grokReply.trim();
-      }
-      throw StateError('Grok returned empty response');
-    } catch (error) {
-      debugPrint('AI_COACH: Falling back Grok -> OpenRouter ($error)');
-    }
-
-    try {
       final openRouterReply = await _generateWithOpenRouter(
         conversation: conversation,
       );
@@ -710,7 +685,7 @@ class AiCoachProvider extends ChangeNotifier {
     final conversation = <Map<String, String>>[
       <String, String>{
         'role': 'system',
-        'content': AiPrompts.eliteCoachSystemPrompt,
+        'content': AiCoach.eliteCoachSystemPrompt,
       },
     ];
 
@@ -730,133 +705,6 @@ class AiCoachProvider extends ChangeNotifier {
     }
 
     return conversation;
-  }
-
-  Future<String?> _generateWithGemini({
-    required List<Map<String, String>> conversation,
-    required AiCoachMessage latestUserMessage,
-  }) async {
-    if (geminiApiKeyForAiCoach.trim().isEmpty) {
-      return null;
-    }
-
-    final transcript = conversation
-        .where((entry) => entry['role'] != 'system')
-        .map(
-          (entry) =>
-              '${entry['role'] == 'user' ? 'User' : 'Coach'}: ${entry['content']}',
-        )
-        .join('\n\n');
-
-    final attachmentContext =
-        latestUserMessage.attachmentType == null ||
-            latestUserMessage.attachmentData == null
-        ? ''
-        : '\n\nAttachment (${latestUserMessage.attachmentType}): '
-              '${jsonEncode(latestUserMessage.attachmentData)}';
-
-    final body = <String, dynamic>{
-      'contents': [
-        {
-          'role': 'user',
-          'parts': [
-            {
-              'text':
-                  '${AiPrompts.eliteCoachSystemPrompt}\n\nConversation so far:\n$transcript$attachmentContext',
-            },
-          ],
-        },
-      ],
-      'generationConfig': <String, dynamic>{'temperature': 0.6, 'topP': 0.9},
-    };
-
-    final uri = Uri.parse(
-      'https://generativelanguage.googleapis.com/v1beta/models/$_geminiModel:generateContent?key=$geminiApiKeyForAiCoach',
-    );
-
-    try {
-      final response = await _httpClient
-          .post(
-            uri,
-            headers: const <String, String>{'Content-Type': 'application/json'},
-            body: jsonEncode(body),
-          )
-          .timeout(const Duration(seconds: 25));
-
-      if (response.statusCode != 200) {
-        debugPrint('AI_COACH: Gemini HTTP ${response.statusCode}');
-        return null;
-      }
-
-      final decoded = jsonDecode(response.body) as Map<String, dynamic>;
-      final candidates = decoded['candidates'];
-      if (candidates is! List || candidates.isEmpty) return null;
-      final firstCandidate = candidates.first;
-      if (firstCandidate is! Map) return null;
-      final content = firstCandidate['content'];
-      if (content is! Map) return null;
-      final parts = content['parts'];
-      if (parts is! List || parts.isEmpty) return null;
-      final firstPart = parts.first;
-      if (firstPart is! Map) return null;
-      return firstPart['text'] as String?;
-    } catch (error) {
-      debugPrint('AI_COACH: Gemini failed — $error');
-      return null;
-    }
-  }
-
-  Future<String?> _generateWithGrok({
-    required List<Map<String, String>> conversation,
-  }) async {
-    if (grokapikey.trim().isEmpty) {
-      return null;
-    }
-
-    final payloadMessages = conversation
-        .map(
-          (entry) => <String, String>{
-            'role': entry['role'] == 'assistant' ? 'assistant' : entry['role']!,
-            'content': entry['content'] ?? '',
-          },
-        )
-        .toList(growable: false);
-
-    final body = <String, dynamic>{
-      'model': _grokModel,
-      'messages': payloadMessages,
-      'temperature': 0.6,
-    };
-
-    try {
-      final response = await _httpClient
-          .post(
-            Uri.parse('https://api.x.ai/v1/chat/completions'),
-            headers: <String, String>{
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer $grokapikey',
-            },
-            body: jsonEncode(body),
-          )
-          .timeout(const Duration(seconds: 25));
-
-      if (response.statusCode != 200) {
-        debugPrint('AI_COACH: Grok HTTP ${response.statusCode}');
-        return null;
-      }
-
-      final decoded = jsonDecode(response.body) as Map<String, dynamic>;
-      final choices = decoded['choices'];
-      if (choices is! List || choices.isEmpty) return null;
-      final firstChoice = choices.first;
-      if (firstChoice is! Map) return null;
-      final message = firstChoice['message'];
-      if (message is! Map) return null;
-      return message['content'] as String?;
-    } catch (error) {
-      debugPrint('AI_COACH: Grok failed — $error');
-      return null;
-    }
   }
 
   Future<String?> _generateWithOpenRouter({

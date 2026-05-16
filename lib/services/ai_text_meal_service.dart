@@ -6,7 +6,7 @@ import 'package:http/http.dart' as http;
 import '../config/secrets.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// AI TEXT MEAL SERVICE — 3-Tier Fallback: Grok → Gemini → DeepSeek V3
+// AI TEXT MEAL SERVICE — 2-Tier Fallback: Gemini → DeepSeek V4 flash
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const String _systemPrompt =
@@ -15,88 +15,36 @@ const String _systemPrompt =
     'All values must be integers. No markdown, no explanations.';
 
 const String _geminiModel = 'gemini-1.5-flash-latest';
-const String _grokModel = 'grok-beta';
 const String _deepSeekModel = 'deepseek-v4-flash';
 
 /// Analyzes a plain-text food description and returns macro estimates.
-/// Tries Grok first, then Gemini 1.5 Flash, then DeepSeek V3 via OpenRouter.
-/// Returns null if all three fail.
+/// Tries Gemini 1.5 Flash first, then DeepSeek V4 flash via OpenRouter.
+/// Returns null if both fail.
 Future<Map<String, int>?> analyzeTextMeal(String foodDescription) async {
   if (foodDescription.trim().isEmpty) return null;
 
   debugPrint('[AI_TEXT] Analyzing: "$foodDescription"');
 
-  // Tier 1: Grok
-  final grokResult = await _attemptGrok(foodDescription);
-  if (grokResult != null) {
-    debugPrint('[AI_TEXT] Grok succeeded.');
-    return grokResult;
-  }
-
-  // Tier 2: Gemini 1.5 Flash
-  debugPrint('[AI_TEXT] Grok failed — trying Gemini...');
+  // Tier 1: Gemini 1.5 Flash
   final geminiResult = await _attemptGemini(foodDescription);
   if (geminiResult != null) {
     debugPrint('[AI_TEXT] Gemini succeeded.');
     return geminiResult;
   }
 
-  // Tier 3: DeepSeek V4 flash via OpenRouter
+  // Tier 2: DeepSeek V4 flash via OpenRouter
   debugPrint('[AI_TEXT] Gemini failed — trying DeepSeek V4 flash ...');
   final deepSeekResult = await _attemptDeepSeek(foodDescription);
   if (deepSeekResult != null) {
-    debugPrint('[AI_TEXT] DeepSeek V4 flash  succeeded.');
+    debugPrint('[AI_TEXT] DeepSeek V4 flash succeeded.');
     return deepSeekResult;
   }
 
-  debugPrint('[AI_TEXT] All three providers failed.');
+  debugPrint('[AI_TEXT] All providers failed.');
   return null;
 }
 
-// ─── Tier 1: Grok ────────────────────────────────────────────────────────────
-
-Future<Map<String, int>?> _attemptGrok(String food) async {
-  const apiKey = grokapikey;
-  if (apiKey.isEmpty) {
-    debugPrint('[AI_TEXT] Grok API key not set — skipping.');
-    return null;
-  }
-
-  try {
-    final response = await http
-        .post(
-          Uri.parse('https://api.x.ai/v1/chat/completions'),
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $apiKey',
-          },
-          body: jsonEncode({
-            'model': _grokModel,
-            'messages': [
-              {'role': 'system', 'content': _systemPrompt},
-              {'role': 'user', 'content': food},
-            ],
-            'temperature': 0.1,
-          }),
-        )
-        .timeout(const Duration(seconds: 15));
-
-    if (response.statusCode != 200) {
-      debugPrint('[AI_TEXT] Grok HTTP ${response.statusCode}');
-      return null;
-    }
-
-    final text =
-        jsonDecode(response.body)['choices']?[0]['message']?['content']
-            as String?;
-    return _parseJsonResponse(text);
-  } catch (e) {
-    debugPrint('[AI_TEXT] Grok exception: $e');
-    return null;
-  }
-}
-
-// ─── Tier 2: Gemini 1.5 Flash ────────────────────────────────────────────────
+// ─── Tier 1: Gemini 1.5 Flash ────────────────────────────────────────────────
 
 Future<Map<String, int>?> _attemptGemini(String food) async {
   const apiKey = geminiApiKey1;
@@ -144,7 +92,7 @@ Future<Map<String, int>?> _attemptGemini(String food) async {
   }
 }
 
-// ─── Tier 3: DeepSeek V4 flash via OpenRouter ──────────────────────────────────────
+// ─── Tier 2: DeepSeek V4 flash via OpenRouter ──────────────────────────────────────
 
 Future<Map<String, int>?> _attemptDeepSeek(String food) async {
   const apiKey = openRouterApiKey;

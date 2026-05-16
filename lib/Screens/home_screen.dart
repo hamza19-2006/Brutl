@@ -11,7 +11,7 @@ import 'package:provider/provider.dart';
 
 import '../config/secrets.dart';
 import '../core/theme/app_colors.dart';
-import '../core/theme/constants/ai_prompts.dart';
+import '../core/theme/constants/ai_coach.dart';
 import '../providers/health_provider.dart';
 import '../providers/nutrition_service.dart';
 import '../providers/workout_nutrition_provider.dart';
@@ -389,7 +389,7 @@ class AiCoachProvider extends ChangeNotifier {
     final conversation = <Map<String, String>>[
       <String, String>{
         'role': 'system',
-        'content': AiPrompts.eliteCoachSystemPrompt,
+        'content': AiCoach.eliteCoachSystemPrompt,
       },
     ];
     for (final message in window) {
@@ -434,7 +434,7 @@ class AiCoachProvider extends ChangeNotifier {
           'parts': [
             {
               'text':
-                  '${AiPrompts.eliteCoachSystemPrompt}\n\nConversation so far:\n$transcript$attachmentContext',
+                  '${AiCoach.eliteCoachSystemPrompt}\n\nConversation so far:\n$transcript$attachmentContext',
             },
           ],
         },

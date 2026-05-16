@@ -34,6 +34,10 @@ migrate_working_dir/
 /coverage/
 
 lib/config/secrets.dart
+lib/core/theme/constants
+
+
+
 
 firestore.rules
 # Symbolication related

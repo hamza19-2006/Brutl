@@ -8,7 +8,10 @@ import 'package:provider/provider.dart';
 
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/theme_extensions.dart';
+import '../../core/theme/constants/ai_diet_plan.dart';
+import '../../core/theme/constants/ai_workout_plan.dart';
 import '../../providers/brutl_user_provider.dart';
+import '../../services/ai_diet_plan_service.dart';
 
 class DietWorkoutScreen extends StatefulWidget {
   const DietWorkoutScreen({super.key});
@@ -77,6 +80,8 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
   bool _isGenerating = false;
   bool _showDownload = false;
   bool _isHydrated = false;
+  String? _generatedDietPlan;
+  String? _generatedWorkoutPlan;
   String _workoutGoal = 'Body Recomp';
   int _workoutDaysPerWeek = 7;
   String _experienceLevel = 'Beginner';
@@ -262,12 +267,45 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
     setState(() {
       _isGenerating = true;
       _showDownload = false;
+      _generatedDietPlan = null;
     });
-    await Future<void>.delayed(const Duration(seconds: 2));
+
+    final user = context.read<BrutlUserProvider>().user;
+    final goal = _goal == 'Other' ? _otherGoalController.text.trim() : _goal;
+    final prompt = StringBuffer()
+      ..writeln('Generate a detailed ${_duration.toLowerCase()} diet plan.')
+      ..writeln('User Stats:')
+      ..writeln('- Name: ${user.displayName.isNotEmpty ? user.displayName : user.username}')
+      ..writeln('- Country: ${user.country.isNotEmpty ? user.country : "Not specified"}')
+      ..writeln('- Weight: ${_weightController.text} ${user.weightUnit}')
+      ..writeln('- Height: ${_heightController.text} ${user.heightUnit}')
+      ..writeln('- Body Fat: ${_bodyFatController.text}%')
+      ..writeln('- Steps Goal: ${_stepsController.text}')
+      ..writeln('- Workout Days: $_workoutDays per week')
+      ..writeln('- Budget: ${_budgetController.text} $_currency')
+      ..writeln('- Meals Per Day: ${_mealsController.text}')
+      ..writeln('- Target Calories: ${_kcalController.text} kcal')
+      ..writeln('- Target Carbs: ${_carbsController.text}g')
+      ..writeln('- Target Protein: ${_proteinController.text}g')
+      ..writeln('- Target Fat: ${_fatController.text}g')
+      ..writeln('- Goal: $goal')
+      ..writeln('- Duration: $_duration')
+      ..writeln('- Notes/Allergies: ${_suggestionsController.text.trim().isNotEmpty ? _suggestionsController.text.trim() : "None"}')
+      ..writeln()
+      ..writeln('Return a JSON object with a "days" array. Each day should have "dayName" and "meals" array. Each meal should have "mealName", "time", "foods", and "kcal". Provide realistic local foods based on the country and budget.');
+
+    final plan = await generateAiPlan(
+      systemPrompt: Aidietplan.elitedietplanprompt,
+      userPrompt: prompt.toString(),
+    );
+
     if (!mounted) return;
     setState(() {
       _isGenerating = false;
-      _showDownload = true;
+      if (plan != null && plan.trim().isNotEmpty) {
+        _generatedDietPlan = plan;
+        _showDownload = true;
+      }
     });
   }
 
@@ -275,12 +313,49 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
     setState(() {
       _isWorkoutGenerating = true;
       _showWorkoutDownload = false;
+      _generatedWorkoutPlan = null;
     });
-    await Future<void>.delayed(const Duration(seconds: 3));
+
+    final user = context.read<BrutlUserProvider>().user;
+    final goal = _workoutGoal == 'Other'
+        ? _workoutCustomGoalController.text.trim()
+        : _workoutGoal;
+    final dayNames = List<String>.generate(_dayNameControllers.length, (
+      int index,
+    ) {
+      final value = _dayNameControllers[index].text.trim();
+      return value.isNotEmpty ? value : 'Day ${index + 1}';
+    });
+
+    final userPrompt = StringBuffer()
+      ..writeln('User Payload:')
+      ..writeln('- Name: ${user.displayName.isNotEmpty ? user.displayName : user.username}')
+      ..writeln('- Country: ${user.country.isNotEmpty ? user.country : "Not specified"}')
+      ..writeln('- Age: ${_workoutAgeController.text} years')
+      ..writeln('- Weight: ${_weightController.text} ${user.weightUnit}')
+      ..writeln('- Height: ${_heightController.text} ${user.heightUnit}')
+      ..writeln('- Experience Level: $_experienceLevel')
+      ..writeln('- Days Per Week: $_workoutDaysPerWeek')
+      ..writeln('- Workout Split: $_selectedWorkoutSplit')
+      ..writeln('- Day Names: ${dayNames.join(", ")}')
+      ..writeln('- Goal: $goal')
+      ..writeln('- Equipment Access: $_equipmentAccess')
+      ..writeln('- Suggestions / Injuries: ${_workoutSuggestionsController.text.trim().isNotEmpty ? _workoutSuggestionsController.text.trim() : "None"}')
+      ..writeln()
+      ..writeln('Generate the complete structured workout plan now.');
+
+    final plan = await generateAiPlan(
+      systemPrompt: AiWorkoutPlan.eliteworkoutplanprompt,
+      userPrompt: userPrompt.toString(),
+    );
+
     if (!mounted) return;
     setState(() {
       _isWorkoutGenerating = false;
-      _showWorkoutDownload = true;
+      if (plan != null && plan.trim().isNotEmpty) {
+        _generatedWorkoutPlan = plan;
+        _showWorkoutDownload = true;
+      }
     });
   }
 
@@ -290,39 +365,202 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
     final userName = user.displayName.isNotEmpty
         ? user.displayName
         : user.username;
+    final goal = _goal == 'Other' ? _otherGoalController.text.trim() : _goal;
+
+    final summaryItems = <_PdfSummaryItem>[
+      _PdfSummaryItem('Goal', goal.isNotEmpty ? goal : 'Body Recomp'),
+      _PdfSummaryItem(
+        'Weight',
+        _weightController.text.trim().isNotEmpty
+            ? '${_weightController.text.trim()} ${user.weightUnit}'
+            : '--',
+      ),
+      _PdfSummaryItem(
+        'Height',
+        _heightController.text.trim().isNotEmpty
+            ? '${_heightController.text.trim()} ${user.heightUnit}'
+            : '--',
+      ),
+      _PdfSummaryItem('Body Fat', '${_bodyFatController.text.trim().isNotEmpty ? _bodyFatController.text.trim() : '--'}%'),
+      _PdfSummaryItem('Country', user.country.isNotEmpty ? user.country : '--'),
+      _PdfSummaryItem('Kcal', _kcalController.text.trim().isNotEmpty ? '${_kcalController.text.trim()} kcal' : '--'),
+    ];
 
     doc.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
-        build: (pw.Context context) => <pw.Widget>[
-          pw.Text(
-            'Brutl App',
-            style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold),
+        margin: const pw.EdgeInsets.fromLTRB(28, 32, 28, 42),
+        footer: (pw.Context context) => pw.Container(
+          padding: const pw.EdgeInsets.only(top: 12),
+          decoration: const pw.BoxDecoration(
+            border: pw.Border(
+              top: pw.BorderSide(color: PdfColors.grey300, width: 0.8),
+            ),
           ),
-          pw.SizedBox(height: 8),
-          pw.Text('Name: $userName'),
-          pw.Text('Weight: ${_weightController.text}'),
-          pw.Text('Height: ${_heightController.text}'),
-          pw.Text('Body Fat: ${_bodyFatController.text}%'),
-          pw.Text('Kcal: ${_kcalController.text}'),
-          pw.Text(
-            'Goal: ${_goal == 'Other' ? _otherGoalController.text.trim() : _goal}',
-          ),
-          pw.SizedBox(height: 16),
-          pw.Text(
-            'Mock Diet Plan',
-            style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold),
-          ),
-          pw.SizedBox(height: 8),
-          pw.Table.fromTextArray(
-            headerDecoration: const pw.BoxDecoration(color: PdfColors.grey300),
-            headers: const <String>['Meal', 'Time', 'Food', 'Kcal'],
-            data: const <List<String>>[
-              <String>['Meal 1', '08:00', 'Oats + Eggs', '450'],
-              <String>['Meal 2', '12:30', 'Chicken + Rice', '620'],
-              <String>['Meal 3', '16:30', 'Yogurt + Nuts', '300'],
-              <String>['Meal 4', '20:00', 'Fish + Potatoes', '550'],
+          child: pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: <pw.Widget>[
+              pw.Text(
+                'Generated by Brutl AI',
+                style: const pw.TextStyle(
+                  fontSize: 10,
+                  color: PdfColors.grey700,
+                ),
+              ),
+              pw.Text(
+                'brutlapp@gmail.com',
+                style: const pw.TextStyle(
+                  fontSize: 10,
+                  color: PdfColors.grey700,
+                ),
+              ),
             ],
+          ),
+        ),
+        build: (pw.Context context) => <pw.Widget>[
+          pw.Container(
+            padding: const pw.EdgeInsets.all(20),
+            decoration: pw.BoxDecoration(
+              color: PdfColor.fromInt(0xFFF5F5F5),
+              borderRadius: pw.BorderRadius.circular(14),
+              border: pw.Border.all(color: PdfColor.fromInt(0xFFE6E6E6)),
+            ),
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: <pw.Widget>[
+                pw.Text(
+                  'BRUTL FITNESS',
+                  style: pw.TextStyle(
+                    fontSize: 24,
+                    fontWeight: pw.FontWeight.bold,
+                    color: PdfColor.fromInt(0xFF111111),
+                  ),
+                ),
+                pw.SizedBox(height: 6),
+                pw.Text(
+                  'Custom Diet Plan for: $userName',
+                  style: const pw.TextStyle(
+                    fontSize: 13,
+                    color: PdfColors.grey800,
+                  ),
+                ),
+                pw.SizedBox(height: 6),
+                pw.Text(
+                  'Duration: $_duration',
+                  style: const pw.TextStyle(
+                    fontSize: 11,
+                    color: PdfColors.grey700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          pw.SizedBox(height: 18),
+          pw.Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: summaryItems
+                .map(
+                  (_PdfSummaryItem item) => pw.Container(
+                    width: 120,
+                    padding: const pw.EdgeInsets.all(12),
+                    decoration: pw.BoxDecoration(
+                      color: PdfColor.fromInt(0xFFFFF7ED),
+                      borderRadius: pw.BorderRadius.circular(12),
+                      border: pw.Border.all(
+                        color: PdfColor.fromInt(0xFFFFD6BF),
+                      ),
+                    ),
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: <pw.Widget>[
+                        pw.Text(
+                          item.label,
+                          style: const pw.TextStyle(
+                            fontSize: 9,
+                            color: PdfColors.grey700,
+                          ),
+                        ),
+                        pw.SizedBox(height: 4),
+                        pw.Text(
+                          item.value,
+                          style: pw.TextStyle(
+                            fontSize: 11,
+                            fontWeight: pw.FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+                .toList(),
+          ),
+          pw.SizedBox(height: 20),
+          pw.Text(
+            'Diet Plan',
+            style: pw.TextStyle(
+              fontSize: 16,
+              fontWeight: pw.FontWeight.bold,
+              color: PdfColor.fromInt(0xFF111111),
+            ),
+          ),
+          pw.SizedBox(height: 12),
+          if (_generatedDietPlan != null && _generatedDietPlan!.trim().isNotEmpty)
+            ..._generatedDietPlan!
+                .trim()
+                .split('\n')
+                .where((line) => line.trim().isNotEmpty)
+                .map(
+                  (line) => pw.Text(
+                    line,
+                    style: const pw.TextStyle(
+                      fontSize: 10,
+                      color: PdfColors.grey800,
+                    ),
+                  ),
+                )
+          else
+            pw.Table.fromTextArray(
+              headerDecoration: const pw.BoxDecoration(color: PdfColors.grey300),
+              headers: const <String>['Meal', 'Time', 'Food', 'Kcal'],
+              data: const <List<String>>[
+                <String>['Meal 1', '08:00', 'Oats + Eggs', '450'],
+                <String>['Meal 2', '12:30', 'Chicken + Rice', '620'],
+                <String>['Meal 3', '16:30', 'Yogurt + Nuts', '300'],
+                <String>['Meal 4', '20:00', 'Fish + Potatoes', '550'],
+              ],
+            ),
+          pw.SizedBox(height: 20),
+          pw.Container(
+            width: double.infinity,
+            padding: const pw.EdgeInsets.all(16),
+            decoration: pw.BoxDecoration(
+              color: PdfColor.fromInt(0xFFF8FAFC),
+              borderRadius: pw.BorderRadius.circular(12),
+              border: pw.Border.all(color: PdfColor.fromInt(0xFFE2E8F0)),
+            ),
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: <pw.Widget>[
+                pw.Text(
+                  "Coach's Notes",
+                  style: pw.TextStyle(
+                    fontSize: 14,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+                pw.SizedBox(height: 8),
+                pw.Text(
+                  _suggestionsController.text.trim().isNotEmpty
+                      ? _suggestionsController.text.trim()
+                      : 'Stay consistent with your meals, hydrate well, and adjust portions based on weekly progress.',
+                  style: const pw.TextStyle(
+                    fontSize: 11,
+                    color: PdfColors.grey800,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -416,6 +654,7 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
       ),
       _PdfSummaryItem('Experience', _experienceLevel),
       _PdfSummaryItem('Workout Days', '${_workoutDaysPerWeek} / week'),
+      _PdfSummaryItem('Country', user.country.isNotEmpty ? user.country : '--'),
     ];
 
     document.addPage(
@@ -440,7 +679,7 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
                 ),
               ),
               pw.Text(
-                'brutl.app | @brutlfitness',
+                'brutlapp@gmail.com',
                 style: const pw.TextStyle(
                   fontSize: 10,
                   color: PdfColors.grey700,
@@ -528,7 +767,22 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
                 .toList(),
           ),
           pw.SizedBox(height: 20),
-          ...plan.expand(((_WorkoutDayPlan dayPlan) sync* {
+          if (_generatedWorkoutPlan != null && _generatedWorkoutPlan!.trim().isNotEmpty)
+            ..._generatedWorkoutPlan!
+                .trim()
+                .split('\n')
+                .where((line) => line.trim().isNotEmpty)
+                .map(
+                  (line) => pw.Text(
+                    line,
+                    style: const pw.TextStyle(
+                      fontSize: 10,
+                      color: PdfColors.grey800,
+                    ),
+                  ),
+                )
+          else
+            ...plan.expand(((_WorkoutDayPlan dayPlan) sync* {
             yield pw.Container(
               margin: const pw.EdgeInsets.only(bottom: 8),
               padding: const pw.EdgeInsets.symmetric(

@@ -56,7 +56,12 @@ class PersonalStatsScreen extends StatelessWidget {
                     showChevron: false,
                     enabled: false,
                   ),
-                  _CountryTile(country: country),
+                  SettingsTileWidget(
+                    title: 'Country',
+                    trailingText: _countryDisplayName(country),
+                    showChevron: false,
+                    enabled: false,
+                  ),
                   SettingsTileWidget(
                     title: 'Height',
                     trailingText: _formatHeight(user.height),
@@ -118,6 +123,13 @@ class PersonalStatsScreen extends StatelessWidget {
     );
   }
 
+  String _countryDisplayName(String country) {
+    final trimmed = country.trim();
+    if (trimmed.isEmpty) return '—';
+    if (trimmed.length == 2) return GeoService.countryName(trimmed);
+    return trimmed;
+  }
+
   String _withCommas(int n) {
     final s = n.toString();
     final buf = StringBuffer();
@@ -127,61 +139,6 @@ class PersonalStatsScreen extends StatelessWidget {
       if (remaining > 1 && remaining % 3 == 1) buf.write(',');
     }
     return buf.toString();
-  }
-}
-
-class _CountryTile extends StatelessWidget {
-  const _CountryTile({required this.country});
-
-  final String country;
-
-  @override
-  Widget build(BuildContext context) {
-    final trimmed = country.trim();
-    final countryName = trimmed.isEmpty
-        ? '—'
-        : trimmed.length == 2
-        ? GeoService.countryName(trimmed)
-        : trimmed;
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.lg,
-        vertical: AppSpacing.md + 2,
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Text(
-              'Country',
-              style: AppTextStyles.bodyLarge(color: AppColors.textTertiary),
-            ),
-          ),
-          Flexible(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Flexible(
-                      child: Text(
-                        countryName,
-                        textAlign: TextAlign.right,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppTextStyles.bodyMedium(
-                          color: AppColors.textSecondary,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }
 

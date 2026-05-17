@@ -12,10 +12,12 @@ import '../../providers/chat_provider.dart';
 import '../auth/login_screen.dart';
 import 'account_settings_screen.dart';
 import 'blocked_friends_screen.dart';
+import 'connected_apps_screen.dart';
 import 'contact_support_screen.dart';
 import 'credentials/credentials_screen.dart';
 import 'feedback_screen.dart';
 import 'personal_stats_screen.dart';
+import 'subscription_screen.dart';
 import 'widgets/settings_widgets.dart';
 import 'workout_settings/exercise_settings_screen.dart';
 
@@ -159,6 +161,22 @@ class _MainSettingsScreenState extends State<MainSettingsScreen> {
               const SizedBox(height: AppSpacing.xxl),
               SettingsActionBoxWidget(
                 children: [
+                  SettingsTileWidget(
+                    title: 'Subscription',
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const SubscriptionScreen(),
+                      ),
+                    ),
+                  ),
+                  SettingsTileWidget(
+                    title: 'Connected Apps',
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const ConnectedAppsScreen(),
+                      ),
+                    ),
+                  ),
                   SettingsTileWidget(
                     title: 'Contact Support',
                     showChevron: true,

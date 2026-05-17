@@ -163,8 +163,8 @@ class CaloriesCard extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             CircularPercentIndicator(
-              radius: 50,
-              lineWidth: 8,
+              radius: 68,
+              lineWidth: 10,
               percent: progress.clamp(0.0, 1.0),
               backgroundColor: const Color(0xFF2A2A2A),
               circularStrokeCap: CircularStrokeCap.round,
@@ -177,7 +177,7 @@ class CaloriesCard extends StatelessWidget {
                   const Icon(
                     Icons.local_fire_department_rounded,
                     color: Color(0xFFFF3D00),
-                    size: 18,
+                    size: 22,
                   ),
                   const SizedBox(height: 2),
                   Text(
@@ -185,14 +185,14 @@ class CaloriesCard extends StatelessWidget {
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: Colors.white,
                       fontWeight: FontWeight.w800,
-                      fontSize: 16,
+                      fontSize: 20,
                     ),
                   ),
                   Text(
                     '/ $calorieGoal',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: const Color(0xFF666666),
-                      fontSize: 9,
+                      fontSize: 11,
                     ),
                   ),
                 ],

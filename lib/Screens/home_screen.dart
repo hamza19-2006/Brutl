@@ -24,6 +24,7 @@ import '../widgets/water_card.dart';
 import 'calories_history_screen.dart';
 import 'chat/chat_list_screen.dart';
 import 'home/home_screen_ex_show.dart';
+import 'music_screen.dart';
 import 'shop/shop_main_screen.dart';
 import 'workout_screen.dart';
 
@@ -564,8 +565,10 @@ class _HomeScreenState extends State<HomeScreen> {
       case 1:
         return const WorkoutScreen(showBottomNavigationBar: false);
       case 2:
-        return const ShopMainScreen();
+        return const MusicScreen();
       case 3:
+        return const ShopMainScreen();
+      case 4:
         return const ChatListScreen();
       default:
         return const _HomeTab();
@@ -588,6 +591,10 @@ class _BottomNav extends StatelessWidget {
       BottomNavigationBarItem(
         icon: Icon(Icons.fitness_center_rounded),
         label: 'Workout',
+      ),
+      BottomNavigationBarItem(
+        icon: Icon(Icons.headphones_rounded),
+        label: 'Music',
       ),
       BottomNavigationBarItem(
         icon: Icon(Icons.shopping_bag_rounded),

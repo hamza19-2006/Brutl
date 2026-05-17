@@ -7,8 +7,10 @@ import 'dart:async';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../providers/brutl_user_provider.dart';
 import '../providers/nutrition_service.dart';
 import '../services/calorie_history_service.dart';
 
@@ -103,11 +105,24 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
 
   Future<void> _loadGoals() async {
     final prefs = await SharedPreferences.getInstance();
+    final brutlUser = context.read<BrutlUserProvider>().user;
+
+    // Use BrutlUser as the source of truth for macro goals.
+    // SharedPreferences only acts as a fallback for days before
+    // the user explicitly set targets in Settings / Onboarding.
     setState(() {
-      _calorieGoal = prefs.getInt('calorie_goal') ?? 2000;
-      _carbsGoal = prefs.getInt('carbs_goal') ?? 200;
-      _proteinGoal = prefs.getInt('protein_goal') ?? 150;
-      _fatsGoal = prefs.getInt('fats_goal') ?? 60;
+      _calorieGoal = brutlUser.targetCalories > 0
+          ? brutlUser.targetCalories
+          : (prefs.getInt('calorie_goal') ?? 2000);
+      _carbsGoal = brutlUser.targetCarbs > 0
+          ? brutlUser.targetCarbs
+          : (prefs.getInt('carbs_goal') ?? 200);
+      _proteinGoal = brutlUser.targetProtein > 0
+          ? brutlUser.targetProtein
+          : (prefs.getInt('protein_goal') ?? 150);
+      _fatsGoal = brutlUser.targetFats > 0
+          ? brutlUser.targetFats
+          : (prefs.getInt('fats_goal') ?? 60);
     });
   }
 

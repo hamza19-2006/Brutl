@@ -8,10 +8,12 @@ class ExerciseCardWidget extends StatelessWidget {
     super.key,
     required this.exercise,
     required this.onTap,
+    this.onLongPress,
   });
 
   final ExerciseModel exercise;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -30,6 +32,7 @@ class ExerciseCardWidget extends StatelessWidget {
 
     return GestureDetector(
       onTap: onTap,
+      onLongPress: onLongPress,
       child: Container(
         margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),

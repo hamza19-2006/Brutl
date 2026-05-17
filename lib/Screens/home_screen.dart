@@ -10,6 +10,7 @@ import 'package:provider/provider.dart';
 
 import '../config/secrets.dart';
 import '../core/theme/constants/ai_coach.dart';
+import '../providers/brutl_user_provider.dart';
 import '../providers/health_provider.dart';
 import '../providers/nutrition_service.dart';
 import '../providers/workout_provider.dart';
@@ -780,25 +781,34 @@ class _StatsRowState extends State<_StatsRow> {
   }
 
   Future<void> _loadNutrition() async {
-    // Seed from WorkoutProvider's goal so the circle isn't empty on first paint.
-    final workoutProvider = context.read<WorkoutProvider>();
-    final goalFromProfile = workoutProvider.user.dailyCalorieGoal;
-    if (goalFromProfile > 0 && mounted) {
-      setState(() => _calorieGoal = goalFromProfile);
+    // Seed from BrutlUserProvider (source of truth) so the circle shows
+    // the correct goal immediately, without waiting for Firestore or
+    // SharedPreferences round-trips.
+    final brutlUser = context.read<BrutlUserProvider>().user;
+    final goalFromBrutlUser = brutlUser.targetCalories;
+    if (goalFromBrutlUser > 0 && mounted) {
+      setState(() => _calorieGoal = goalFromBrutlUser);
     }
 
     final data = await NutritionService.instance.loadTodayNutrition();
     if (!mounted) return;
+    // Only accept NutritionService value if it is valid AND BrutlUser
+    // has not already provided a more trustworthy target.
     setState(() {
       _caloriesEaten = data.caloriesEaten;
-      _calorieGoal = data.calorieGoal > 0 ? data.calorieGoal : _calorieGoal;
+      _calorieGoal = data.calorieGoal > 0 && brutlUser.targetCalories <= 0
+          ? data.calorieGoal
+          : _calorieGoal;
     });
 
     _nutritionSub = NutritionService.instance.stream.listen((data) {
       if (!mounted) return;
       setState(() {
         _caloriesEaten = data.caloriesEaten;
-        _calorieGoal = data.calorieGoal > 0 ? data.calorieGoal : _calorieGoal;
+        // Never let stale SharedPreferences overwrite BrutlUser truth.
+        _calorieGoal = brutlUser.targetCalories > 0
+            ? brutlUser.targetCalories
+            : (data.calorieGoal > 0 ? data.calorieGoal : _calorieGoal);
       });
     });
   }

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
+import '../providers/brutl_user_provider.dart';
 import '../providers/workout_nutrition_provider.dart';
 import '../providers/workout_provider.dart';
 import '../providers/nutrition_service.dart';
@@ -44,28 +45,47 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   }
 
   Future<void> _loadNutrition() async {
+    final brutlUser = context.read<BrutlUserProvider>().user;
     final workoutProvider = context.read<WorkoutProvider>();
     final targetKcal = workoutProvider.user.dailyCalorieGoal;
-    if (mounted && targetKcal > 0) {
-      setState(() => _calorieGoal = targetKcal);
+
+    // Use actual macro targets from BrutlUser (source of truth).
+    // Fall back to weight-derived estimates only when user has never
+    // set explicit targets in Settings / Onboarding.
+    final calorieGoal = brutlUser.targetCalories > 0
+        ? brutlUser.targetCalories
+        : (targetKcal > 0 ? targetKcal : 2000);
+    final proteinGoal = brutlUser.targetProtein > 0
+        ? brutlUser.targetProtein
+        : (workoutProvider.user.weightKg > 0
+              ? (workoutProvider.user.weightKg * 2.0).round()
+              : 150);
+    final fatsGoal = brutlUser.targetFats > 0
+        ? brutlUser.targetFats
+        : (workoutProvider.user.weightKg > 0
+              ? (workoutProvider.user.weightKg * 0.7).round()
+              : 60);
+    final carbsGoal = brutlUser.targetCarbs > 0
+        ? brutlUser.targetCarbs
+        : ((calorieGoal - (proteinGoal * 4) - (fatsGoal * 9)) / 4)
+            .clamp(0, calorieGoal)
+            .round();
+
+    if (mounted) {
+      setState(() {
+        _calorieGoal = calorieGoal;
+        _carbsGoal = carbsGoal;
+        _proteinGoal = proteinGoal;
+        _fatsGoal = fatsGoal;
+      });
     }
 
-    // Derive macro goals proportionally if not yet set in SharedPreferences.
-    // These will be overwritten by any explicit values saved in Settings.
-    if (targetKcal > 0) {
-      final proteinGoal = (workoutProvider.user.weightKg * 2.0).round();
-      final fatGoal = (workoutProvider.user.weightKg * 0.7).round();
-      final carbGoal = ((targetKcal - (proteinGoal * 4) - (fatGoal * 9)) / 4)
-          .clamp(0, targetKcal)
-          .round();
-
-      await NutritionService.instance.saveGoals(
-        calorieGoal: targetKcal,
-        carbsGoal: carbGoal > 0 ? carbGoal : 200,
-        proteinGoal: proteinGoal > 0 ? proteinGoal : 150,
-        fatsGoal: fatGoal > 0 ? fatGoal : 60,
-      );
-    }
+    await NutritionService.instance.saveGoals(
+      calorieGoal: calorieGoal,
+      carbsGoal: carbsGoal > 0 ? carbsGoal : 200,
+      proteinGoal: proteinGoal > 0 ? proteinGoal : 150,
+      fatsGoal: fatsGoal > 0 ? fatsGoal : 60,
+    );
 
     final data = await NutritionService.instance.loadTodayNutrition();
     if (!mounted) return;
@@ -76,6 +96,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   }
 
   void _applyData(NutritionData data) {
+    final brutlUser = context.read<BrutlUserProvider>().user;
     setState(() {
       _caloriesEaten = data.caloriesEaten;
       final providerGoal = context
@@ -84,13 +105,21 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
           .dailyCalorieGoal;
       _calorieGoal = data.calorieGoal > 0
           ? data.calorieGoal
-          : (providerGoal > 0 ? providerGoal : _calorieGoal);
+          : (brutlUser.targetCalories > 0
+                ? brutlUser.targetCalories
+                : (providerGoal > 0 ? providerGoal : _calorieGoal));
       _carbs = data.carbs;
-      _carbsGoal = data.carbsGoal;
+      _carbsGoal = data.carbsGoal > 0
+          ? data.carbsGoal
+          : (brutlUser.targetCarbs > 0 ? brutlUser.targetCarbs : _carbsGoal);
       _protein = data.protein;
-      _proteinGoal = data.proteinGoal;
+      _proteinGoal = data.proteinGoal > 0
+          ? data.proteinGoal
+          : (brutlUser.targetProtein > 0 ? brutlUser.targetProtein : _proteinGoal);
       _fats = data.fats;
-      _fatsGoal = data.fatsGoal;
+      _fatsGoal = data.fatsGoal > 0
+          ? data.fatsGoal
+          : (brutlUser.targetFats > 0 ? brutlUser.targetFats : _fatsGoal);
       _meals = data.meals;
     });
   }

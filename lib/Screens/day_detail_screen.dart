@@ -577,12 +577,13 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
   }
 
   Widget _buildExerciseList() {
-    return ListView.builder(
+    return ReorderableListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       itemCount: _exercises.length,
       itemBuilder: (context, index) {
         final exercise = _exercises[index];
         return ExerciseCardWidget(
+          key: ValueKey(exercise.id),
           exercise: exercise,
           onTap: () {
             showModalBottomSheet<void>(
@@ -598,7 +599,57 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
           },
         );
       },
+      onReorder: (int oldIndex, int newIndex) {
+        setState(() {
+          if (newIndex > oldIndex) {
+            // ReorderableListView reports newIndex as if the item was already removed.
+            newIndex -= 1;
+          }
+          final exercise = _exercises.removeAt(oldIndex);
+          _exercises.insert(newIndex, exercise);
+        });
+        _saveReorderedExercises();
+      },
+      proxyDecorator: (Widget child, int index, Animation<double> animation) {
+        return AnimatedBuilder(
+          animation: animation,
+          builder: (context, child) {
+            final elevation = Tween<double>(
+              begin: 0.0,
+              end: 16.0,
+            ).animate(animation).value;
+            return Material(
+              elevation: elevation,
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(16),
+              child: child,
+            );
+          },
+          child: child,
+        );
+      },
     );
+  }
+
+  Future<void> _saveReorderedExercises() async {
+    // Persist locally first.
+    await _persistToSharedPreferences(_exercises, _dayName);
+
+    // Sync full reordered list to Firestore in background.
+    unawaited(_saveAllExercisesToFirestore());
+  }
+
+  Future<void> _saveAllExercisesToFirestore() async {
+    try {
+      final jsonList = _exercises.map((e) => e.toJson()).toList();
+      await _dayDocRef.set(<String, dynamic>{
+        'exercises': jsonList,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      debugPrint('DAY_DETAIL: Reordered ${jsonList.length} exercises synced.');
+    } catch (e) {
+      debugPrint('DAY_DETAIL: Firestore reorder sync failed — $e');
+    }
   }
 
   Widget _buildAddButton(BuildContext context) {

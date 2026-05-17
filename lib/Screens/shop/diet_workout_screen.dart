@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -833,291 +834,188 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
     return getApplicationDocumentsDirectory();
   }
 
-  Future<void> _generateWorkoutPdf() async {
-    final user = context.read<BrutlUserProvider>().user;
-    final workoutGoal = _workoutGoal == 'Other'
-        ? _workoutCustomGoalController.text.trim()
-        : _workoutGoal;
-    final athleteName = user.displayName.trim().isNotEmpty
-        ? user.displayName.trim()
-        : (user.username.trim().isNotEmpty
-              ? user.username.trim()
-              : 'Brutl Athlete');
-    final dayNames = List<String>.generate(_dayNameControllers.length, (
-      int index,
-    ) {
-      final value = _dayNameControllers[index].text.trim();
-      return value.isNotEmpty ? value : 'Day ${index + 1}';
-    });
-    final plan = _buildWorkoutPlan(
-      dayNames: dayNames,
-      compoundRepRange: '${user.compoundRepMin}-${user.compoundRepMax} reps',
-      isolationRepRange: '${user.isolationRepMin}-${user.isolationRepMax} reps',
-      equipmentAccess: _equipmentAccess,
+  pw.Widget _buildWorkoutHeaderCell(String text, pw.TextStyle style) {
+    return pw.Container(
+      padding: const pw.EdgeInsets.all(8),
+      color: _pdfHex('#2D2D2D'),
+      alignment: pw.Alignment.centerLeft,
+      child: pw.Text(text, style: style),
     );
+  }
 
+  pw.Widget _buildWorkoutCell(String text, pw.TextStyle style, PdfColor bg) {
+    return pw.Container(
+      padding: const pw.EdgeInsets.all(8),
+      color: bg,
+      alignment: pw.Alignment.centerLeft,
+      child: pw.Text(text, style: style),
+    );
+  }
+
+  Future<File> _generateWorkoutPdf(Map<String, dynamic> workoutData, BrutlUser user) async {
     final document = pw.Document();
+    final athleteName = user.displayName.isNotEmpty
+        ? user.displayName
+        : (user.username.isNotEmpty ? user.username : 'Brutl Athlete');
+
+    final goal = (workoutData['goal'] as String?)?.isNotEmpty == true
+        ? workoutData['goal'] as String
+        : (user.bodyGoal.isNotEmpty ? user.bodyGoal : 'Body Recomp');
+
+    final weight = (workoutData['userWeight'] as String?)?.isNotEmpty == true
+        ? workoutData['userWeight'] as String
+        : (user.weight > 0 ? '${user.weight.toStringAsFixed(1)} ${user.weightUnit}' : '--');
+
+    final height = (workoutData['userHeight'] as String?)?.isNotEmpty == true
+        ? workoutData['userHeight'] as String
+        : (user.height > 0 ? '${user.height.toStringAsFixed(1)} ${user.heightUnit}' : '--');
+
+    final experience = workoutData['experience'] as String? ?? 'Beginner';
+    final daysPerWeek = workoutData['daysPerWeek']?.toString() ?? '7';
+    final country = workoutData['country'] as String? ?? (user.country.isNotEmpty ? user.country : '--');
+    final splitName = workoutData['splitName'] as String? ?? 'Custom Workout Split';
+
     final summaryItems = <_PdfSummaryItem>[
-      _PdfSummaryItem(
-        'Goal',
-        workoutGoal.isNotEmpty ? workoutGoal : 'Body Recomp',
-      ),
-      _PdfSummaryItem(
-        'Weight',
-        _weightController.text.trim().isNotEmpty
-            ? '${_weightController.text.trim()} kg'
-            : '--',
-      ),
-      _PdfSummaryItem(
-        'Height',
-        _heightController.text.trim().isNotEmpty
-            ? '${_heightController.text.trim()} cm'
-            : '--',
-      ),
-      _PdfSummaryItem('Experience', _experienceLevel),
-      _PdfSummaryItem('Workout Days', '${_workoutDaysPerWeek} / week'),
-      _PdfSummaryItem('Country', user.country.isNotEmpty ? user.country : '--'),
+      _PdfSummaryItem('Goal', goal),
+      _PdfSummaryItem('Weight', weight),
+      _PdfSummaryItem('Height', height),
+      _PdfSummaryItem('Experience', experience),
+      _PdfSummaryItem('Workout Days', '$daysPerWeek / week'),
+      _PdfSummaryItem('Country', country),
     ];
+
+    final days = (workoutData['days'] as List<dynamic>?) ?? <dynamic>[];
+    final aiInsights = (workoutData['aiInsights'] as String?) ?? '';
 
     document.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.fromLTRB(28, 32, 28, 42),
-        footer: (pw.Context context) => pw.Container(
-          padding: const pw.EdgeInsets.only(top: 12),
-          decoration: const pw.BoxDecoration(
-            border: pw.Border(
-              top: pw.BorderSide(color: PdfColors.grey300, width: 0.8),
+        footer: (pw.Context context) => _buildPdfFooter(),
+        build: (pw.Context context) {
+          final widgets = <pw.Widget>[
+            _buildBrutlHeader(
+              'Custom Plan for: $athleteName',
+              'Split: $splitName',
+              null,
             ),
-          ),
-          child: pw.Row(
-            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-            children: <pw.Widget>[
+            pw.SizedBox(height: 18),
+            _buildSummaryPills(summaryItems),
+            pw.SizedBox(height: 20),
+          ];
+
+          if (days.isEmpty) {
+            widgets.add(
               pw.Text(
-                'Generated by Brutl AI',
+                'No workout days available.',
                 style: const pw.TextStyle(
-                  fontSize: 10,
+                  fontSize: 12,
                   color: PdfColors.grey700,
                 ),
               ),
-              pw.Text(
-                'brutlapp@gmail.com',
-                style: const pw.TextStyle(
-                  fontSize: 10,
-                  color: PdfColors.grey700,
+            );
+          }
+
+          for (final day in days) {
+            final dayMap = day as Map<String, dynamic>? ?? {};
+            final dayName = (dayMap['dayName'] as String?) ?? 'Day';
+            final exercises = (dayMap['exercises'] as List<dynamic>?) ?? <dynamic>[];
+
+            widgets.add(
+              pw.Container(
+                margin: const pw.EdgeInsets.only(bottom: 8),
+                padding: const pw.EdgeInsets.symmetric(vertical: 10, horizontal: 14),
+                decoration: pw.BoxDecoration(
+                  color: _pdfHex('#1A1A1A'),
+                  borderRadius: pw.BorderRadius.circular(10),
                 ),
-              ),
-            ],
-          ),
-        ),
-        build: (pw.Context context) => <pw.Widget>[
-          pw.Container(
-            padding: const pw.EdgeInsets.all(20),
-            decoration: pw.BoxDecoration(
-              color: PdfColor.fromInt(0xFFF5F5F5),
-              borderRadius: pw.BorderRadius.circular(14),
-              border: pw.Border.all(color: PdfColor.fromInt(0xFFE6E6E6)),
-            ),
-            child: pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: <pw.Widget>[
-                pw.Text(
-                  'BRUTL FITNESS',
+                child: pw.Text(
+                  dayName,
                   style: pw.TextStyle(
-                    fontSize: 24,
-                    fontWeight: pw.FontWeight.bold,
-                    color: PdfColor.fromInt(0xFF111111),
-                  ),
-                ),
-                pw.SizedBox(height: 6),
-                pw.Text(
-                  'Custom Plan for: $athleteName',
-                  style: const pw.TextStyle(
+                    font: pw.Font.helveticaBold(),
+                    color: PdfColors.white,
                     fontSize: 13,
-                    color: PdfColors.grey800,
                   ),
-                ),
-                pw.SizedBox(height: 6),
-                pw.Text(
-                  'Split: ${_workoutSplitNameController.text.trim().isNotEmpty ? _workoutSplitNameController.text.trim() : 'Custom Workout Split'}',
-                  style: const pw.TextStyle(
-                    fontSize: 11,
-                    color: PdfColors.grey700,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          pw.SizedBox(height: 18),
-          pw.Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: summaryItems
-                .map(
-                  (_PdfSummaryItem item) => pw.Container(
-                    width: 120,
-                    padding: const pw.EdgeInsets.all(12),
-                    decoration: pw.BoxDecoration(
-                      color: PdfColor.fromInt(0xFFFFF7ED),
-                      borderRadius: pw.BorderRadius.circular(12),
-                      border: pw.Border.all(
-                        color: PdfColor.fromInt(0xFFFFD6BF),
-                      ),
-                    ),
-                    child: pw.Column(
-                      crossAxisAlignment: pw.CrossAxisAlignment.start,
-                      children: <pw.Widget>[
-                        pw.Text(
-                          item.label,
-                          style: const pw.TextStyle(
-                            fontSize: 9,
-                            color: PdfColors.grey700,
-                          ),
-                        ),
-                        pw.SizedBox(height: 4),
-                        pw.Text(
-                          item.value,
-                          style: pw.TextStyle(
-                            fontSize: 11,
-                            fontWeight: pw.FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                )
-                .toList(),
-          ),
-          pw.SizedBox(height: 20),
-          if (_generatedWorkoutPlan != null && _generatedWorkoutPlan!.trim().isNotEmpty)
-            ..._generatedWorkoutPlan!
-                .trim()
-                .split('\n')
-                .where((line) => line.trim().isNotEmpty)
-                .map(
-                  (line) => pw.Text(
-                    line,
-                    style: const pw.TextStyle(
-                      fontSize: 10,
-                      color: PdfColors.grey800,
-                    ),
-                  ),
-                )
-          else
-            ...plan.expand(((_WorkoutDayPlan dayPlan) sync* {
-            yield pw.Container(
-              margin: const pw.EdgeInsets.only(bottom: 8),
-              padding: const pw.EdgeInsets.symmetric(
-                vertical: 8,
-                horizontal: 12,
-              ),
-              decoration: pw.BoxDecoration(
-                color: PdfColor.fromInt(0xFF111111),
-                borderRadius: pw.BorderRadius.circular(10),
-              ),
-              child: pw.Text(
-                dayPlan.name,
-                style: pw.TextStyle(
-                  color: PdfColors.white,
-                  fontSize: 13,
-                  fontWeight: pw.FontWeight.bold,
                 ),
               ),
             );
-            yield pw.TableHelper.fromTextArray(
-              headers: const <String>[
-                'Exercise',
-                'Sets',
-                'Reps',
-                'Rest Period',
-              ],
-              headerDecoration: pw.BoxDecoration(
-                color: PdfColor.fromInt(0xFFFFF1EA),
-              ),
-              headerStyle: pw.TextStyle(
-                fontWeight: pw.FontWeight.bold,
-                color: PdfColor.fromInt(0xFF111111),
-                fontSize: 10,
-              ),
-              cellStyle: const pw.TextStyle(fontSize: 10),
-              cellAlignment: pw.Alignment.centerLeft,
-              headerAlignment: pw.Alignment.centerLeft,
-              cellPadding: const pw.EdgeInsets.all(8),
-              data: dayPlan.exercises
-                  .map(
-                    (_WorkoutExercise exercise) => <String>[
-                      exercise.name,
-                      exercise.sets,
-                      exercise.reps,
-                      exercise.restPeriod,
-                    ],
-                  )
-                  .toList(),
+
+            if (exercises.isEmpty) {
+              widgets.add(pw.Text('No exercises listed.', style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey600)));
+              widgets.add(pw.SizedBox(height: 14));
+              continue;
+            }
+
+            final headerStyle = pw.TextStyle(
+              font: pw.Font.helveticaBold(),
+              fontSize: 10,
+              color: PdfColors.white,
             );
-            yield pw.SizedBox(height: 14);
-          })),
-          pw.Container(
-            width: double.infinity,
-            padding: const pw.EdgeInsets.all(16),
-            decoration: pw.BoxDecoration(
-              color: PdfColor.fromInt(0xFFF8FAFC),
-              borderRadius: pw.BorderRadius.circular(12),
-              border: pw.Border.all(color: PdfColor.fromInt(0xFFE2E8F0)),
-            ),
-            child: pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: <pw.Widget>[
-                pw.Text(
-                  "Coach's Notes",
-                  style: pw.TextStyle(
-                    fontSize: 14,
-                    fontWeight: pw.FontWeight.bold,
-                  ),
+            final cellStyle = const pw.TextStyle(fontSize: 9, color: PdfColors.grey800);
+
+            final tableRows = <pw.TableRow>[];
+            tableRows.add(
+              pw.TableRow(
+                decoration: pw.BoxDecoration(color: _pdfHex('#2D2D2D')),
+                children: [
+                  _buildWorkoutHeaderCell('Exercise Name', headerStyle),
+                  _buildWorkoutHeaderCell('Sets', headerStyle),
+                  _buildWorkoutHeaderCell('Reps', headerStyle),
+                  _buildWorkoutHeaderCell('RIR', headerStyle),
+                  _buildWorkoutHeaderCell('Rest', headerStyle),
+                  _buildWorkoutHeaderCell('Form Cue / Notes', headerStyle),
+                ],
+              ),
+            );
+
+            for (int i = 0; i < exercises.length; i++) {
+              final ex = exercises[i] as Map<String, dynamic>? ?? {};
+              final bg = i % 2 == 0 ? PdfColors.white : _pdfHex('#F5F5F5');
+
+              tableRows.add(
+                pw.TableRow(
+                  decoration: pw.BoxDecoration(color: bg),
+                  children: [
+                    _buildWorkoutCell((ex['name'] as String?) ?? '--', pw.TextStyle(font: pw.Font.helveticaBold(), fontSize: 9, color: PdfColors.black), bg),
+                    _buildWorkoutCell((ex['sets'] as String?) ?? '--', cellStyle, bg),
+                    _buildWorkoutCell((ex['reps'] as String?) ?? '--', cellStyle, bg),
+                    _buildWorkoutCell((ex['rir'] as String?) ?? '--', cellStyle, bg),
+                    _buildWorkoutCell((ex['rest'] as String?) ?? '--', cellStyle, bg),
+                    _buildWorkoutCell((ex['notes'] as String?) ?? '--', cellStyle.copyWith(fontStyle: pw.FontStyle.italic), bg),
+                  ],
                 ),
-                pw.SizedBox(height: 8),
-                pw.Text(
-                  _workoutSuggestionsController.text.trim().isNotEmpty
-                      ? _workoutSuggestionsController.text.trim()
-                      : 'Progressive overload, clean form, and recovery remain the top priorities for this cycle.',
-                  style: const pw.TextStyle(
-                    fontSize: 11,
-                    color: PdfColors.grey800,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
+              );
+            }
+
+            widgets.add(
+              pw.Table(
+                border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
+                columnWidths: const {
+                  0: pw.FlexColumnWidth(2.5),
+                  1: pw.FixedColumnWidth(45),
+                  2: pw.FixedColumnWidth(60),
+                  3: pw.FixedColumnWidth(50),
+                  4: pw.FixedColumnWidth(55),
+                  5: pw.FlexColumnWidth(2),
+                },
+                children: tableRows,
+              ),
+            );
+            widgets.add(pw.SizedBox(height: 14));
+          }
+
+          widgets.add(_buildAiCoachBox(aiInsights));
+
+          return widgets;
+        },
       ),
     );
 
     final directory = await _resolveWorkoutDownloadDirectory();
     final safeTimestamp = DateTime.now().millisecondsSinceEpoch;
     final file = File('${directory.path}/workout_plan_$safeTimestamp.pdf');
-
-    try {
-      await file.writeAsBytes(await document.save());
-      final exists = await file.exists();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(
-            content: Text(
-              exists
-                  ? 'Workout Plan saved to Downloads'
-                  : 'Save failed — file not found',
-            ),
-          ),
-        );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(content: Text('Save failed: $e')),
-        );
-    }
+    await file.writeAsBytes(await document.save());
+    return file;
   }
 
   List<_WorkoutDayPlan> _buildWorkoutPlan({
@@ -1792,7 +1690,33 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
           if (_showDownload) ...<Widget>[
             const SizedBox(height: 12),
             ElevatedButton.icon(
-              onPressed: _generateAndSavePdf,
+              onPressed: () async {
+                final user = context.read<BrutlUserProvider>().user;
+                final data = _parseGeneratedPlanToMap(_generatedDietPlan);
+                data['goal'] = _goal == 'Other' ? _otherGoalController.text.trim() : _goal;
+                data['userWeight'] = _weightController.text.trim().isNotEmpty ? '${_weightController.text.trim()} ${user.weightUnit}' : null;
+                data['userHeight'] = _heightController.text.trim().isNotEmpty ? '${_heightController.text.trim()} ${user.heightUnit}' : null;
+                data['userBodyFat'] = _bodyFatController.text.trim().isNotEmpty ? '${_bodyFatController.text.trim()}%' : null;
+                data['country'] = user.country;
+                data['kcal'] = _kcalController.text.trim().isNotEmpty ? '${_kcalController.text.trim()} kcal' : null;
+                data['duration'] = _duration;
+                try {
+                  final file = await _generateAndSaveDietPdf(data, user);
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context)
+                    ..hideCurrentSnackBar()
+                    ..showSnackBar(
+                      SnackBar(content: Text('Diet Plan saved to ${file.path}')),
+                    );
+                } catch (e) {
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context)
+                    ..hideCurrentSnackBar()
+                    ..showSnackBar(
+                      SnackBar(content: Text('Save failed: $e')),
+                    );
+                }
+              },
               icon: const Icon(Icons.download_rounded),
               label: const Text('Download PDF'),
               style: ElevatedButton.styleFrom(
@@ -2095,7 +2019,34 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
             if (_showWorkoutDownload) ...<Widget>[
               SizedBox(height: spacing.md),
               ElevatedButton.icon(
-                onPressed: _generateWorkoutPdf,
+                onPressed: () async {
+                  final user = context.read<BrutlUserProvider>().user;
+                  final data = _parseGeneratedPlanToMap(_generatedWorkoutPlan);
+                  final workoutGoal = _workoutGoal == 'Other' ? _workoutCustomGoalController.text.trim() : _workoutGoal;
+                  data['goal'] = workoutGoal;
+                  data['userWeight'] = _weightController.text.trim().isNotEmpty ? '${_weightController.text.trim()} ${user.weightUnit}' : null;
+                  data['userHeight'] = _heightController.text.trim().isNotEmpty ? '${_heightController.text.trim()} ${user.heightUnit}' : null;
+                  data['experience'] = _experienceLevel;
+                  data['daysPerWeek'] = _workoutDaysPerWeek.toString();
+                  data['country'] = user.country;
+                  data['splitName'] = _workoutSplitNameController.text.trim().isNotEmpty ? _workoutSplitNameController.text.trim() : 'Custom Workout Split';
+                  try {
+                    final file = await _generateWorkoutPdf(data, user);
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context)
+                      ..hideCurrentSnackBar()
+                      ..showSnackBar(
+                        SnackBar(content: Text('Workout Plan saved to ${file.path}')),
+                      );
+                  } catch (e) {
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context)
+                      ..hideCurrentSnackBar()
+                      ..showSnackBar(
+                        SnackBar(content: Text('Save failed: $e')),
+                      );
+                  }
+                },
                 icon: const Icon(Icons.download_rounded),
                 label: const Text('Download PDF'),
                 style: ElevatedButton.styleFrom(

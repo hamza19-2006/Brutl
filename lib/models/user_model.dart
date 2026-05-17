@@ -28,6 +28,7 @@ class BrutlUser {
     this.targetProtein = 150,
     this.targetCarbs = 200,
     this.targetFats = 60,
+    this.bodyMeasurements = const [],
     this.isProfileComplete = false,
     this.photoUrl = '',
     this.usernameChangedAt,
@@ -59,6 +60,7 @@ class BrutlUser {
   final int targetProtein;
   final int targetCarbs;
   final int targetFats;
+  final List<Map<String, dynamic>> bodyMeasurements;
   final bool isProfileComplete;
   final String photoUrl;
   final DateTime? usernameChangedAt;
@@ -90,6 +92,7 @@ class BrutlUser {
     int? targetProtein,
     int? targetCarbs,
     int? targetFats,
+    List<Map<String, dynamic>>? bodyMeasurements,
     bool? isProfileComplete,
     String? photoUrl,
     DateTime? usernameChangedAt,
@@ -121,6 +124,7 @@ class BrutlUser {
       targetProtein: targetProtein ?? this.targetProtein,
       targetCarbs: targetCarbs ?? this.targetCarbs,
       targetFats: targetFats ?? this.targetFats,
+      bodyMeasurements: bodyMeasurements ?? this.bodyMeasurements,
       isProfileComplete: isProfileComplete ?? this.isProfileComplete,
       photoUrl: photoUrl ?? this.photoUrl,
       usernameChangedAt: usernameChangedAt ?? this.usernameChangedAt,
@@ -155,6 +159,7 @@ class BrutlUser {
       'target_protein': targetProtein,
       'target_carbs': targetCarbs,
       'target_fats': targetFats,
+      'body_measurements': bodyMeasurements,
       'is_profile_complete': isProfileComplete,
       'photo_url': photoUrl,
       if (usernameChangedAt != null)
@@ -206,6 +211,11 @@ class BrutlUser {
       targetProtein: (json['target_protein'] as num?)?.toInt() ?? 150,
       targetCarbs: (json['target_carbs'] as num?)?.toInt() ?? 200,
       targetFats: (json['target_fats'] as num?)?.toInt() ?? 60,
+      bodyMeasurements:
+          (json['body_measurements'] as List<dynamic>?)
+              ?.whereType<Map<String, dynamic>>()
+              .toList() ??
+          const [],
       isProfileComplete: json['is_profile_complete'] as bool? ?? false,
       photoUrl:
           (json['photo_url'] as String?) ?? (json['photoUrl'] as String?) ?? '',

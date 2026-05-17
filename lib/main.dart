@@ -10,17 +10,18 @@ import 'Screens/auth/login_screen.dart';
 import 'Screens/home_screen.dart' hide AiCoachProvider;
 import 'Screens/onboarding/onboarding_screen.dart';
 import 'core/theme/app_theme.dart';
-import 'services/firebase_bootstrap.dart';
-import 'services/step_sensor_service.dart';
-import 'services/step_service.dart';
 import 'providers/auth_provider.dart';
 import 'providers/auth_validation_provider.dart';
 import 'providers/brutl_user_provider.dart';
-import 'providers/health_provider.dart';
-import 'providers/workout_nutrition_provider.dart';
 import 'providers/chat_provider.dart';
-import 'providers/ai_coach_provider.dart';
+import 'providers/health_provider.dart';
+import 'providers/water_provider.dart'; // ← NEW
+import 'providers/workout_nutrition_provider.dart';
 import 'providers/workout_provider.dart';
+import 'providers/ai_coach_provider.dart';
+import 'services/firebase_bootstrap.dart';
+import 'services/step_sensor_service.dart';
+import 'services/step_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -55,6 +56,8 @@ class BrutlAppBootstrap extends StatelessWidget {
         ChangeNotifierProvider<AiCoachProvider>(
           create: (_) => AiCoachProvider(),
         ),
+        // ── NEW: Water Provider ─────────────────────────────────────────────
+        ChangeNotifierProvider<WaterProvider>(create: (_) => WaterProvider()),
       ],
       child: const AppWarmupGate(),
     );
@@ -101,10 +104,11 @@ class _AppWarmupGateState extends State<AppWarmupGate>
 
     switch (state) {
       case AppLifecycleState.resumed:
-        // Refresh steps on resume so today's bar is immediately correct
         if (stepRef != null) unawaited(stepRef.refreshSteps());
         unawaited(StepService.instance.checkAndResetIfNewDay());
         unawaited(StepSensorService.instance.checkAndResetIfNewDay());
+        // Also check water day reset on resume
+        unawaited(context.read<WaterProvider>().checkAndResetIfNewDay());
         break;
       case AppLifecycleState.inactive:
       case AppLifecycleState.paused:
@@ -119,21 +123,20 @@ class _AppWarmupGateState extends State<AppWarmupGate>
       final workoutProvider = context.read<WorkoutProvider>();
       final nutritionProvider = context.read<WorkoutNutritionProvider>();
       final stepProvider = context.read<StepProvider>();
+      final waterProvider = context.read<WaterProvider>(); // ← NEW
 
       await Hive.initFlutter();
       await Hive.openBox<String>('exercises');
 
       if (!mounted) return;
 
-      // Initialize StepService first (used by StepProvider internally)
       await StepService.instance.initializeStepService();
-
-      // Initialize StepProvider — this starts the pedometer stream and
-      // requests ACTIVITY_RECOGNITION permission
       await stepProvider.initialize();
-
       await workoutProvider.initialize();
       await nutritionProvider.initialize();
+
+      // ── NEW: Load water data on app start ──────────────────────────────
+      await waterProvider.loadFromLocal();
 
       if (mounted) {
         await context.read<BrutlUserProvider>().bindToCurrentUser();

@@ -262,6 +262,15 @@ class BrutlUserProvider extends ChangeNotifier {
     );
   }
 
+  Future<void> updateBodyMeasurements(List<Map<String, dynamic>> measurements) {
+    return applyOptimistic(
+      mutate: (u) => u.copyWith(bodyMeasurements: measurements),
+      firestorePatch: <String, dynamic>{
+        'body_measurements': measurements,
+      },
+    );
+  }
+
   Future<void> updateRepRanges({
     required int compoundMin,
     required int compoundMax,

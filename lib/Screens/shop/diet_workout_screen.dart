@@ -11,6 +11,7 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/theme_extensions.dart';
 import '../../core/theme/constants/ai_diet_plan.dart';
 import '../../core/theme/constants/ai_workout_plan.dart';
+import '../../models/user_model.dart';
 import '../../providers/brutl_user_provider.dart';
 import '../../services/ai_diet_plan_service.dart';
 

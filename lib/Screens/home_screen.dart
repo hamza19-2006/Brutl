@@ -1,3 +1,8 @@
+// ═══════════════════════════════════════════════════════════════════════════════
+// HOME SCREEN — with Water Card integrated
+// Replace lib/Screens/home_screen.dart with this file entirely.
+// ═══════════════════════════════════════════════════════════════════════════════
+
 import 'dart:async';
 import 'dart:convert';
 
@@ -13,12 +18,15 @@ import '../core/theme/constants/ai_coach.dart';
 import '../providers/brutl_user_provider.dart';
 import '../providers/health_provider.dart';
 import '../providers/nutrition_service.dart';
+import '../providers/water_provider.dart';
 import '../providers/workout_provider.dart';
 import '../widgets/biometric_card.dart';
+import '../widgets/water_card.dart';
 import 'calories_history_screen.dart';
 import 'chat/chat_list_screen.dart';
 import 'home/home_screen_ex_show.dart';
 import 'shop/shop_main_screen.dart';
+import 'steps_history_screen.dart';
 import 'workout_screen.dart';
 
 // ─── AI Coach models (kept here so nothing else needs to import them) ─────────
@@ -634,7 +642,6 @@ class _HomeHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final workoutProvider = context.watch<WorkoutProvider>();
-    final stepProvider = context.watch<StepProvider>();
     final now = DateTime.now();
 
     final hour = now.hour;
@@ -654,7 +661,6 @@ class _HomeHeader extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Left: greeting + date
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -666,15 +672,19 @@ class _HomeHeader extends StatelessWidget {
                       .snapshots(),
                   builder: (context, snap) {
                     String name = workoutProvider.user.name;
-                    if (snap.hasData && snap.data!.exists) {
-                      final data = snap.data!.data() as Map<String, dynamic>;
-                      final dn =
-                          (data['display_name'] as String?)?.trim() ?? '';
-                      final un = (data['username'] as String?)?.trim() ?? '';
-                      if (dn.isNotEmpty)
-                        name = dn;
-                      else if (un.isNotEmpty)
-                        name = un;
+                    final doc = snap.data;
+                    if (doc != null && doc.exists) {
+                      final data = doc.data() as Map<String, dynamic>?;
+                      if (data != null) {
+                        final dn =
+                            (data['display_name'] as String?)?.trim() ?? '';
+                        final un = (data['username'] as String?)?.trim() ?? '';
+                        if (dn.isNotEmpty) {
+                          name = dn;
+                        } else if (un.isNotEmpty) {
+                          name = un;
+                        }
+                      }
                     }
                     return Text(
                       '$greeting, $name ',
@@ -710,8 +720,6 @@ class _HomeHeader extends StatelessWidget {
               ],
             ),
           ),
-
-          // Right: brand + calories
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
@@ -737,9 +745,6 @@ class _HomeHeader extends StatelessWidget {
               const SizedBox(height: 4),
               Consumer<StepProvider>(
                 builder: (context, liveStepProvider, _) {
-                  // MODULE 1 FIX — read the strictly-computed steps so the
-                  // calorie text can never derive from the raw hardware
-                  // counter (e.g. 20,836 → 833 kcal).
                   final liveCalories = liveStepProvider.caloriesBurned;
                   return Text(
                     'kcal ${liveCalories.round()} 🔥',
@@ -759,11 +764,8 @@ class _HomeHeader extends StatelessWidget {
   }
 }
 
-// ─── Stats Row (Steps + Calories cards) ──────────────────────────────────────
+// ─── Stats Row — Left: compact Steps + Water | Right: Calories ───────────────
 
-// BUG 4 FIX: Changed from StatelessWidget to StatefulWidget so the
-// CaloriesCard can subscribe to NutritionService for consumed calories
-// instead of showing burned calories from StepProvider.
 class _StatsRow extends StatefulWidget {
   @override
   State<_StatsRow> createState() => _StatsRowState();
@@ -781,9 +783,6 @@ class _StatsRowState extends State<_StatsRow> {
   }
 
   Future<void> _loadNutrition() async {
-    // Seed from BrutlUserProvider (source of truth) so the circle shows
-    // the correct goal immediately, without waiting for Firestore or
-    // SharedPreferences round-trips.
     final brutlUser = context.read<BrutlUserProvider>().user;
     final goalFromBrutlUser = brutlUser.targetCalories;
     if (goalFromBrutlUser > 0 && mounted) {
@@ -792,8 +791,6 @@ class _StatsRowState extends State<_StatsRow> {
 
     final data = await NutritionService.instance.loadTodayNutrition();
     if (!mounted) return;
-    // Only accept NutritionService value if it is valid AND BrutlUser
-    // has not already provided a more trustworthy target.
     setState(() {
       _caloriesEaten = data.caloriesEaten;
       _calorieGoal = data.calorieGoal > 0 && brutlUser.targetCalories <= 0
@@ -805,7 +802,6 @@ class _StatsRowState extends State<_StatsRow> {
       if (!mounted) return;
       setState(() {
         _caloriesEaten = data.caloriesEaten;
-        // Never let stale SharedPreferences overwrite BrutlUser truth.
         _calorieGoal = brutlUser.targetCalories > 0
             ? brutlUser.targetCalories
             : (data.calorieGoal > 0 ? data.calorieGoal : _calorieGoal);
@@ -824,9 +820,6 @@ class _StatsRowState extends State<_StatsRow> {
     return Consumer2<WorkoutProvider, StepProvider>(
       builder: (context, workoutProvider, stepProvider, _) {
         final stepGoal = workoutProvider.user.dailyStepGoal;
-        // MODULE 1 FIX — always read the computed `todaysDisplaySteps`
-        // (raw hardware counter − daily baseline). Never bind the UI to
-        // raw pedometer events.
         final steps = stepProvider.todaysDisplaySteps < 0
             ? 0
             : stepProvider.todaysDisplaySteps;
@@ -834,8 +827,6 @@ class _StatsRowState extends State<_StatsRow> {
             ? (steps / stepGoal).clamp(0.0, 1.0).toDouble()
             : 0.0;
 
-        // BUG 4 FIX: Use consumed calories from NutritionService
-        // instead of burned calories from StepProvider.
         final consumedCalories = _caloriesEaten.toDouble();
         final calorieGoal = _calorieGoal > 0
             ? _calorieGoal
@@ -846,39 +837,48 @@ class _StatsRowState extends State<_StatsRow> {
 
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  flex: 6,
-                  child: StepsCard(
-                    currentSteps: steps,
-                    goalSteps: stepGoal,
-                    progress: progress,
-                    stepsLabel: 'Steps',
-                    stepsUnitLabel: 'steps today',
-                  ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // ── LEFT COLUMN: Steps (big) + Water (small) ────────────────
+              Expanded(
+                flex: 6,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Big Steps card
+                    StepsCard(
+                      currentSteps: steps,
+                      goalSteps: stepGoal,
+                      progress: progress,
+                      stepsLabel: 'Steps',
+                      stepsUnitLabel: 'steps today',
+                    ),
+                    const SizedBox(height: 10),
+                    // Compact Water card
+                    const WaterCard(),
+                  ],
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  flex: 4,
-                  child: CaloriesCard(
-                    caloriesBurned: consumedCalories,
-                    calorieGoal: calorieGoal,
-                    progress: calProgress,
-                    caloriesLabel: 'Calories',
-                    caloriesUnitLabel: 'kcal eaten',
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const CaloriesHistoryScreen(),
-                      ),
+              ),
+              const SizedBox(width: 12),
+              // ── RIGHT COLUMN: Calories card ────────────────────────────────
+              Expanded(
+                flex: 4,
+                child: CaloriesCard(
+                  caloriesBurned: consumedCalories,
+                  calorieGoal: calorieGoal,
+                  progress: calProgress,
+                  caloriesLabel: 'Calories',
+                  caloriesUnitLabel: 'kcal eaten',
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const CaloriesHistoryScreen(),
                     ),
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         );
       },
@@ -902,39 +902,6 @@ class _SectionLabel extends StatelessWidget {
           color: Colors.white,
           fontSize: 18,
           fontWeight: FontWeight.w700,
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Shop Placeholder ─────────────────────────────────────────────────────────
-
-class _ShopPlaceholder extends StatelessWidget {
-  const _ShopPlaceholder();
-
-  @override
-  Widget build(BuildContext context) {
-    return const SafeArea(
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.shopping_bag_rounded,
-              color: Color(0xFF333333),
-              size: 64,
-            ),
-            SizedBox(height: 16),
-            Text(
-              'Shop Coming Soon',
-              style: TextStyle(
-                color: Color(0xFF666666),
-                fontSize: 18,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
         ),
       ),
     );

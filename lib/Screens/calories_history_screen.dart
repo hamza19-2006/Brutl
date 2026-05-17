@@ -1,6 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// CALORIES HISTORY SCREEN
+// CALORIES HISTORY SCREEN — with Water Tracking
 // ═══════════════════════════════════════════════════════════════════════════════
+// Replace lib/Screens/calories_history_screen.dart with this file entirely.
 
 import 'dart:async';
 
@@ -12,6 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../providers/brutl_user_provider.dart';
 import '../providers/nutrition_service.dart';
+import '../providers/water_provider.dart';
 import '../services/calorie_history_service.dart';
 
 class CaloriesHistoryScreen extends StatefulWidget {
@@ -23,34 +25,27 @@ class CaloriesHistoryScreen extends StatefulWidget {
 
 class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
     with SingleTickerProviderStateMixin {
-  // ─── week navigation ──────────────────────────────────────────────────────
   int _weekOffset = 0;
+  late int _selectedDayIndex;
 
-  // ─── selected day within the visible week ─────────────────────────────────
-  late int _selectedDayIndex; // 0 = Mon, 6 = Sun
-
-  // ─── loaded data ──────────────────────────────────────────────────────────
   Map<String, DailyMacroSnapshot?> _weekData = {};
   bool _isLoading = true;
 
-  // ─── goals ────────────────────────────────────────────────────────────────
   int _calorieGoal = 2000;
   int _carbsGoal = 200;
   int _proteinGoal = 150;
   int _fatsGoal = 60;
 
-  // ─── animation ────────────────────────────────────────────────────────────
   late final AnimationController _animCtrl;
   late final Animation<double> _animCurve;
 
-  // ─── bar entrance animation ───────────────────────────────────────────────
-  // FIX 4: Separate animation for bar growth so bars animate on every load
   bool _barsVisible = false;
 
-  // ─── live nutrition stream ────────────────────────────────────────────────
   StreamSubscription<NutritionData>? _nutritionSub;
 
-  // ─── constants ────────────────────────────────────────────────────────────
+  // Water data per day index (0=Mon … 6=Sun)
+  final Map<int, double> _weekWaterLiters = {};
+
   static const _dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   static const _accent = Color(0xFFFF3D00);
   static const _accentSoft = Color(0xFFFF6B00);
@@ -62,15 +57,14 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
   static const _textSecondary = Color(0xFF888888);
   static const _textTertiary = Color(0xFF555555);
 
-  // ─── macro palette ────────────────────────────────────────────────────────
   static const _carbColor = Color(0xFF00A3FF);
   static const _proteinColor = Color(0xFF00E676);
   static const _fatColor = Color(0xFFFFD54F);
+  static const _waterColor = Color(0xFF4FC3F7);
 
   @override
   void initState() {
     super.initState();
-    // FIX 1: Always default to today's weekday index (Mon=0)
     _selectedDayIndex = (DateTime.now().weekday - 1) % 7;
 
     _animCtrl = AnimationController(
@@ -85,7 +79,7 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
   Future<void> _init() async {
     await _loadGoals();
     await _snapshotToday();
-    await _loadWeek(); // This sets _selectedDayIndex to today and loads data
+    await _loadWeek();
 
     _nutritionSub = NutritionService.instance.stream.listen((data) async {
       if (!mounted) return;
@@ -106,10 +100,6 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
   Future<void> _loadGoals() async {
     final prefs = await SharedPreferences.getInstance();
     final brutlUser = context.read<BrutlUserProvider>().user;
-
-    // Use BrutlUser as the source of truth for macro goals.
-    // SharedPreferences only acts as a fallback for days before
-    // the user explicitly set targets in Settings / Onboarding.
     setState(() {
       _calorieGoal = brutlUser.targetCalories > 0
           ? brutlUser.targetCalories
@@ -140,14 +130,24 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
     );
   }
 
+  Future<void> _loadWaterForWeek() async {
+    final waterProvider = context.read<WaterProvider>();
+    for (int i = 0; i < 7; i++) {
+      final date = _dayAt(i);
+      final liters = await waterProvider.getIntakeForDate(date);
+      _weekWaterLiters[i] = liters;
+    }
+  }
+
   Future<void> _loadWeek() async {
     if (!mounted) return;
     setState(() {
       _isLoading = true;
-      _barsVisible = false; // reset so bars animate again on each load
+      _barsVisible = false;
     });
 
     final weekData = await CalorieHistoryService.instance.loadWeek(_weekStart);
+    await _loadWaterForWeek();
 
     if (!mounted) return;
     setState(() {
@@ -157,7 +157,6 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
 
     _animCtrl.forward(from: 0);
 
-    // FIX 4: Small delay then trigger bar growth animation
     Future.delayed(const Duration(milliseconds: 80), () {
       if (mounted) setState(() => _barsVisible = true);
     });
@@ -169,8 +168,6 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
     _animCtrl.dispose();
     super.dispose();
   }
-
-  // ─── date helpers ─────────────────────────────────────────────────────────
 
   DateTime get _weekStart {
     final now = DateTime.now();
@@ -197,7 +194,6 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
     return _weekData[key];
   }
 
-  // ─── selected day values ──────────────────────────────────────────────────
   int get _selCalories => _selectedSnapshot?.calories ?? 0;
   int get _selCalGoal => _selectedSnapshot?.calorieGoal ?? _calorieGoal;
   int get _selCarbs => _selectedSnapshot?.carbs ?? 0;
@@ -206,11 +202,12 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
   int get _selProteinGoal => _selectedSnapshot?.proteinGoal ?? _proteinGoal;
   int get _selFats => _selectedSnapshot?.fats ?? 0;
   int get _selFatsGoal => _selectedSnapshot?.fatsGoal ?? _fatsGoal;
+  double get _selWater => _weekWaterLiters[_selectedDayIndex] ?? 0.0;
+  double get _selWaterGoal => context.read<WaterProvider>().goalLiters;
 
   double get _calProgress =>
       _selCalGoal <= 0 ? 0 : (_selCalories / _selCalGoal).clamp(0.0, 1.0);
 
-  // ─── week average ─────────────────────────────────────────────────────────
   int get _weekAvgCalories {
     final active = _weekData.values.whereType<DailyMacroSnapshot>().toList();
     if (active.isEmpty) return 0;
@@ -218,19 +215,15 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
         active.length;
   }
 
-  // ─── navigation ───────────────────────────────────────────────────────────
   void _changeWeek(int delta) {
     final next = _weekOffset + delta;
     if (next < -3 || next > 0) return;
     setState(() {
       _weekOffset = next;
-      // FIX 1: When going back to current week, snap to today; else go to Mon
       _selectedDayIndex = next == 0 ? (DateTime.now().weekday - 1) % 7 : 0;
     });
     _loadWeek();
   }
-
-  // ─── build ────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -261,8 +254,6 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
       ),
     );
   }
-
-  // ── 1. Header ─────────────────────────────────────────────────────────────
 
   Widget _buildHeader() {
     final avg = _weekAvgCalories;
@@ -331,8 +322,6 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
     );
   }
 
-  // ── 2. Week Paginator ─────────────────────────────────────────────────────
-
   Widget _buildWeekNav() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
@@ -386,8 +375,6 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
     );
   }
 
-  // ── 3. Day Strip ──────────────────────────────────────────────────────────
-
   Widget _buildDayStrip() {
     return Row(
       children: List.generate(7, (i) {
@@ -397,12 +384,13 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
         final isSelected = i == _selectedDayIndex;
         final isToday = _isToday(day);
 
-        // FIX 2: Always use full accent color for progress rings — never gray
         final progress = snap != null ? snap.calorieProgress : 0.0;
+
+        // Check if water was logged this day
+        final hasWater = (_weekWaterLiters[i] ?? 0) > 0;
 
         return Expanded(
           child: GestureDetector(
-            // FIX 3: On tap, immediately update _selectedDayIndex so ring + macros sync
             onTap: () => setState(() => _selectedDayIndex = i),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 200),
@@ -423,11 +411,9 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Day name — always full brightness accent when selected
                   Text(
                     _dayNames[i],
                     style: TextStyle(
-                      // FIX 2: selected = accent, unselected = secondary (never dimmed)
                       color: isSelected ? _accent : _textSecondary,
                       fontSize: 10,
                       fontWeight: isSelected
@@ -436,7 +422,6 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
                     ),
                   ),
                   const SizedBox(height: 4),
-                  // Date circle — today gets filled accent background
                   Container(
                     width: 22,
                     height: 22,
@@ -459,12 +444,22 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
                     ),
                   ),
                   const SizedBox(height: 6),
-                  // FIX 2: Mini ring is ALWAYS bright — accent when selected, accentSoft otherwise
                   _MiniRing(
                     progress: progress,
                     size: 24,
                     strokeWidth: 3,
                     color: isSelected ? _accent : _accentSoft,
+                  ),
+                  // Blue water dot — only shown if water was logged that day
+                  const SizedBox(height: 4),
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    width: hasWater ? 6 : 0,
+                    height: hasWater ? 6 : 0,
+                    decoration: const BoxDecoration(
+                      color: _waterColor,
+                      shape: BoxShape.circle,
+                    ),
                   ),
                 ],
               ),
@@ -480,12 +475,14 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
     return d.year == now.year && d.month == now.month && d.day == now.day;
   }
 
-  // ── 4. Detail Section ─────────────────────────────────────────────────────
-
   Widget _buildDetailSection() {
     final hasData = _selectedSnapshot != null;
     final selectedDate = _dayAt(_selectedDayIndex);
     final formattedDate = DateFormat('EEEE, MMMM d').format(selectedDate);
+    final waterGoal = _selWaterGoal;
+    final waterProgress = waterGoal > 0
+        ? (_selWater / waterGoal).clamp(0.0, 1.0)
+        : 0.0;
 
     return SingleChildScrollView(
       child: Column(
@@ -501,8 +498,6 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
           ),
           const SizedBox(height: 16),
 
-          // FIX 3: Big ring + macro stats update instantly because they read
-          // _selCalories / _selCarbs etc which are derived from _selectedDayIndex
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
@@ -552,6 +547,13 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
                       unit: 'g',
                       color: _fatColor,
                     ),
+                    const SizedBox(height: 14),
+                    // ── Water row (new) ─────────────────────────────────────
+                    _WaterMacroRow(
+                      currentLiters: _selWater,
+                      goalLiters: waterGoal,
+                      progress: waterProgress,
+                    ),
                   ],
                 ),
               ),
@@ -596,8 +598,6 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
     );
   }
 
-  // ── Week bar chart ─────────────────────────────────────────────────────────
-
   Widget _buildWeekBarChart() {
     final maxRaw = _weekData.values
         .whereType<DailyMacroSnapshot>()
@@ -619,7 +619,6 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
           ),
         ),
         const SizedBox(height: 12),
-        // FIX 4: AnimatedContainer wraps the chart so bars grow upward on open
         AnimatedContainer(
           duration: const Duration(milliseconds: 400),
           curve: Curves.easeOutCubic,
@@ -717,7 +716,6 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
                         child: Text(
                           _dayNames[idx],
                           style: TextStyle(
-                            // FIX 2: Chart labels always bright — accent for selected, secondary otherwise
                             color: isSelected ? _accent : _textSecondary,
                             fontSize: 9,
                             fontWeight: isSelected
@@ -738,8 +736,6 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
                     const FlLine(color: Color(0xFF1E1E1E), strokeWidth: 0.6),
               ),
               borderData: FlBorderData(show: false),
-              // FIX 2: Bar colors are ALWAYS bright — accent for selected, accentSoft for others
-              // Never use _bg3 (gray) for bars regardless of data presence
               barGroups: List.generate(7, (i) {
                 final key = CalorieHistoryService.dateKeyFor(_dayAt(i));
                 final snap = _weekData[key];
@@ -750,15 +746,11 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
                   x: i,
                   barRods: [
                     BarChartRodData(
-                      // FIX 4: bars always show full height (no animation multiplier)
-                      // AnimatedContainer handles the grow effect
                       toY: val,
                       width: 14,
                       borderRadius: const BorderRadius.vertical(
                         top: Radius.circular(4),
                       ),
-                      // FIX 2: Always colorful — selected = bright accent, rest = accentSoft
-                      // Zero-value bars get a subtle accent tint (not gray)
                       color: isSelected
                           ? _accent
                           : val > 0
@@ -777,7 +769,89 @@ class _CaloriesHistoryScreenState extends State<CaloriesHistoryScreen>
   }
 }
 
-// ─── Extracted Widgets ────────────────────────────────────────────────────────
+// ─── Water Macro Row ──────────────────────────────────────────────────────────
+
+class _WaterMacroRow extends StatelessWidget {
+  const _WaterMacroRow({
+    required this.currentLiters,
+    required this.goalLiters,
+    required this.progress,
+  });
+
+  final double currentLiters;
+  final double goalLiters;
+  final double progress;
+
+  @override
+  Widget build(BuildContext context) {
+    const color = Color(0xFF4FC3F7);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text(
+              'Water',
+              style: TextStyle(
+                color: Color(0xFF888888),
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            RichText(
+              text: TextSpan(
+                children: [
+                  TextSpan(
+                    text: currentLiters.toStringAsFixed(1),
+                    style: const TextStyle(
+                      color: color,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  TextSpan(
+                    text: ' / ${goalLiters.toStringAsFixed(1)} L',
+                    style: const TextStyle(
+                      color: Color(0xFF555555),
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 5),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(3),
+          child: SizedBox(
+            height: 4,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.15),
+                  ),
+                ),
+                FractionallySizedBox(
+                  alignment: Alignment.centerLeft,
+                  widthFactor: progress.clamp(0.0, 1.0),
+                  child: const DecoratedBox(
+                    decoration: BoxDecoration(color: color),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─── Extracted Widgets (same as original, kept here for self-contained file) ──
 
 class _MiniRing extends StatelessWidget {
   const _MiniRing({

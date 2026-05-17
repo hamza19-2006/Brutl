@@ -15,7 +15,7 @@ import 'providers/auth_validation_provider.dart';
 import 'providers/brutl_user_provider.dart';
 import 'providers/chat_provider.dart';
 import 'providers/health_provider.dart';
-import 'providers/water_provider.dart'; // ← NEW
+import 'providers/water_provider.dart';
 import 'providers/workout_nutrition_provider.dart';
 import 'providers/workout_provider.dart';
 import 'providers/ai_coach_provider.dart';
@@ -25,7 +25,13 @@ import 'services/step_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await FirebaseBootstrap.initialize();
+  // Run Firebase + Hive init in parallel — they're independent so this saves
+  // ~50–150 ms on cold start. Hive box opening is deferred to warmup so we
+  // don't block runApp() on disk I/O for boxes we don't need yet.
+  await Future.wait(<Future<void>>[
+    FirebaseBootstrap.initialize(),
+    Hive.initFlutter(),
+  ]);
   runApp(const BrutlAppBootstrap());
 }
 
@@ -119,30 +125,55 @@ class _AppWarmupGateState extends State<AppWarmupGate>
   }
 
   Future<void> _warmupServices() async {
+    debugPrint('WARMUP: starting...');
+    final sw = Stopwatch()..start();
     try {
       final workoutProvider = context.read<WorkoutProvider>();
       final nutritionProvider = context.read<WorkoutNutritionProvider>();
       final stepProvider = context.read<StepProvider>();
-      final waterProvider = context.read<WaterProvider>(); // ← NEW
+      final waterProvider = context.read<WaterProvider>();
+      final brutlUserProvider = context.read<BrutlUserProvider>();
+      debugPrint('WARMUP: providers read OK (${sw.elapsedMilliseconds}ms)');
 
-      await Hive.initFlutter();
-      await Hive.openBox<String>('exercises');
+      // ── Phase 1: independent LOCAL-only init in parallel ────────────────
+      // Hive box open, step-service init and water-load all touch disk only;
+      // running them serially wastes ~100–200 ms.
+      await Future.wait(<Future<void>>[
+        Hive.openBox<String>('exercises').then((_) {
+          debugPrint('WARMUP: Hive box open OK');
+        }),
+        StepService.instance.initializeStepService().then((_) {
+          debugPrint('WARMUP: step service init OK');
+        }),
+        waterProvider.loadFromLocal().then((_) {
+          debugPrint('WARMUP: water provider load OK');
+        }),
+      ]);
+      debugPrint('WARMUP: phase 1 done (${sw.elapsedMilliseconds}ms)');
 
       if (!mounted) return;
 
-      await StepService.instance.initializeStepService();
-      await stepProvider.initialize();
-      await workoutProvider.initialize();
-      await nutritionProvider.initialize();
-
-      // ── NEW: Load water data on app start ──────────────────────────────
-      await waterProvider.loadFromLocal();
-
-      if (mounted) {
-        await context.read<BrutlUserProvider>().bindToCurrentUser();
-      }
-    } catch (error) {
+      // ── Phase 2: provider initializers that hit Firestore in parallel ───
+      // workout / nutrition / brutlUser all read from Firestore; running them
+      // sequentially is the single biggest startup slowdown.
+      await Future.wait(<Future<void>>[
+        stepProvider.initialize().then((_) {
+          debugPrint('WARMUP: step provider init OK');
+        }),
+        workoutProvider.initialize().then((_) {
+          debugPrint('WARMUP: workout provider init OK');
+        }),
+        nutritionProvider.initialize().then((_) {
+          debugPrint('WARMUP: nutrition provider init OK');
+        }),
+        brutlUserProvider.bindToCurrentUser().then((_) {
+          debugPrint('WARMUP: BrutlUser bind OK');
+        }),
+      ]);
+      debugPrint('WARMUP: complete (${sw.elapsedMilliseconds}ms total)');
+    } catch (error, stack) {
       debugPrint('BRUTL_BOOT: Startup warmup failed — $error');
+      debugPrint('BRUTL_BOOT: Stack — $stack');
     }
   }
 
@@ -166,34 +197,129 @@ class BrutlApp extends StatelessWidget {
   }
 }
 
-class AuthWrapper extends StatelessWidget {
+class AuthWrapper extends StatefulWidget {
   const AuthWrapper({super.key});
 
   @override
+  State<AuthWrapper> createState() => _AuthWrapperState();
+}
+
+class _AuthWrapperState extends State<AuthWrapper> {
+  String? _profileUid;
+  Future<DocumentSnapshot<Map<String, dynamic>>?>? _profileFuture;
+  Timer? _watchdog;
+  bool _watchdogExpired = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Hard safety net: if the whole auth/profile flow takes longer than 8s
+    // for any reason (Firebase init issues, App Check, network), we force
+    // the app to leave the loading screen.
+    _watchdog = Timer(const Duration(seconds: 8), () {
+      if (!mounted || _watchdogExpired) return;
+      debugPrint('AUTH_WRAPPER: WATCHDOG fired — forcing past loading screen');
+      setState(() => _watchdogExpired = true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _watchdog?.cancel();
+    super.dispose();
+  }
+
+  Future<DocumentSnapshot<Map<String, dynamic>>?> _loadProfile(
+    String uid,
+  ) async {
+    // Try cache first — instant return if the user has opened the app before.
+    try {
+      final cached = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .get(const GetOptions(source: Source.cache))
+          .timeout(const Duration(seconds: 2));
+      if (cached.exists) {
+        debugPrint('AUTH_WRAPPER: profile loaded from CACHE');
+        // Fire-and-forget a background refresh so data stays fresh.
+        unawaited(
+          FirebaseFirestore.instance
+              .collection('users')
+              .doc(uid)
+              .get(const GetOptions(source: Source.server))
+              .timeout(const Duration(seconds: 10))
+              .catchError((Object _) =>
+                  FirebaseFirestore.instance.collection('users').doc(uid).get()),
+        );
+        return cached;
+      }
+    } catch (e) {
+      debugPrint('AUTH_WRAPPER: cache miss/err ($e), trying server');
+    }
+    // No cache → server with a 6-second guard.
+    try {
+      final fresh = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .get(const GetOptions(source: Source.serverAndCache))
+          .timeout(
+            const Duration(seconds: 6),
+            onTimeout: () {
+              debugPrint('AUTH_WRAPPER: server fetch timed out');
+              throw TimeoutException('Profile fetch timed out');
+            },
+          );
+      debugPrint('AUTH_WRAPPER: profile loaded from SERVER');
+      return fresh;
+    } catch (e) {
+      debugPrint('AUTH_WRAPPER: profile fetch failed: $e');
+      return null; 
+    }
+  }
+
+  void _ensureProfileFuture(String uid) {
+    if (_profileUid == uid && _profileFuture != null) return;
+    _profileUid = uid;
+    _profileFuture = _loadProfile(uid);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    debugPrint('AUTH_WRAPPER: building... (watchdogExpired=$_watchdogExpired)');
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, authSnapshot) {
-        if (authSnapshot.connectionState == ConnectionState.waiting) {
-          return const _BrutlLoadingScreen();
-        }
+        debugPrint(
+          'AUTH_WRAPPER: auth state=${authSnapshot.connectionState}, '
+          'hasData=${authSnapshot.hasData}, user=${authSnapshot.data?.uid}',
+        );
         final currentUser =
             FirebaseAuth.instance.currentUser ?? authSnapshot.data;
+
         if (currentUser == null) {
+          // If watchdog expired and we still have no user → just show login.
+          if (authSnapshot.connectionState == ConnectionState.waiting &&
+              !_watchdogExpired) {
+            return const _BrutlLoadingScreen(message: 'Checking auth…');
+          }
+          debugPrint('AUTH_WRAPPER: no user, showing LoginScreen');
           return const LoginScreen();
         }
-        return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-          future: FirebaseFirestore.instance
-              .collection('users')
-              .doc(currentUser.uid)
-              .get(),
+
+        _ensureProfileFuture(currentUser.uid);
+        debugPrint('AUTH_WRAPPER: user=${currentUser.uid}, fetching profile');
+        return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>?>(
+          future: _profileFuture,
           builder: (context, profileSnapshot) {
-            if (profileSnapshot.connectionState == ConnectionState.waiting) {
-              return const _BrutlLoadingScreen();
+            debugPrint(
+              'AUTH_WRAPPER: profile state=${profileSnapshot.connectionState}, '
+              'hasError=${profileSnapshot.hasError}',
+            );
+            if (profileSnapshot.connectionState == ConnectionState.waiting &&
+                !_watchdogExpired) {
+              return const _BrutlLoadingScreen(message: 'Loading profile…');
             }
-            if (profileSnapshot.hasError) {
-              return const _BrutlLoadingScreen();
-            }
+            // Either we have a result, or the watchdog forced us through.
             final doc = profileSnapshot.data;
             final profileData = doc?.data();
             final isProfileComplete =
@@ -202,12 +328,21 @@ class AuthWrapper extends StatelessWidget {
                 ((profileData?['is_profile_complete'] as bool?) ??
                     (profileData?['isProfileComplete'] as bool?) ??
                     false);
-            if (doc == null || !doc.exists) {
+            debugPrint(
+              'AUTH_WRAPPER: docExists=${doc?.exists}, isProfileComplete=$isProfileComplete',
+            );
+            // If the profile fetch errored or timed out, assume the user has
+            // a valid profile (they're already logged in) and let them in.
+            if (profileSnapshot.hasError || doc == null) {
+              debugPrint(
+                'AUTH_WRAPPER: no doc/error — falling through to HomeScreen',
+              );
+              return const HomeScreen();
+            }
+            if (!doc.exists || !isProfileComplete) {
               return const OnboardingScreen();
             }
-            if (!isProfileComplete) {
-              return const OnboardingScreen();
-            }
+            debugPrint('AUTH_WRAPPER: showing HomeScreen');
             return const HomeScreen();
           },
         );
@@ -217,13 +352,31 @@ class AuthWrapper extends StatelessWidget {
 }
 
 class _BrutlLoadingScreen extends StatelessWidget {
-  const _BrutlLoadingScreen();
+  const _BrutlLoadingScreen({this.message});
+  final String? message;
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      backgroundColor: Color(0xFF0A0A0A),
-      body: Center(child: CircularProgressIndicator(color: Color(0xFFFF3D00))),
+    return Scaffold(
+      backgroundColor: const Color(0xFF0A0A0A),
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(color: Color(0xFFFF3D00)),
+            if (message != null && message!.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Text(
+                message!,
+                style: const TextStyle(
+                  color: Color(0xFF888888),
+                  fontSize: 14,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }

@@ -18,7 +18,6 @@ import '../core/theme/constants/ai_coach.dart';
 import '../providers/brutl_user_provider.dart';
 import '../providers/health_provider.dart';
 import '../providers/nutrition_service.dart';
-import '../providers/water_provider.dart';
 import '../providers/workout_provider.dart';
 import '../widgets/biometric_card.dart';
 import '../widgets/water_card.dart';
@@ -26,7 +25,6 @@ import 'calories_history_screen.dart';
 import 'chat/chat_list_screen.dart';
 import 'home/home_screen_ex_show.dart';
 import 'shop/shop_main_screen.dart';
-import 'steps_history_screen.dart';
 import 'workout_screen.dart';
 
 // ─── AI Coach models (kept here so nothing else needs to import them) ─────────
@@ -551,20 +549,27 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
-      body: IndexedStack(
-        index: _selectedIndex,
-        children: const [
-          _HomeTab(),
-          WorkoutScreen(showBottomNavigationBar: false),
-          ShopMainScreen(),
-          ChatListScreen(),
-        ],
-      ),
+      body: _buildSelectedTab(),
       bottomNavigationBar: _BottomNav(
         currentIndex: _selectedIndex,
         onTap: (index) => setState(() => _selectedIndex = index),
       ),
     );
+  }
+
+  Widget _buildSelectedTab() {
+    switch (_selectedIndex) {
+      case 0:
+        return const _HomeTab();
+      case 1:
+        return const WorkoutScreen(showBottomNavigationBar: false);
+      case 2:
+        return const ShopMainScreen();
+      case 3:
+        return const ChatListScreen();
+      default:
+        return const _HomeTab();
+    }
   }
 }
 
@@ -837,48 +842,53 @@ class _StatsRowState extends State<_StatsRow> {
 
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // ── LEFT COLUMN: Steps (big) + Water (small) ────────────────
-              Expanded(
-                flex: 6,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Big Steps card
-                    StepsCard(
-                      currentSteps: steps,
-                      goalSteps: stepGoal,
-                      progress: progress,
-                      stepsLabel: 'Steps',
-                      stepsUnitLabel: 'steps today',
-                    ),
-                    const SizedBox(height: 10),
-                    // Compact Water card
-                    const WaterCard(),
-                  ],
+          // IntrinsicHeight gives the Row a bounded height (the tallest child),
+          // which is required when Row.crossAxisAlignment is stretch and the
+          // parent (SliverToBoxAdapter) provides unbounded height.
+          child: IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // ── LEFT COLUMN: Steps (big) + Water (small) ────────────────
+                Expanded(
+                  flex: 6,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Big Steps card
+                      StepsCard(
+                        currentSteps: steps,
+                        goalSteps: stepGoal,
+                        progress: progress,
+                        stepsLabel: 'Steps',
+                        stepsUnitLabel: 'steps today',
+                      ),
+                      const SizedBox(height: 10),
+                      // Compact Water card
+                      const WaterCard(),
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              // ── RIGHT COLUMN: Calories card ────────────────────────────────
-              Expanded(
-                flex: 4,
-                child: CaloriesCard(
-                  caloriesBurned: consumedCalories,
-                  calorieGoal: calorieGoal,
-                  progress: calProgress,
-                  caloriesLabel: 'Calories',
-                  caloriesUnitLabel: 'kcal eaten',
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const CaloriesHistoryScreen(),
+                const SizedBox(width: 12),
+                // ── RIGHT COLUMN: Calories card ────────────────────────────────
+                Expanded(
+                  flex: 4,
+                  child: CaloriesCard(
+                    caloriesBurned: consumedCalories,
+                    calorieGoal: calorieGoal,
+                    progress: calProgress,
+                    caloriesLabel: 'Calories',
+                    caloriesUnitLabel: 'kcal eaten',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const CaloriesHistoryScreen(),
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         );
       },

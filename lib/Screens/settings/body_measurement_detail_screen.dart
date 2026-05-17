@@ -63,10 +63,7 @@ class _BodyMeasurementDetailScreenState
           ),
           onPressed: () => Navigator.of(context).maybePop(),
         ),
-        title: Text(
-          _measurement.name,
-          style: AppTextStyles.headingLarge(),
-        ),
+        title: Text(_measurement.name, style: AppTextStyles.headingLarge()),
         centerTitle: false,
         actions: [
           IconButton(
@@ -134,10 +131,7 @@ class _BodyMeasurementDetailScreenState
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _unitChip('cm'),
-                          _unitChip('inch'),
-                        ],
+                        children: [_unitChip('cm'), _unitChip('inch')],
                       ),
                     ),
                   ],
@@ -146,8 +140,7 @@ class _BodyMeasurementDetailScreenState
               const SizedBox(height: AppSpacing.xl),
               // ── Info hint ──
               Text(
-                'Switching units auto-converts your value.\n'
-                'Values are stored in centimeters.',
+                'Switching units auto-converts your value.',
                 style: AppTextStyles.bodySmall(),
                 textAlign: TextAlign.center,
               ),
@@ -159,9 +152,7 @@ class _BodyMeasurementDetailScreenState
                   backgroundColor: AppColors.accentPrimary,
                   foregroundColor: Colors.white,
                   elevation: 0,
-                  padding: const EdgeInsets.symmetric(
-                    vertical: AppSpacing.lg,
-                  ),
+                  padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(
                       AppSpacing.borderRadiusMedium,
@@ -193,11 +184,12 @@ class _BodyMeasurementDetailScreenState
         ),
         child: Text(
           unit,
-          style: AppTextStyles.bodyMedium(
-            color: isSelected ? Colors.white : AppColors.textSecondary,
-          ).copyWith(
-            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w400,
-          ),
+          style:
+              AppTextStyles.bodyMedium(
+                color: isSelected ? Colors.white : AppColors.textSecondary,
+              ).copyWith(
+                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w400,
+              ),
         ),
       ),
     );
@@ -240,11 +232,15 @@ class _BodyMeasurementDetailScreenState
             style: AppTextStyles.bodyLarge(color: AppColors.textPrimary),
             decoration: InputDecoration(
               hintText: 'Measurement name',
-              hintStyle: AppTextStyles.bodyMedium(color: AppColors.textTertiary),
+              hintStyle: AppTextStyles.bodyMedium(
+                color: AppColors.textTertiary,
+              ),
               filled: true,
               fillColor: AppColors.backgroundPrimary,
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(AppSpacing.borderRadiusSmall),
+                borderRadius: BorderRadius.circular(
+                  AppSpacing.borderRadiusSmall,
+                ),
                 borderSide: BorderSide.none,
               ),
             ),

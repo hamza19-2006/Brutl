@@ -161,7 +161,7 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
       _workoutDaysPerWeek = 7;
       _syncWorkoutDayControllers(
         7,
-        seededValues: _splitDayPresets[_selectedWorkoutSplit]!,
+        seededValues: _splitDayPresets[_selectedWorkoutSplit] ?? const <String>[],
       );
     }
     _isHydrated = true;
@@ -259,7 +259,7 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
         _workoutDaysPerWeek = 7;
         _syncWorkoutDayControllers(
           7,
-          seededValues: _splitDayPresets[value]!,
+          seededValues: _splitDayPresets[value] ?? const <String>[],
         );
       }
     });
@@ -2069,6 +2069,7 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text(

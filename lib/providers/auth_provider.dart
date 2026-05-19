@@ -116,6 +116,9 @@ class BrutlAuthProvider extends ChangeNotifier {
               'email': user.email,
               'uid': user.uid,
               'created_at': FieldValue.serverTimestamp(),
+              'subscriptionPlan': 'free',
+              'proExpiry': null,
+              'proPlusExpiry': null,
               'createdAt': FieldValue.delete(),
             }, SetOptions(merge: true));
         await _ensureCountryCode(user.uid);
@@ -182,6 +185,9 @@ class BrutlAuthProvider extends ChangeNotifier {
               'photo_url': user.photoURL,
               'last_sign_in_at': FieldValue.serverTimestamp(),
               if (isNewUser) 'is_profile_complete': false,
+              if (!existedBefore) 'subscriptionPlan': 'free',
+              if (!existedBefore) 'proExpiry': null,
+              if (!existedBefore) 'proPlusExpiry': null,
               if (!existedBefore) 'created_at': FieldValue.serverTimestamp(),
               'displayName': FieldValue.delete(),
               'photoUrl': FieldValue.delete(),

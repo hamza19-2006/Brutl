@@ -104,16 +104,36 @@ class WorkoutProvider extends ChangeNotifier {
   // ── NEW: returns the real current week (1-4 loop) based on program start ──
   int get currentWeekAuto => _computeCurrentWeek();
 
+  int calculateCurrentWeek(DateTime startDate) {
+    final now = DateTime.now();
+
+    // 1. Strip time to midnight for accurate day math
+    final startMidnight = DateTime(
+      startDate.year,
+      startDate.month,
+      startDate.day,
+    );
+    final nowMidnight = DateTime(now.year, now.month, now.day);
+
+    // 2. Snap BOTH dates to their respective Mondays (Monday = 1)
+    final startMonday = startMidnight.subtract(
+      Duration(days: startMidnight.weekday - 1),
+    );
+    final currentMonday = nowMidnight.subtract(
+      Duration(days: nowMidnight.weekday - 1),
+    );
+
+    // 3. Calculate how many calendar weeks have passed
+    final weeksPassed = currentMonday.difference(startMonday).inDays ~/ 7;
+
+    // 4. Modulo 4 ensures infinite cycle 0,1,2,3 -> 0,1,2,3. Add 1 for the UI.
+    return (weeksPassed % 4) + 1;
+  }
+
   int _computeCurrentWeek() {
     final startDate = _programStartDate;
     if (startDate == null) return 1;
-    final daysSinceStart = DateTime.now()
-        .difference(startDate)
-        .inDays
-        .clamp(0, 999999);
-    // Week 1 = days 0-6, Week 2 = days 7-13, etc. Loops every 4 weeks.
-    final weekIndex = (daysSinceStart ~/ 7) % _totalProgramWeeks;
-    return weekIndex + 1; // 1-based
+    return calculateCurrentWeek(startDate);
   }
 
   // ── Home strings ───────────────────────────────────────────────────────────

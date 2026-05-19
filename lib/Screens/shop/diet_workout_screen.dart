@@ -294,7 +294,7 @@ class _DietWorkoutScreenState extends State<DietWorkoutScreen>
       ..writeln('- Duration: $_duration')
       ..writeln('- Notes/Allergies: ${_suggestionsController.text.trim().isNotEmpty ? _suggestionsController.text.trim() : "None"}')
       ..writeln()
-      ..writeln('Return a JSON object with a "days" array. Each day should have "dayName" and "meals" array. Each meal should have "mealName", "time", "foods", and "kcal". Provide realistic local foods based on the country and budget.');
+      ..writeln('Return a JSON object with a "days" array. Each day should have "dayName" and "meals" array. Each meal should have "mealName", "time", "foods","kcal" , "Carbs","Protein","Fats" and "Cost" . Provide realistic local foods based on the country and budget.');
 
     final plan = await generateAiPlan(
       systemPrompt: Aidietplan.elitedietplanprompt,

@@ -15,6 +15,7 @@ import 'providers/auth_validation_provider.dart';
 import 'providers/brutl_user_provider.dart';
 import 'providers/chat_provider.dart';
 import 'providers/health_provider.dart';
+import 'providers/subscription_provider.dart';
 import 'providers/water_provider.dart';
 import 'providers/workout_nutrition_provider.dart';
 import 'providers/workout_provider.dart';
@@ -25,9 +26,6 @@ import 'services/step_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Run Firebase + Hive init in parallel — they're independent so this saves
-  // ~50–150 ms on cold start. Hive box opening is deferred to warmup so we
-  // don't block runApp() on disk I/O for boxes we don't need yet.
   await Future.wait(<Future<void>>[
     FirebaseBootstrap.initialize(),
     Hive.initFlutter(),
@@ -57,6 +55,9 @@ class BrutlAppBootstrap extends StatelessWidget {
         ),
         ChangeNotifierProvider<BrutlUserProvider>(
           create: (_) => BrutlUserProvider(),
+        ),
+        ChangeNotifierProvider<SubscriptionProvider>(
+          create: (_) => SubscriptionProvider(),
         ),
         ChangeNotifierProvider<ChatProvider>(create: (_) => ChatProvider()),
         ChangeNotifierProvider<AiCoachProvider>(
@@ -133,6 +134,7 @@ class _AppWarmupGateState extends State<AppWarmupGate>
       final stepProvider = context.read<StepProvider>();
       final waterProvider = context.read<WaterProvider>();
       final brutlUserProvider = context.read<BrutlUserProvider>();
+      final subscriptionProvider = context.read<SubscriptionProvider>();
       debugPrint('WARMUP: providers read OK (${sw.elapsedMilliseconds}ms)');
 
       // ── Phase 1: independent LOCAL-only init in parallel ────────────────
@@ -168,6 +170,9 @@ class _AppWarmupGateState extends State<AppWarmupGate>
         }),
         brutlUserProvider.bindToCurrentUser().then((_) {
           debugPrint('WARMUP: BrutlUser bind OK');
+        }),
+        subscriptionProvider.bindToCurrentUser().then((_) {
+          debugPrint('WARMUP: Subscription bind OK');
         }),
       ]);
       debugPrint('WARMUP: complete (${sw.elapsedMilliseconds}ms total)');
@@ -248,8 +253,12 @@ class _AuthWrapperState extends State<AuthWrapper> {
               .doc(uid)
               .get(const GetOptions(source: Source.server))
               .timeout(const Duration(seconds: 10))
-              .catchError((Object _) =>
-                  FirebaseFirestore.instance.collection('users').doc(uid).get()),
+              .catchError(
+                (Object _) => FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(uid)
+                    .get(),
+              ),
         );
         return cached;
       }
@@ -273,7 +282,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
       return fresh;
     } catch (e) {
       debugPrint('AUTH_WRAPPER: profile fetch failed: $e');
-      return null; 
+      return null;
     }
   }
 
@@ -368,10 +377,7 @@ class _BrutlLoadingScreen extends StatelessWidget {
               const SizedBox(height: 16),
               Text(
                 message!,
-                style: const TextStyle(
-                  color: Color(0xFF888888),
-                  fontSize: 14,
-                ),
+                style: const TextStyle(color: Color(0xFF888888), fontSize: 14),
               ),
             ],
           ],

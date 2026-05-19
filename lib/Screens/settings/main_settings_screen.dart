@@ -9,6 +9,7 @@ import '../../core/theme/app_text_styles.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/brutl_user_provider.dart';
 import '../../providers/chat_provider.dart';
+import '../../providers/subscription_provider.dart';
 import '../auth/login_screen.dart';
 import 'account_settings_screen.dart';
 import 'blocked_friends_screen.dart';
@@ -17,7 +18,7 @@ import 'contact_support_screen.dart';
 import 'credentials/credentials_screen.dart';
 import 'feedback_screen.dart';
 import 'personal_stats_screen.dart';
-import 'subscription_screen.dart';
+import '../subscription/subscription_screen.dart';
 import 'widgets/settings_widgets.dart';
 import 'workout_settings/exercise_settings_screen.dart';
 
@@ -38,6 +39,7 @@ class _MainSettingsScreenState extends State<MainSettingsScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<BrutlUserProvider>().bindToCurrentUser();
       context.read<ChatProvider>().listenToFriends();
+      context.read<SubscriptionProvider>().bindToCurrentUser();
     });
   }
 
@@ -161,13 +163,17 @@ class _MainSettingsScreenState extends State<MainSettingsScreen> {
               const SizedBox(height: AppSpacing.xxl),
               SettingsActionBoxWidget(
                 children: [
-                  SettingsTileWidget(
-                    title: 'Subscription',
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => const SubscriptionScreen(),
-                      ),
-                    ),
+                  Consumer<SubscriptionProvider>(
+                    builder: (context, provider, _) {
+                      return _SubscriptionSettingsTile(
+                        plan: provider.currentPlan,
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const SubscriptionScreen(),
+                          ),
+                        ),
+                      );
+                    },
                   ),
                   SettingsTileWidget(
                     title: 'Connected Apps',
@@ -239,5 +245,89 @@ class _MainSettingsScreenState extends State<MainSettingsScreen> {
         ),
       ),
     );
+  }
+}
+
+class _SubscriptionSettingsTile extends StatelessWidget {
+  const _SubscriptionSettingsTile({required this.plan, required this.onTap});
+
+  final SubscriptionPlan plan;
+  final VoidCallback onTap;
+
+  static const _free = Color(0xFF9E9E9E);
+  static const _pro = Color(0xFFFF6600);
+  static const _proPlus = Color(0xFFFFB300);
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _planColor(plan);
+    final label = _planLabel(plan);
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AppSpacing.borderRadiusSmall),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.lg,
+          vertical: AppSpacing.md + 2,
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.bolt_rounded, color: _pro, size: 20),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Text(
+                'Subscription',
+                style: AppTextStyles.headingSmall(color: AppColors.textPrimary),
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.sm,
+                vertical: AppSpacing.xs,
+              ),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(
+                  AppSpacing.borderRadiusFull,
+                ),
+                border: Border.all(color: color.withOpacity(0.4)),
+              ),
+              child: Text(label, style: AppTextStyles.labelSmall(color: color)),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            const Icon(
+              Icons.chevron_right,
+              color: AppColors.textTertiary,
+              size: 20,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Color _planColor(SubscriptionPlan plan) {
+    switch (plan) {
+      case SubscriptionPlan.pro:
+        return _pro;
+      case SubscriptionPlan.proPlus:
+        return _proPlus;
+      case SubscriptionPlan.free:
+      default:
+        return _free;
+    }
+  }
+
+  String _planLabel(SubscriptionPlan plan) {
+    switch (plan) {
+      case SubscriptionPlan.pro:
+        return 'Pro';
+      case SubscriptionPlan.proPlus:
+        return 'Pro+';
+      case SubscriptionPlan.free:
+      default:
+        return 'Free';
+    }
   }
 }

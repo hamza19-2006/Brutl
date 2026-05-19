@@ -18,13 +18,14 @@ import '../core/theme/constants/ai_coach.dart';
 import '../providers/brutl_user_provider.dart';
 import '../providers/health_provider.dart';
 import '../providers/nutrition_service.dart';
+import '../providers/subscription_provider.dart';
 import '../providers/workout_provider.dart';
 import '../widgets/biometric_card.dart';
 import '../widgets/water_card.dart';
 import 'calories_history_screen.dart';
 import 'chat/chat_list_screen.dart';
+import 'chat/chat_locked_screen.dart';
 import 'home/home_screen_ex_show.dart';
-import 'music_screen.dart';
 import 'shop/shop_main_screen.dart';
 import 'workout_screen.dart';
 
@@ -559,16 +560,18 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildSelectedTab() {
+    final subscriptionPlan = context.watch<SubscriptionProvider>().currentPlan;
     switch (_selectedIndex) {
       case 0:
         return const _HomeTab();
       case 1:
         return const WorkoutScreen(showBottomNavigationBar: false);
       case 2:
-        return const MusicScreen();
-      case 3:
         return const ShopMainScreen();
-      case 4:
+      case 3:
+        if (subscriptionPlan == SubscriptionPlan.free) {
+          return const ChatLockedScreen();
+        }
         return const ChatListScreen();
       default:
         return const _HomeTab();
@@ -591,10 +594,6 @@ class _BottomNav extends StatelessWidget {
       BottomNavigationBarItem(
         icon: Icon(Icons.fitness_center_rounded),
         label: 'Workout',
-      ),
-      BottomNavigationBarItem(
-        icon: Icon(Icons.headphones_rounded),
-        label: 'Music',
       ),
       BottomNavigationBarItem(
         icon: Icon(Icons.shopping_bag_rounded),
@@ -717,17 +716,12 @@ class _HomeHeader extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 2),
-                Row(
-                  children: [
-                    const SizedBox(width: 4),
-                    Text(
-                      todayName,
-                      style: const TextStyle(
-                        color: Color(0xFF888888),
-                        fontSize: 13,
-                      ),
-                    ),
-                  ],
+                Text(
+                  todayName,
+                  style: const TextStyle(
+                    color: Color(0xFF888888),
+                    fontSize: 13,
+                  ),
                 ),
               ],
             ),
@@ -785,7 +779,6 @@ class _StatsRow extends StatefulWidget {
 
 class _StatsRowState extends State<_StatsRow> {
   int _caloriesEaten = 0;
-  int _calorieGoal = 0;
   StreamSubscription<NutritionData>? _nutritionSub;
 
   @override
@@ -795,28 +788,16 @@ class _StatsRowState extends State<_StatsRow> {
   }
 
   Future<void> _loadNutrition() async {
-    final brutlUser = context.read<BrutlUserProvider>().user;
-    final goalFromBrutlUser = brutlUser.targetCalories;
-    if (goalFromBrutlUser > 0 && mounted) {
-      setState(() => _calorieGoal = goalFromBrutlUser);
-    }
-
     final data = await NutritionService.instance.loadTodayNutrition();
     if (!mounted) return;
     setState(() {
       _caloriesEaten = data.caloriesEaten;
-      _calorieGoal = data.calorieGoal > 0 && brutlUser.targetCalories <= 0
-          ? data.calorieGoal
-          : _calorieGoal;
     });
 
     _nutritionSub = NutritionService.instance.stream.listen((data) {
       if (!mounted) return;
       setState(() {
         _caloriesEaten = data.caloriesEaten;
-        _calorieGoal = brutlUser.targetCalories > 0
-            ? brutlUser.targetCalories
-            : (data.calorieGoal > 0 ? data.calorieGoal : _calorieGoal);
       });
     });
   }
@@ -829,21 +810,23 @@ class _StatsRowState extends State<_StatsRow> {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer2<WorkoutProvider, StepProvider>(
-      builder: (context, workoutProvider, stepProvider, _) {
-        final stepGoal = workoutProvider.user.dailyStepGoal;
+    return Consumer2<StepProvider, BrutlUserProvider>(
+      builder: (context, stepProvider, brutlUserProvider, _) {
+        final brutlUser = brutlUserProvider.user;
+        final goalsLoading =
+            brutlUserProvider.isLoading || brutlUser.uid.isEmpty;
+
+        final stepGoal = goalsLoading ? 0 : brutlUser.dailySteps;
         final steps = stepProvider.todaysDisplaySteps < 0
             ? 0
             : stepProvider.todaysDisplaySteps;
-        final progress = stepGoal > 0
+        final progress = !goalsLoading && stepGoal > 0
             ? (steps / stepGoal).clamp(0.0, 1.0).toDouble()
             : 0.0;
 
         final consumedCalories = _caloriesEaten.toDouble();
-        final calorieGoal = _calorieGoal > 0
-            ? _calorieGoal
-            : workoutProvider.user.dailyCalorieGoal;
-        final calProgress = calorieGoal > 0
+        final calorieGoal = goalsLoading ? 0 : brutlUser.targetCalories;
+        final calProgress = !goalsLoading && calorieGoal > 0
             ? (consumedCalories / calorieGoal).clamp(0.0, 1.0)
             : 0.0;
 
@@ -869,6 +852,7 @@ class _StatsRowState extends State<_StatsRow> {
                         progress: progress,
                         stepsLabel: 'Steps',
                         stepsUnitLabel: 'steps today',
+                        isLoading: goalsLoading,
                       ),
                       const SizedBox(height: 10),
                       // Compact Water card
@@ -886,6 +870,7 @@ class _StatsRowState extends State<_StatsRow> {
                     progress: calProgress,
                     caloriesLabel: 'Calories',
                     caloriesUnitLabel: 'kcal eaten',
+                    isLoading: goalsLoading,
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(

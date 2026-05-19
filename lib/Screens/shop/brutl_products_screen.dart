@@ -9,7 +9,7 @@ class BrutlProductsScreen extends StatelessWidget {
       appBar: AppBar(title: const Text('Brutl Products')),
       body: const Center(
         child: Text(
-          'Coming Soon',
+          'Products are not available yet.',
           style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
         ),
       ),

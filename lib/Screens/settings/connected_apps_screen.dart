@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 
 /// Settings → Connected Apps.
-/// Currently displays a "Coming Soon" placeholder. Replace the body of
-/// [build] with the real integrations UI (Apple Health, Google Fit, Strava,
-/// etc.) once that feature lands.
+/// Placeholder screen until integrations UI (Apple Health, Google Fit, Strava,
+/// etc.) is ready.
 class ConnectedAppsScreen extends StatelessWidget {
   const ConnectedAppsScreen({super.key});
 
@@ -54,7 +53,7 @@ class ConnectedAppsScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 24),
                 const Text(
-                  'Coming Soon',
+                  'Not available yet',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 28,
@@ -67,11 +66,7 @@ class ConnectedAppsScreen extends StatelessWidget {
                   'Connect Apple Health, Google Fit, Strava and more.\n'
                   'We\'re wiring it up — stay tuned!',
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: _muted,
-                    fontSize: 14,
-                    height: 1.5,
-                  ),
+                  style: TextStyle(color: _muted, fontSize: 14, height: 1.5),
                 ),
               ],
             ),
